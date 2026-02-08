@@ -1,0 +1,484 @@
+# Composite Machine — Automatic Calculus via Dimensional Arithmetic
+# Copyright (C) 2026 Toni Milovan <tmilovan@fwd.hr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Commercial licensing available. Contact: tmilovan@fwd.hr
+
+"""
+composite_multivar.py — Multi-Variable Calculus Extension
+=========================================================
+Extends composite arithmetic from scalar dimensions (int) to
+tuple dimensions (tuple of ints) for multi-variable calculus.
+
+Same algebra: dimensions add component-wise, coefficients multiply.
+Same mechanism: evaluate f(x, y, ...) on composite inputs, read off
+partial derivatives, gradients, Hessians from tuple positions.
+
+Usage:
+    from composite_multivar import *
+
+    # Two variables
+    x = RR(3, var=0, nvars=2)   # x = 3 + hx
+    y = RR(2, var=1, nvars=2)   # y = 2 + hy
+    result = x**2 * y + sin(y)
+
+    print(result.st())           # f(3,2) = 18 + sin(2)
+    print(result.partial(1,0))   # ∂f/∂x = 2*3*2 = 12
+    print(result.partial(0,1))   # ∂f/∂y = 9 + cos(2)
+    print(result.partial(1,1))   # ∂²f/∂x∂y = 6
+    print(result.gradient())     # [12, 9+cos(2)]
+    print(result.hessian())      # [[4, 6], [6, -sin(2)]]
+
+Author: Toni Milovan
+License: MIT
+"""
+
+import math
+from typing import Callable, List, Tuple, Dict, Optional
+
+
+class MC:
+    """
+    MultiComposite: composite number with tuple dimensions.
+
+    Each term is |coefficient|_{(d1, d2, ..., dn)} where
+    the tuple encodes partial derivative orders for each variable.
+
+    Arithmetic rules (identical to single-variable):
+      - Multiply: coefficients multiply, dimensions add component-wise
+      - Divide: coefficients divide, dimensions subtract component-wise
+      - Add: same-dimension terms combine, cross-dimension terms coexist
+
+    Examples (2 variables):
+      |5|_{(0,0)}      = real number 5
+      |1|_{(-1,0)}     = infinitesimal in x direction
+      |1|_{(0,-1)}     = infinitesimal in y direction
+      |3|_{(-1,-1)}    = mixed second-order infinitesimal
+    """
+
+    __slots__ = ['c', 'nvars']
+
+    def __init__(self, coefficients=None, nvars=1):
+        self.nvars = nvars
+        if coefficients is None:
+            self.c = {}
+        elif isinstance(coefficients, (int, float)):
+            key = tuple([0] * nvars)
+            self.c = {key: float(coefficients)} if coefficients != 0 else {}
+        elif isinstance(coefficients, dict):
+            self.c = {k: v for k, v in coefficients.items() if abs(v) > 1e-15}
+            # Infer nvars from keys if not specified
+            if self.c and nvars == 1:
+                first_key = next(iter(self.c))
+                if isinstance(first_key, tuple):
+                    self.nvars = len(first_key)
+        else:
+            raise TypeError(f"Cannot create MC from {type(coefficients)}")
+
+    def _zero_key(self):
+        return tuple([0] * self.nvars)
+
+    def _ensure_compatible(self, other):
+        if isinstance(other, MC):
+            return max(self.nvars, other.nvars)
+        return self.nvars
+
+    def _promote_key(self, key, target_nvars):
+        """Extend a dimension tuple to target length by padding with zeros."""
+        if len(key) < target_nvars:
+            return key + tuple([0] * (target_nvars - len(key)))
+        return key
+
+    def _promote(self, target_nvars):
+        """Promote all keys to target_nvars dimensions."""
+        if self.nvars == target_nvars:
+            return self
+        new_c = {}
+        for k, v in self.c.items():
+            new_k = self._promote_key(k, target_nvars)
+            new_c[new_k] = v
+        result = MC(new_c, target_nvars)
+        return result
+
+    # -------------------------------------------------------------------------
+    # Constructors
+    # -------------------------------------------------------------------------
+
+    @classmethod
+    def real(cls, value, nvars=1):
+        """Real number at dimension (0,0,...,0)"""
+        key = tuple([0] * nvars)
+        return cls({key: float(value)}, nvars)
+
+    @classmethod
+    def zero_var(cls, var, nvars):
+        """
+        Structural zero (infinitesimal) in variable direction.
+        var=0 → hx = |1|_{(-1,0,...)}
+        var=1 → hy = |1|_{(0,-1,...)}
+        """
+        key = tuple(-1 if i == var else 0 for i in range(nvars))
+        return cls({key: 1.0}, nvars)
+
+    # -------------------------------------------------------------------------
+    # String representation
+    # -------------------------------------------------------------------------
+
+    def __repr__(self):
+        if not self.c:
+            return f"|0|_{tuple([0]*self.nvars)}"
+
+        def fmt_coeff(c):
+            if isinstance(c, float) and c == int(c):
+                return str(int(c))
+            elif isinstance(c, float):
+                return f"{c:.6g}"
+            return str(c)
+
+        # Sort by sum of dimensions (descending), then lexicographic
+        terms = sorted(self.c.items(), key=lambda x: (-sum(x[0]), x[0]))
+        parts = [f"|{fmt_coeff(coeff)}|_{dim}" for dim, coeff in terms]
+        return " + ".join(parts)
+
+    # -------------------------------------------------------------------------
+    # Arithmetic (identical rules, tuple dimensions)
+    # -------------------------------------------------------------------------
+
+    def __add__(self, other):
+        if isinstance(other, (int, float)):
+            other = MC(other, self.nvars)
+        nv = self._ensure_compatible(other)
+        a = self._promote(nv)
+        b = other._promote(nv)
+        result = dict(a.c)
+        for dim, coeff in b.c.items():
+            result[dim] = result.get(dim, 0) + coeff
+        return MC(result, nv)
+
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __sub__(self, other):
+        if isinstance(other, (int, float)):
+            other = MC(other, self.nvars)
+        nv = self._ensure_compatible(other)
+        a = self._promote(nv)
+        b = other._promote(nv)
+        result = dict(a.c)
+        for dim, coeff in b.c.items():
+            result[dim] = result.get(dim, 0) - coeff
+        return MC(result, nv)
+
+    def __rsub__(self, other):
+        return MC(other, self.nvars).__sub__(self)
+
+    def __neg__(self):
+        return MC({k: -v for k, v in self.c.items()}, self.nvars)
+
+    def __mul__(self, other):
+        """Multiply: coefficients multiply, dimensions add component-wise."""
+        if isinstance(other, (int, float)):
+            return MC({k: v * other for k, v in self.c.items()}, self.nvars)
+        nv = self._ensure_compatible(other)
+        a = self._promote(nv)
+        b = other._promote(nv)
+        result = {}
+        for d1, c1 in a.c.items():
+            for d2, c2 in b.c.items():
+                dim = tuple(d1[i] + d2[i] for i in range(nv))
+                result[dim] = result.get(dim, 0) + c1 * c2
+        return MC(result, nv)
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
+    def __truediv__(self, other):
+        """Divide: coefficients divide, dimensions subtract component-wise."""
+        if isinstance(other, (int, float)):
+            if other == 0:
+                raise ZeroDivisionError("Use MC.zero_var() for structural zero.")
+            return MC({k: v / other for k, v in self.c.items()}, self.nvars)
+
+        if len(other.c) == 0:
+            raise ZeroDivisionError("Cannot divide by empty composite")
+
+        nv = self._ensure_compatible(other)
+        a = self._promote(nv)
+        b = other._promote(nv)
+
+        if len(b.c) == 1:
+            # Single-term divisor: fast path
+            div_dim, div_coeff = list(b.c.items())[0]
+            result = {}
+            for dim, coeff in a.c.items():
+                new_dim = tuple(dim[i] - div_dim[i] for i in range(nv))
+                result[new_dim] = coeff / div_coeff
+            return MC(result, nv)
+
+        # Multi-term: polynomial long division
+        return _mc_poly_divide(a, b, nv)[0]
+
+    def __rtruediv__(self, other):
+        return MC(other, self.nvars).__truediv__(self)
+
+    def __pow__(self, n):
+        if not isinstance(n, int):
+            raise TypeError("Power must be integer. Use mc_power() for real exponents.")
+        if n == 0:
+            return MC.real(1, self.nvars)
+        if n < 0:
+            return MC.real(1, self.nvars) / (self ** (-n))
+        result = MC.real(1, self.nvars)
+        for _ in range(n):
+            result = result * self
+        return result
+
+    # -------------------------------------------------------------------------
+    # Extraction methods
+    # -------------------------------------------------------------------------
+
+    def st(self):
+        """Standard part: coefficient at (0,0,...,0)"""
+        return self.c.get(self._zero_key(), 0.0)
+
+    def coeff(self, *dims):
+        """Get coefficient at specific tuple dimension."""
+        if len(dims) == 1 and isinstance(dims[0], tuple):
+            key = dims[0]
+        else:
+            key = tuple(dims)
+        return self.c.get(key, 0.0)
+
+    def partial(self, *orders):
+        """
+        Extract partial derivative value.
+        partial(n1, n2, ...) = ∂^(n1+n2+...)f / ∂x1^n1 ∂x2^n2 ...
+
+        Example:
+            result.partial(1, 0)   # ∂f/∂x
+            result.partial(0, 1)   # ∂f/∂y
+            result.partial(2, 0)   # ∂²f/∂x²
+            result.partial(1, 1)   # ∂²f/∂x∂y
+        """
+        key = tuple(-o for o in orders)
+        raw = self.c.get(key, 0.0)
+        # Multiply by product of factorials: n1! * n2! * ...
+        scale = 1
+        for o in orders:
+            scale *= math.factorial(o)
+        return raw * scale
+
+    def gradient(self):
+        """
+        Extract gradient vector [∂f/∂x1, ∂f/∂x2, ...].
+        """
+        result = []
+        for var in range(self.nvars):
+            orders = tuple(-1 if i == var else 0 for i in range(self.nvars))
+            result.append(self.c.get(orders, 0.0))
+        return result
+
+    def hessian(self):
+        """
+        Extract Hessian matrix [[∂²f/∂xi∂xj]].
+        """
+        n = self.nvars
+        H = [[0.0] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(n):
+                orders = [0] * n
+                orders[i] -= 1
+                orders[j] -= 1
+                key = tuple(orders)
+                raw = self.c.get(key, 0.0)
+                # Scale: if i == j, it's f''/2!, so multiply by 2
+                # if i != j, it's the mixed partial coefficient directly
+                if i == j:
+                    H[i][j] = raw * 2  # ∂²f/∂x² = 2 * coeff at (-2,0)
+                else:
+                    H[i][j] = raw      # ∂²f/∂x∂y = coeff at (-1,-1)
+        return H
+
+    def laplacian(self):
+        """
+        Compute Laplacian: ∇²f = Σ ∂²f/∂xi²
+        """
+        total = 0.0
+        for i in range(self.nvars):
+            orders = [0] * self.nvars
+            orders[i] = -2
+            key = tuple(orders)
+            total += self.c.get(key, 0.0) * 2  # times 2!/1 = 2
+        return total
+
+    def divergence_of(components):
+        """
+        Compute divergence of a vector field F = [f1, f2, ...].
+        div(F) = ∂f1/∂x1 + ∂f2/∂x2 + ...
+        Takes a list of MC objects (one per component).
+        """
+        total = 0.0
+        for i, comp in enumerate(components):
+            key = tuple(-1 if j == i else 0 for j in range(comp.nvars))
+            total += comp.c.get(key, 0.0)
+        return total
+
+
+def _mc_poly_divide(num, den, nvars, max_terms=20):
+    """Polynomial long division for multi-term tuple-dimension divisors."""
+    if not den.c:
+        raise ZeroDivisionError("Cannot divide by zero polynomial")
+
+    # Find leading term of denominator (highest total dimension)
+    denom_sorted = sorted(den.c.items(), key=lambda x: (-sum(x[0]), x[0]))
+    lead_dim, lead_coeff = denom_sorted[0]
+
+    quotient = MC({}, nvars)
+    remainder = MC(dict(num.c), nvars)
+
+    for _ in range(max_terms):
+        if not remainder.c:
+            break
+        rem_sorted = sorted(remainder.c.items(), key=lambda x: (-sum(x[0]), x[0]))
+        rem_dim, rem_coeff = rem_sorted[0]
+
+        # Check if remainder leading dim >= denominator leading dim
+        if sum(rem_dim) < sum(lead_dim):
+            break
+
+        q_dim = tuple(rem_dim[i] - lead_dim[i] for i in range(nvars))
+        q_coeff = rem_coeff / lead_coeff
+
+        quotient = quotient + MC({q_dim: q_coeff}, nvars)
+        subtract = MC({q_dim: q_coeff}, nvars) * den
+        remainder = remainder - subtract
+        remainder.c = {k: v for k, v in remainder.c.items() if abs(v) > 1e-14}
+
+    return quotient, remainder
+
+
+# =============================================================================
+# CONVENIENCE CONSTRUCTORS
+# =============================================================================
+
+def RR(value, var=0, nvars=2):
+    """
+    Create a composite variable: real value + infinitesimal in var direction.
+
+    RR(3, var=0, nvars=2) → |3|_{(0,0)} + |1|_{(-1,0)}  (x = 3 + hx)
+    RR(2, var=1, nvars=2) → |2|_{(0,0)} + |1|_{(0,-1)}  (y = 2 + hy)
+    """
+    real_key = tuple([0] * nvars)
+    inf_key = tuple(-1 if i == var else 0 for i in range(nvars))
+    return MC({real_key: float(value), inf_key: 1.0}, nvars)
+
+
+def RR_const(value, nvars=2):
+    """
+    Create a constant (no infinitesimal seed) in multi-var space.
+    Useful for parameters that aren't differentiated.
+
+    RR_const(5, nvars=2) → |5|_{(0,0)}
+    """
+    return MC.real(value, nvars)
+
+
+# =============================================================================
+# TRANSCENDENTAL FUNCTIONS (work unchanged on MC)
+# =============================================================================
+
+def mc_sin(x, terms=12):
+    if isinstance(x, (int, float)):
+        return math.sin(x)
+    result = MC({}, x.nvars)
+    for n in range(terms):
+        sign = (-1) ** n
+        coeff = sign / math.factorial(2*n + 1)
+        result = result + coeff * (x ** (2*n + 1))
+    return result
+
+
+def mc_cos(x, terms=12):
+    if isinstance(x, (int, float)):
+        return math.cos(x)
+    result = MC({}, x.nvars)
+    for n in range(terms):
+        sign = (-1) ** n
+        coeff = sign / math.factorial(2*n)
+        result = result + coeff * (x ** (2*n))
+    return result
+
+
+def mc_exp(x, terms=15):
+    if isinstance(x, (int, float)):
+        return math.exp(x)
+    result = MC({}, x.nvars)
+    for n in range(terms):
+        coeff = 1 / math.factorial(n)
+        result = result + coeff * (x ** n)
+    return result
+
+
+def mc_ln(x, terms=15):
+    if isinstance(x, (int, float)):
+        return math.log(x)
+    a = x.st()
+    if a <= 0:
+        raise ValueError("ln requires positive standard part")
+    h_part = x - MC.real(a, x.nvars)
+    ratio = h_part / MC.real(a, x.nvars)
+    result = MC.real(math.log(a), x.nvars)
+    power = MC.real(1, x.nvars)
+    for n in range(1, terms):
+        power = power * ratio
+        sign = (-1) ** (n + 1)
+        result = result + sign * power / n
+    return result
+
+
+def mc_sqrt(x, terms=12):
+    if isinstance(x, (int, float)):
+        return math.sqrt(x)
+    a = x.st()
+    if a <= 0:
+        raise ValueError("sqrt requires positive standard part")
+    sqrt_a = math.sqrt(a)
+    h_part = x - MC.real(a, x.nvars)
+    ratio = h_part / MC.real(a, x.nvars)
+    def binom(n):
+        if n == 0: return 1
+        r = 1
+        for k in range(n):
+            r *= (0.5 - k)
+        return r / math.factorial(n)
+    result = MC.real(sqrt_a, x.nvars)
+    power = MC.real(1, x.nvars)
+    for n in range(1, terms):
+        power = power * ratio
+        result = result + binom(n) * sqrt_a * power
+    return result
+
+
+def mc_tan(x, terms=10):
+    return mc_sin(x, terms) / mc_cos(x, terms)
+
+
+def mc_power(x, s, terms=15):
+    """x^s for any real s, via exp(s * ln(x))."""
+    if isinstance(x, (int, float)):
+        return x ** s
+    if isinstance(s, int):
+        return x ** s
+    return mc_exp(MC.real(s, x.nvars) * mc_ln(x, terms), terms)
