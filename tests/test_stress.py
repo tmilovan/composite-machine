@@ -21,7 +21,7 @@ composite_stress_test.py — 20 Hard Problems
 Run: python composite_stress_test.py
 """
 import math, sys, time
-from composite_lib import (
+from composite.composite_lib import (
     R, ZERO, INF, sin, cos, tan, exp, ln, sqrt,
     atan, sinh, cosh, tanh,
     derivative, nth_derivative, limit, integrate_adaptive,
