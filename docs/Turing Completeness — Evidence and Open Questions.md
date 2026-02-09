@@ -9,7 +9,7 @@ Independent Researcher, Pula, Croatia
 
 **Status: Seeking Review**
 
-This page presents exploration (evidence?) of idea that composite arithmetic (as implemented in `composite_[lib.py](http://lib.py)`) constitutes a Turing-complete mathematical system. We publish these tests and arguments openly, inviting the community to **reinforce or refute** this claim. If our reasoning contains errors, we want to find them.
+This page presents exploration (evidence?) of idea that composite arithmetic (as implemented in `composite_lib.py`) constitutes a Turing-complete mathematical system. We publish these tests and arguments openly, inviting the community to **reinforce or refute** this claim. If our reasoning contains errors, we want to find them.
 
 </aside>
 
