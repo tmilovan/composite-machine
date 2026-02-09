@@ -39,7 +39,7 @@ Standard arithmetic on ℝ, ℤ, or ℚ is **not** Turing complete. Neither are 
 
 ## The Argument
 
-A computational model requires three primitives for Turing completeness:
+A computational model requires four primitives for Turing completeness:
 
 ### 1. Unbounded Memory
 
