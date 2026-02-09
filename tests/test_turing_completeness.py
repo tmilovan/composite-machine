@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Composite Machine — Automatic Calculus via Dimensional Arithmetic
 # Copyright (C) 2026 Toni Milovan <tmilovan@fwd.hr>
 #
@@ -15,6 +16,8 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
 # Commercial licensing available. Contact: tmilovan@fwd.hr
+=======
+>>>>>>> refs/remotes/origin/main
 """
 test_turing_completeness.py
 ============================
