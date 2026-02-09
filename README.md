@@ -200,11 +200,11 @@ result.d(3)   # 48   ← Third derivative (8 × 3!)
 
 ## Documentation
 
-- [**10-Minute Tutorial**](docs/tutorial.md) - Get started quickly
-- [**API Reference**](docs/api_reference.md) - Complete function docs
-- [**Implementation Guide**](docs/implementation.md) - How it works internally
-- [**Examples**](examples/) - Code snippets for common tasks
-
+- [**10-Minute Tutorial**](docs/Tutorial%20-%20Getting%20Started.md) - Get started quickly
+- [**API Reference**](docs/API%20Reference.md) - Complete function docs
+- [**Implementation Guide**](docs/Implementation%20Guide.md) - How it works internally
+- [**Examples**](docs/Examples.md) - Code snippets for common tasks
+- [**Roadmap (DRAFT)**](docs/Roadmap%20(DRAFT).md) - What's next
 ---
 
 ## Testing
