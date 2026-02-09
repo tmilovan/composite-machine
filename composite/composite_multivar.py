@@ -18,7 +18,7 @@
 
 """
 composite_multivar.py — Multi-Variable Calculus Extension
-=========================================================
+=================================================================
 Extends composite arithmetic from scalar dimensions (int) to
 tuple dimensions (tuple of ints) for multi-variable calculus.
 
@@ -26,13 +26,19 @@ Same algebra: dimensions add component-wise, coefficients multiply.
 Same mechanism: evaluate f(x, y, ...) on composite inputs, read off
 partial derivatives, gradients, Hessians from tuple positions.
 
+FIXES applied:
+  1. Constructor: v != 0 (not abs(v) > 1e-15)
+  2. Transcendentals always return MC (never plain float)
+  3. __abs__, __float__, __int__ added to MC
+  4. divergence_of is @staticmethod; curl_at is standalone function
+
 Usage:
     from composite_multivar import *
 
     # Two variables
     x = RR(3, var=0, nvars=2)   # x = 3 + hx
     y = RR(2, var=1, nvars=2)   # y = 2 + hy
-    result = x**2 * y + sin(y)
+    result = x**2 * y + mc_sin(y)
 
     print(result.st())           # f(3,2) = 18 + sin(2)
     print(result.partial(1,0))   # ∂f/∂x = 2*3*2 = 12
@@ -42,13 +48,9 @@ Usage:
     print(result.hessian())      # [[4, 6], [6, -sin(2)]]
 
 Author: Toni Milovan
-License: MIT
 """
-
 import math
 from typing import Callable, List, Tuple, Dict, Optional
-
-
 class MC:
     """
     MultiComposite: composite number with tuple dimensions.
@@ -76,9 +78,11 @@ class MC:
             self.c = {}
         elif isinstance(coefficients, (int, float)):
             key = tuple([0] * nvars)
+            # FIX 1: Use v != 0 instead of abs(v) > 1e-15
             self.c = {key: float(coefficients)} if coefficients != 0 else {}
         elif isinstance(coefficients, dict):
-            self.c = {k: v for k, v in coefficients.items() if abs(v) > 1e-15}
+            # FIX 1: Use v != 0 instead of abs(v) > 1e-15
+            self.c = {k: v for k, v in coefficients.items() if v != 0}
             # Infer nvars from keys if not specified
             if self.c and nvars == 1:
                 first_key = next(iter(self.c))
@@ -151,6 +155,22 @@ class MC:
         terms = sorted(self.c.items(), key=lambda x: (-sum(x[0]), x[0]))
         parts = [f"|{fmt_coeff(coeff)}|_{dim}" for dim, coeff in terms]
         return " + ".join(parts)
+
+    # -------------------------------------------------------------------------
+    # FIX 3: Add __abs__, __float__, __int__ dunder methods
+    # -------------------------------------------------------------------------
+
+    def __abs__(self):
+        """Return abs of standard part (for use with built-in abs())."""
+        return abs(self.st())
+
+    def __float__(self):
+        """Return standard part as float (for use with float())."""
+        return float(self.st())
+
+    def __int__(self):
+        """Return standard part as int (for use with int())."""
+        return int(self.st())
 
     # -------------------------------------------------------------------------
     # Arithmetic (identical rules, tuple dimensions)
@@ -323,6 +343,8 @@ class MC:
             total += self.c.get(key, 0.0) * 2  # times 2!/1 = 2
         return total
 
+    # FIX 4: divergence_of as @staticmethod (was wrongly indented without self)
+    @staticmethod
     def divergence_of(components):
         """
         Compute divergence of a vector field F = [f1, f2, ...].
@@ -334,6 +356,36 @@ class MC:
             key = tuple(-1 if j == i else 0 for j in range(comp.nvars))
             total += comp.c.get(key, 0.0)
         return total
+
+
+# FIX 4: curl_at as standalone function (was tangled with MC class definition)
+def curl_at(F: List[Callable], at: List[float]):
+    """
+    Compute curl of a 3D vector field F = [Fx, Fy, Fz] at a point.
+    ∇ × F = (∂Fz/∂y - ∂Fy/∂z,
+             ∂Fx/∂z - ∂Fz/∂x,
+             ∂Fy/∂x - ∂Fx/∂y)
+    Returns [curl_x, curl_y, curl_z]
+
+    Example:
+        # Curl of F = [y, -x, 0] (rotation field) at (1, 1, 0)
+        curl_at([lambda x,y,z: y, lambda x,y,z: -x, lambda x,y,z: 0*x],
+                [1, 1, 0])
+        # → [0, 0, -2]  (rotation around z-axis)
+    """
+    if len(at) != 3:
+        raise ValueError("Curl requires 3D vector field")
+    nvars = 3
+    args = [RR(at[i], var=i, nvars=nvars) for i in range(nvars)]
+    # Evaluate each component as MC
+    Fx = F[0](*args)
+    Fy = F[1](*args)
+    Fz = F[2](*args)
+    # Extract partials
+    curl_x = Fz.partial(0, 1, 0) - Fy.partial(0, 0, 1)
+    curl_y = Fx.partial(0, 0, 1) - Fz.partial(1, 0, 0)
+    curl_z = Fy.partial(1, 0, 0) - Fx.partial(0, 1, 0)
+    return [curl_x, curl_y, curl_z]
 
 
 def _mc_poly_divide(num, den, nvars, max_terms=20):
@@ -396,12 +448,14 @@ def RR_const(value, nvars=2):
 
 
 # =============================================================================
-# TRANSCENDENTAL FUNCTIONS (work unchanged on MC)
+# TRANSCENDENTAL FUNCTIONS
+# FIX 2: Always return MC, never plain float
 # =============================================================================
 
 def mc_sin(x, terms=12):
+    """Sine via Taylor series. Always returns MC."""
     if isinstance(x, (int, float)):
-        return math.sin(x)
+        x = MC.real(x, nvars=1)
     result = MC({}, x.nvars)
     for n in range(terms):
         sign = (-1) ** n
@@ -411,8 +465,9 @@ def mc_sin(x, terms=12):
 
 
 def mc_cos(x, terms=12):
+    """Cosine via Taylor series. Always returns MC."""
     if isinstance(x, (int, float)):
-        return math.cos(x)
+        x = MC.real(x, nvars=1)
     result = MC({}, x.nvars)
     for n in range(terms):
         sign = (-1) ** n
@@ -422,8 +477,9 @@ def mc_cos(x, terms=12):
 
 
 def mc_exp(x, terms=15):
+    """Exponential via Taylor series. Always returns MC."""
     if isinstance(x, (int, float)):
-        return math.exp(x)
+        x = MC.real(x, nvars=1)
     result = MC({}, x.nvars)
     for n in range(terms):
         coeff = 1 / math.factorial(n)
@@ -432,8 +488,9 @@ def mc_exp(x, terms=15):
 
 
 def mc_ln(x, terms=15):
+    """Natural log via Mercator series. Always returns MC."""
     if isinstance(x, (int, float)):
-        return math.log(x)
+        x = MC.real(x, nvars=1)
     a = x.st()
     if a <= 0:
         raise ValueError("ln requires positive standard part")
@@ -449,8 +506,9 @@ def mc_ln(x, terms=15):
 
 
 def mc_sqrt(x, terms=12):
+    """Square root via binomial series. Always returns MC."""
     if isinstance(x, (int, float)):
-        return math.sqrt(x)
+        x = MC.real(x, nvars=1)
     a = x.st()
     if a <= 0:
         raise ValueError("sqrt requires positive standard part")
@@ -472,13 +530,14 @@ def mc_sqrt(x, terms=12):
 
 
 def mc_tan(x, terms=10):
+    """Tangent via sin/cos. Always returns MC."""
     return mc_sin(x, terms) / mc_cos(x, terms)
 
 
 def mc_power(x, s, terms=15):
-    """x^s for any real s, via exp(s * ln(x))."""
+    """x^s for any real s, via exp(s * ln(x)). Always returns MC."""
     if isinstance(x, (int, float)):
-        return x ** s
+        x = MC.real(x, nvars=1)
     if isinstance(s, int):
         return x ** s
     return mc_exp(MC.real(s, x.nvars) * mc_ln(x, terms), terms)

@@ -15,11 +15,11 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
 # Commercial licensing available. Contact: tmilovan@fwd.hr
-
 """
-composite_lib.py — Unified Calculus Library
-============================================
-Translates calculus problems to composite arithmetic automatically.
+composite_lib.py — Unified Calculus Library (Fixed: Fully Composite)
+====================================================================
+All operations use composite arithmetic. No plain-number fast paths
+in transcendental functions. Integration accumulates as Composite.
 
 Usage:
     from composite_lib import *
@@ -47,7 +47,6 @@ Usage:
     print(result.d(2))   # 2 (second derivative)
 
 Author: Toni Milovan
-License: AGPL
 """
 
 import math
@@ -82,7 +81,7 @@ class Composite:
         elif isinstance(coefficients, (int, float)):
             self.c = {0: float(coefficients)} if coefficients != 0 else {}
         elif isinstance(coefficients, dict):
-            self.c = {k: v for k, v in coefficients.items() if abs(v) > 1e-15}
+            self.c = {k: v for k, v in coefficients.items() if v != 0}
         else:
             raise TypeError(f"Cannot create Composite from {type(coefficients)}")
 
@@ -187,19 +186,26 @@ class Composite:
             raise ZeroDivisionError("Cannot divide by empty composite")
 
         if len(other.c) == 1:
-            # Simple case: single-term divisor
             div_dim, div_coeff = list(other.c.items())[0]
             result = {}
             for dim, coeff in self.c.items():
                 result[dim - div_dim] = coeff / div_coeff
             return Composite(result)
 
-        # Multi-term division via polynomial long division
         return _poly_divide(self, other)[0]
 
     def __rtruediv__(self, other):
         return Composite(other).__truediv__(self)
 
+    def __abs__(self):
+        """Absolute value of the standard part."""
+        return abs(self.st())
+    def __float__(self):
+        """Float conversion returns standard part."""
+        return float(self.st())
+    def __int__(self):
+        """Int conversion returns int of standard part."""
+        return int(self.st())
     def __pow__(self, n):
         """Integer power via repeated multiplication"""
         if not isinstance(n, int):
@@ -233,6 +239,24 @@ class Composite:
         etc.
         """
         return self.c.get(-n, 0.0) * math.factorial(n)
+
+    # -------------------------------------------------------------------------
+    # Simplified integration operators (dimensional shifts)
+    # -------------------------------------------------------------------------
+
+    def eval_taylor(self, h_value):
+        """
+        Evaluate Taylor polynomial by substituting h → h_value.
+        """
+        return sum(coeff * h_value ** (-dim)
+                   for dim, coeff in self.c.items() if dim < 0)
+
+    def integrate_step(self, dx):
+        """
+        Integrate over interval [x, x+dx] where this composite represents f(x+h).
+        """
+        Fx = antiderivative(self)
+        return Fx.eval_taylor(dx)
 
     # -------------------------------------------------------------------------
     # Comparison (lexicographic by dimension)
@@ -326,11 +350,15 @@ h = ZERO                      # Alias: h is the infinitesimal
 # =============================================================================
 # TAYLOR SERIES FOR TRANSCENDENTAL FUNCTIONS
 # =============================================================================
+# FIX 1: All functions now wrap plain (int, float) inputs into Composite
+#         instead of returning math.* results. Every call flows through
+#         composite arithmetic.
+# =============================================================================
 
 def sin(x, terms=12):
     """Sine function for composite numbers via Taylor series"""
     if isinstance(x, (int, float)):
-        return math.sin(x)
+        x = Composite({0: float(x)})
     result = Composite({})
     for n in range(terms):
         sign = (-1) ** n
@@ -342,7 +370,7 @@ def sin(x, terms=12):
 def cos(x, terms=12):
     """Cosine function for composite numbers via Taylor series"""
     if isinstance(x, (int, float)):
-        return math.cos(x)
+        x = Composite({0: float(x)})
     result = Composite({})
     for n in range(terms):
         sign = (-1) ** n
@@ -352,24 +380,19 @@ def cos(x, terms=12):
 
 
 def exp(x, terms=15):
+    """Exponential function for composite numbers via Taylor series"""
     if isinstance(x, (int, float)):
-        return math.exp(x)
+        x = Composite({0: float(x)})
 
     # Check for infinite arguments (positive dimensions)
     max_dim = max(x.c.keys()) if x.c else 0
     if max_dim > 0:
         lead_coeff = x.c[max_dim]
         if lead_coeff < 0:
-            # exp(-∞) = 0 → return empty composite
             return Composite({})
         else:
-            # exp(+∞) = ∞ → return structural infinity
             return Composite({1: float('inf')})
 
-    # Normal case: Taylor expand around standard
-    """Exponential function for composite numbers via Taylor series"""
-    if isinstance(x, (int, float)):
-        return math.exp(x)
     result = Composite({})
     for n in range(terms):
         coeff = 1 / math.factorial(n)
@@ -383,16 +406,15 @@ def ln(x, terms=15):
     Uses ln(a + h) = ln(a) + ln(1 + h/a) and Mercator series.
     """
     if isinstance(x, (int, float)):
-        return math.log(x)
+        x = Composite({0: float(x)})
 
     a = x.st()
     if a <= 0:
         raise ValueError("ln requires positive standard part")
 
     h_part = x - R(a)
-    ratio = h_part / R(a)  # h/a
+    ratio = h_part / R(a)
 
-    # ln(1 + u) = u - u²/2 + u³/3 - u⁴/4 + ...
     result = Composite({0: math.log(a)})
     power = Composite({0: 1})
 
@@ -407,7 +429,7 @@ def ln(x, terms=15):
 def sqrt(x, terms=12):
     """Square root for composite numbers via binomial series"""
     if isinstance(x, (int, float)):
-        return math.sqrt(x)
+        x = Composite({0: float(x)})
 
     a = x.st()
     if a <= 0:
@@ -415,9 +437,8 @@ def sqrt(x, terms=12):
 
     sqrt_a = math.sqrt(a)
     h_part = x - R(a)
-    ratio = h_part / R(a)  # h/a
+    ratio = h_part / R(a)
 
-    # Binomial coefficients for (1+u)^(1/2)
     def binom(n):
         if n == 0:
             return 1
@@ -438,10 +459,14 @@ def sqrt(x, terms=12):
 
 def tan(x, terms=10):
     """Tangent function via sin/cos"""
+    if isinstance(x, (int, float)):
+        x = Composite({0: float(x)})
     return sin(x, terms) / cos(x, terms)
+
 # =============================================================================
 # INVERSE TRIGONOMETRIC FUNCTIONS
 # =============================================================================
+
 def _reciprocal(x, terms=15):
     """Compute 1/x via geometric series. Internal helper."""
     a = x.st()
@@ -455,13 +480,11 @@ def _reciprocal(x, terms=15):
         power = power * ratio
         result = result + power / a
     return result
+
 def atan(x, terms=15):
-    """
-    Arctangent for composite numbers.
-    Uses atan'(x) = 1/(1+x²), integrated via dimensional shift.
-    """
+    """Arctangent for composite numbers."""
     if isinstance(x, (int, float)):
-        return math.atan(x)
+        x = Composite({0: float(x)})
     a = x.st()
     one_plus_x2 = R(1) + x * x
     deriv = _reciprocal(one_plus_x2, terms)
@@ -471,13 +494,11 @@ def atan(x, terms=15):
         if new_dim != 0:
             result[new_dim] = coeff / abs(new_dim)
     return Composite(result)
+
 def asin(x, terms=15):
-    """
-    Arcsine for composite numbers.
-    Uses asin'(x) = 1/sqrt(1-x²), integrated via dimensional shift.
-    """
+    """Arcsine for composite numbers."""
     if isinstance(x, (int, float)):
-        return math.asin(x)
+        x = Composite({0: float(x)})
     a = x.st()
     if abs(a) >= 1:
         raise ValueError("asin requires |standard part| < 1")
@@ -489,47 +510,45 @@ def asin(x, terms=15):
         if new_dim != 0:
             result[new_dim] = coeff / abs(new_dim)
     return Composite(result)
+
 def acos(x, terms=15):
-    """
-    Arccosine for composite numbers.
-    Uses acos(x) = pi/2 - asin(x).
-    """
+    """Arccosine for composite numbers."""
     if isinstance(x, (int, float)):
-        return math.acos(x)
+        x = Composite({0: float(x)})
     return R(math.pi / 2) - asin(x, terms)
+
 # =============================================================================
 # HYPERBOLIC FUNCTIONS
 # =============================================================================
+
 def sinh(x, terms=15):
     """Hyperbolic sine: (exp(x) - exp(-x)) / 2"""
     if isinstance(x, (int, float)):
-        return math.sinh(x)
+        x = Composite({0: float(x)})
     return (exp(x, terms) - exp(-x, terms)) / 2
+
 def cosh(x, terms=15):
     """Hyperbolic cosine: (exp(x) + exp(-x)) / 2"""
     if isinstance(x, (int, float)):
-        return math.cosh(x)
+        x = Composite({0: float(x)})
     return (exp(x, terms) + exp(-x, terms)) / 2
+
 def tanh(x, terms=15):
     """Hyperbolic tangent: sinh(x) / cosh(x)"""
     if isinstance(x, (int, float)):
-        return math.tanh(x)
+        x = Composite({0: float(x)})
     return sinh(x, terms) / cosh(x, terms)
+
 # =============================================================================
 # REAL-VALUED POWERS
 # =============================================================================
+
 def power(x, s, terms=15):
     """
     x^s for any real s, via exp(s * ln(x)).
-    Works for fractional, irrational, and negative exponents.
-    Requires x.st() > 0.
-    Examples:
-        power(R(8) + ZERO, 1/3)      # cube root of 8 = 2
-        power(R(2) + ZERO, math.pi)   # 2^pi ≈ 8.825
-        power(R(4) + ZERO, 0.5)       # sqrt(4) = 2
     """
     if isinstance(x, (int, float)):
-        return x ** s
+        x = Composite({0: float(x)})
     if isinstance(s, int):
         return x ** s
     return exp(R(s) * ln(x, terms), terms)
@@ -540,50 +559,28 @@ def power(x, s, terms=15):
 # =============================================================================
 
 def derivative(f: Callable, at: float, terms: int = 12) -> float:
-    """
-    Compute f'(at) automatically.
-
-    Example:
-        derivative(lambda x: x**2, at=3)  # → 6
-        derivative(lambda x: sin(x), at=0)  # → 1
-    """
+    """Compute f'(at) automatically."""
     x = R(at) + ZERO
     result = f(x)
     return result.d(1)
 
 
 def nth_derivative(f: Callable, n: int, at: float, terms: int = 12) -> float:
-    """
-    Compute f^(n)(at) - the nth derivative at a point.
-
-    Example:
-        nth_derivative(lambda x: x**5, n=3, at=2)  # → 120
-    """
+    """Compute f^(n)(at) - the nth derivative at a point."""
     x = R(at) + ZERO
     result = f(x)
     return result.d(n)
 
 
 def all_derivatives(f: Callable, at: float, up_to: int = 5, terms: int = 12) -> List[float]:
-    """
-    Compute [f(at), f'(at), f''(at), ...] up to nth derivative.
-
-    Example:
-        all_derivatives(lambda x: exp(x), at=0, up_to=4)  # → [1,1,1,1,1]
-    """
+    """Compute [f(at), f'(at), f''(at), ...] up to nth derivative."""
     x = R(at) + ZERO
     result = f(x)
     return [result.st()] + [result.d(n) for n in range(1, up_to + 1)]
 
 
 def limit(f: Callable, as_x_to: float, terms: int = 12) -> float:
-    """
-    Compute lim(x→as_x_to) f(x) automatically.
-
-    Example:
-        limit(lambda x: sin(x)/x, as_x_to=0)  # → 1
-        limit(lambda x: (x**2 - 4)/(x - 2), as_x_to=2)  # → 4
-    """
+    """Compute lim(x→as_x_to) f(x) automatically."""
     if as_x_to == float('inf'):
         x = INF
     elif as_x_to == float('-inf'):
@@ -600,7 +597,7 @@ def limit(f: Callable, as_x_to: float, terms: int = 12) -> float:
 def limit_right(f: Callable, as_x_to: float, terms: int = 12) -> float:
     """Compute right-hand limit: lim(x→a⁺) f(x)"""
     if as_x_to == 0:
-        x = ZERO  # Positive infinitesimal
+        x = ZERO
     else:
         x = R(as_x_to) + ZERO
     result = f(x)
@@ -610,7 +607,7 @@ def limit_right(f: Callable, as_x_to: float, terms: int = 12) -> float:
 def limit_left(f: Callable, as_x_to: float, terms: int = 12) -> float:
     """Compute left-hand limit: lim(x→a⁻) f(x)"""
     if as_x_to == 0:
-        x = -ZERO  # Negative infinitesimal
+        x = -ZERO
     else:
         x = R(as_x_to) - ZERO
     result = f(x)
@@ -618,12 +615,7 @@ def limit_left(f: Callable, as_x_to: float, terms: int = 12) -> float:
 
 
 def taylor_coefficients(f: Callable, at: float, up_to: int = 5, terms: int = 12) -> List[float]:
-    """
-    Get Taylor series coefficients of f around 'at'.
-    Returns [a₀, a₁, a₂, ...] where f(x) ≈ Σ aₙ(x-at)ⁿ
-
-    Note: aₙ = f^(n)(at) / n!
-    """
+    """Get Taylor series coefficients of f around 'at'."""
     x = R(at) + ZERO
     result = f(x)
     return [result.coeff(-n) for n in range(up_to + 1)]
@@ -632,8 +624,6 @@ def taylor_coefficients(f: Callable, at: float, up_to: int = 5, terms: int = 12)
 def antiderivative(f_composite: Composite, constant: float = 0) -> Composite:
     """
     Compute antiderivative via dimensional shift.
-
-    Given f represented as composite, returns F where F' = f.
     Each |c|₋ₙ → |c/n|₋₍ₙ₊₁₎
     """
     result = {0: constant}
@@ -646,116 +636,70 @@ def antiderivative(f_composite: Composite, constant: float = 0) -> Composite:
 
 
 def definite_integral(f: Callable, a: float, b: float, terms: int = 12) -> float:
-    """
-    Compute ∫ₐᵇ f(x) dx via antiderivative.
-
-    Example:
-        definite_integral(lambda x: x**2, 0, 1)  # → 0.333...
-    """
-    # Get f at midpoint as composite to find antiderivative structure
-    mid = (a + b) / 2
-    x = R(mid) + ZERO
-    f_composite = f(x)
-
-    # Get antiderivative
-    F = antiderivative(f_composite)
-
-    # Evaluate F(b) - F(a) using the structure
-    # For polynomials, we can directly compute
-    # For general functions, we need to evaluate at specific points
-
-    # Simple approach: evaluate f at both endpoints, use structure
+    """Compute ∫ₐᵇ f(x) dx via antiderivative."""
     x_a = R(a) + ZERO
     x_b = R(b) + ZERO
     F_a = antiderivative(f(x_a))
     F_b = antiderivative(f(x_b))
-
     return F_b.st() - F_a.st()
+
 # =============================================================================
 # MULTI-POINT STEPPED INTEGRATION
+# FIX 2: Accumulate as Composite instead of plain float.
+#         Returns (Composite, float) — integral as Composite, error as float.
 # =============================================================================
+
 def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms: int = 15):
-    """
-    Multi-point stepped integration with error estimate.
-    At each point: one composite eval → dimensional shift → accumulate.
-    Returns (value, error_estimate) like scipy.integrate.quad.
-    The error estimate comes free: the last term in each step's Taylor
-    polynomial is the truncation error for that step. No extra evaluations.
-    Example:
-        val, err = integrate_stepped(lambda x: exp(-(x * x)), 1, 2)
-        # val ≈ 0.1353, err ≈ tiny
-        val, err = integrate_stepped(lambda x: x**2, 0, 1)
-        # val = 0.333..., err = 0.0 (exact for polynomials)
-    """
-    total = 0.0
+    """Multi-point stepped integration with error estimate.
+    Returns (Composite, float) — integral result as Composite, error as float."""
+    total = Composite({})
     total_error = 0.0
     x0 = a
     while x0 < b:
         dx = min(step, b - x0)
-        # ONE composite evaluation — all derivatives at x0
         fx = f(R(x0) + ZERO)
-        # ONE dimensional shift — antiderivative
         Fx = antiderivative(fx)
-        # Collect negative-dimension terms of the antiderivative
         neg_terms = {d: c for d, c in Fx.c.items() if d < 0}
-        # Evaluate F(x0+dx) - F(x0) from Taylor coefficients
         contribution = sum(
             coeff * dx ** abs(dim)
             for dim, coeff in neg_terms.items()
         )
-        # Error estimate: the last (highest-order) term is the
-        # truncation error — it approximates the first omitted term.
-        # For polynomials of degree ≤ N, this is exactly 0.
         if neg_terms:
             min_dim = min(neg_terms.keys())
             step_error = abs(neg_terms[min_dim] * dx ** abs(min_dim))
         else:
             step_error = 0.0
-        total += contribution
+        total = total + Composite({0: contribution})
         total_error += step_error
         x0 += dx
     return total, total_error
+
 def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, terms: int = 15):
-    """
-    Adaptive stepped integration with error estimate.
-    Uses higher-order derivatives to automatically control step size
-    for target accuracy. Returns (value, error_estimate).
-    The error estimate is the sum of per-step truncation errors,
-    each computed from the highest-order antiderivative term — free,
-    no extra evaluations needed.
-    Example:
-        val, err = integrate_adaptive(lambda x: exp(-(x * x)), 1, 2)
-        # val ≈ 0.1353, err ≈ 1e-15
-        val, err = integrate_adaptive(lambda x: x**3 / sqrt(x*x + R(1)), 0, 2)
-        # val ≈ 2.1574, err ≈ small
-    """
-    total = 0.0
+    """Adaptive stepped integration with error estimate.
+    Returns (Composite, float) — integral result as Composite, error as float."""
+    total = Composite({})
     total_error = 0.0
     x0 = a
     while x0 < b:
         fx = f(R(x0) + ZERO)
-        # Error estimate from highest-order coefficient
-        # Truncation error ≈ |c_n| · dx^n
         max_coeff = max(
             (abs(coeff) for dim, coeff in fx.c.items() if dim < -1),
             default=1e-10
         )
-        # Choose step size so truncation error < tol
         dx = min((tol / max(max_coeff, 1e-15)) ** 0.1, b - x0)
-        dx = max(dx, 1e-6)  # minimum step
+        dx = max(dx, 1e-6)
         Fx = antiderivative(fx)
         neg_terms = {d: c for d, c in Fx.c.items() if d < 0}
         contribution = sum(
             coeff * dx ** abs(dim)
             for dim, coeff in neg_terms.items()
         )
-        # Per-step error: last term in antiderivative Taylor polynomial
         if neg_terms:
             min_dim = min(neg_terms.keys())
             step_error = abs(neg_terms[min_dim] * dx ** abs(min_dim))
         else:
             step_error = 0.0
-        total += contribution
+        total = total + Composite({0: contribution})
         total_error += step_error
         x0 += dx
     return total, total_error
@@ -763,16 +707,11 @@ def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, term
 
 # =============================================================================
 # IMPROPER INTEGRALS
+# FIX 3: Now returns (Composite, float) since integrate_adaptive does.
 # =============================================================================
+
 def improper_integral(f: Callable, a: float, tol: float = 1e-8, cutoff: float = 20):
-    """
-    Compute ∫_a^∞ f(x) dx.
-    Strategy: find cutoff M where |f(M)| < tol, then adaptively
-    integrate [a, M]. Returns (value, error_estimate).
-    Example:
-        val, err = improper_integral(lambda x: exp(-x), 0)       # ≈ 1.0
-        val, err = improper_integral(lambda x: exp(-(x*x)), 0)   # ≈ √π/2
-    """
+    """Compute ∫_a^∞ f(x) dx. Returns (Composite, float)."""
     M = cutoff
     while M < 1000:
         fx = f(R(M) + ZERO)
@@ -782,27 +721,18 @@ def improper_integral(f: Callable, a: float, tol: float = 1e-8, cutoff: float = 
     bulk, bulk_err = integrate_adaptive(f, a, min(M, cutoff), tol=tol)
     if M > cutoff:
         tail, tail_err = integrate_adaptive(f, cutoff, M, tol=tol)
-        bulk += tail
+        bulk = bulk + tail
         bulk_err += tail_err
     return bulk, bulk_err
+
 def improper_integral_both(f: Callable, tol: float = 1e-8):
-    """
-    Compute ∫_{-∞}^{∞} f(x) dx. Splits at 0.
-    Returns (value, error_estimate).
-    Example:
-        val, err = improper_integral_both(lambda x: exp(-(x*x)))  # ≈ √π
-    """
+    """Compute ∫_{-∞}^{∞} f(x) dx. Splits at 0. Returns (Composite, float)."""
     left, left_err = improper_integral(lambda x: f(-x), 0, tol=tol)
     right, right_err = improper_integral(f, 0, tol=tol)
     return left + right, left_err + right_err
+
 def improper_integral_to(f: Callable, a: float, b: float, tol: float = 1e-8):
-    """
-    Compute ∫_a^b f(x) dx where f has a singularity at a or b.
-    Approaches the singular endpoint with a small offset.
-    Returns (value, error_estimate).
-    Example:
-        val, err = improper_integral_to(lambda x: 1/sqrt(x), 0, 1)  # ≈ 2.0
-    """
+    """Compute ∫_a^b f(x) dx where f has a singularity at a or b. Returns (Composite, float)."""
     eps = tol ** 0.25
     try:
         f(R(a + eps) + ZERO).st()
@@ -818,6 +748,7 @@ def improper_integral_to(f: Callable, a: float, b: float, tol: float = 1e-8):
     end = b - eps if not b_ok else b
     val, err = integrate_adaptive(f, start, end, tol=tol)
     return val, err
+
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
@@ -832,13 +763,11 @@ def show(composite: Composite, name: str = "result"):
         print(f"  f''  = {composite.d(2)}")
     if -3 in composite.c:
         print(f"  f'''  = {composite.d(3)}")
+
+
 class TracedComposite(Composite):
-    """
-    A Composite that prints each operation as it happens.
-    Used by trace() to show step-by-step computation.
-    """
+    """A Composite that prints each operation as it happens."""
     def _wrap(self, result):
-        """Wrap result in TracedComposite"""
         if isinstance(result, Composite):
             tc = TracedComposite.__new__(TracedComposite)
             tc.c = result.c
@@ -892,29 +821,10 @@ class TracedComposite(Composite):
         print(f"  = {result}")
         print()
         return self._wrap(result)
+
+
 def trace(f: Callable, at: float = None, to: float = None) -> Composite:
-    """
-    Trace composite computation showing ALL intermediate steps.
-    Parameters:
-        f: The function to trace
-        at: Point for derivative (x = at + h)
-        to: Point for limit (x → to)
-    Example:
-        >>> trace(lambda x: (3*x + 1)/(x + 2), to=float('inf'))
-        === TRACE: lim(x→∞) ===
-        Let x = |1|₁  (INF)
-            |3|₀  ×  |1|₁
-          = |3|₁
-            |3|₁  +  |1|₀
-          = |3|₁ + |1|₀
-            |1|₁  +  |2|₀
-          = |1|₁ + |2|₀
-            |3|₁ + |1|₀  ÷  |1|₁ + |2|₀
-          = |3|₀
-        RESULT: |3|₀
-        Limit = 3.0
-    """
-    # Create traced version of x
+    """Trace composite computation showing ALL intermediate steps."""
     if to is not None:
         if to == float('inf'):
             x = TracedComposite({1: 1.0})
@@ -940,12 +850,9 @@ def trace(f: Callable, at: float = None, to: float = None) -> Composite:
         x = TracedComposite({-1: 1.0})
         print(f"\n=== TRACE ===")
         print(f"Let x = |1|₋₁  (ZERO)\n")
-    # Evaluate
     result = f(x)
-    # Ensure result is Composite
     if isinstance(result, (int, float)):
         result = Composite(result)
-    # Print final result
     print(f"RESULT: {result}")
     if to is not None:
         print(f"Limit = {result.st()}")
@@ -954,23 +861,10 @@ def trace(f: Callable, at: float = None, to: float = None) -> Composite:
         if -1 in result.c:
             print(f"f'({at if at else 0}) = {result.d(1)}")
     return Composite(result.c) if isinstance(result, TracedComposite) else result
+
+
 def translate(f: Callable, at: float = None, to: float = None) -> Composite:
-    """
-    Show the composite translation WITHOUT resolving.
-    Returns the Composite object so you can inspect it.
-    Parameters:
-        f: The function to translate
-        at: Point for derivative (x = at + h)
-        to: Point for limit (x → to)
-    Examples:
-        >>> translate(lambda x: x**2, at=3)
-        Substitution: x = R(3) + ZERO
-        Translation:  |9|₀ + |6|₋₁ + |1|₋₂
-        >>> translate(lambda x: (3*x+1)/(x+2), to=float('inf'))
-        Substitution: x = INF
-        Translation:  |3|₀ + |-5|₋₁ + |10|₋₂ + ...
-    """
-    # Determine substitution
+    """Show the composite translation WITHOUT resolving."""
     if to is not None:
         if to == float('inf'):
             x = INF
@@ -990,9 +884,7 @@ def translate(f: Callable, at: float = None, to: float = None) -> Composite:
     else:
         x = ZERO
         sub_str = "x = ZERO"
-    # Compute
     result = f(x)
-    # Print translation
     print(f"Substitution: {sub_str}")
     print(f"Translation:  {result}")
     print(f"")
@@ -1008,12 +900,7 @@ def translate(f: Callable, at: float = None, to: float = None) -> Composite:
 
 
 def verify_derivative(f: Callable, f_prime: Callable, at: float, tol: float = 1e-6) -> bool:
-    """
-    Verify that f_prime is indeed the derivative of f at a point.
-
-    Example:
-        verify_derivative(lambda x: x**2, lambda x: 2*x, at=3)  # → True
-    """
+    """Verify that f_prime is indeed the derivative of f at a point."""
     computed = derivative(f, at)
     expected = f_prime(at) if callable(f_prime) else f_prime
     return abs(computed - expected) < tol
@@ -1026,7 +913,7 @@ def verify_derivative(f: Callable, f_prime: Callable, at: float, tol: float = 1e
 def run_tests():
     """Run basic tests to verify the library works"""
     print("=" * 60)
-    print("COMPOSITE LIBRARY TEST SUITE")
+    print("COMPOSITE LIBRARY TEST SUITE (FIXED: FULLY COMPOSITE)")
     print("=" * 60)
 
     tests = []
@@ -1083,6 +970,30 @@ def run_tests():
     s3 = ((R(5) * ZERO) / ZERO).st()
     tests.append(("(5×0)/0", s3, 5))
     print(f"(R(5) * ZERO) / ZERO = {s3}, expected 5 {'✓' if abs(s3-5)<1e-6 else '✗'}")
+
+    # Fix 1 verification: transcendentals on plain floats return Composite
+    print("\n--- Fix 1: Transcendentals return Composite ---")
+
+    sin_plain = sin(0.5)
+    is_composite = isinstance(sin_plain, Composite)
+    tests.append(("sin(0.5) returns Composite", 1 if is_composite else 0, 1))
+    print(f"sin(0.5) returns Composite: {is_composite} {'✓' if is_composite else '✗'}")
+    print(f"  sin(0.5).st() = {sin_plain.st():.6f}, math.sin(0.5) = {math.sin(0.5):.6f}")
+
+    exp_plain = exp(1.0)
+    is_composite = isinstance(exp_plain, Composite)
+    tests.append(("exp(1.0) returns Composite", 1 if is_composite else 0, 1))
+    print(f"exp(1.0) returns Composite: {is_composite} {'✓' if is_composite else '✗'}")
+    print(f"  exp(1.0).st() = {exp_plain.st():.6f}, math.exp(1.0) = {math.exp(1.0):.6f}")
+
+    # Fix 2 verification: integration returns Composite
+    print("\n--- Fix 2: Integration returns Composite ---")
+
+    int_result, int_err = integrate_adaptive(lambda x: x**2, 0, 1, tol=1e-8)
+    is_composite = isinstance(int_result, Composite)
+    tests.append(("integrate_adaptive returns Composite", 1 if is_composite else 0, 1))
+    print(f"integrate_adaptive returns Composite: {is_composite} {'✓' if is_composite else '✗'}")
+    print(f"  ∫x² dx from 0 to 1 = {int_result.st():.6f}, expected 0.333333")
 
     # All derivatives at once
     print("\n--- All Derivatives ---")
