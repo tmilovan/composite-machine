@@ -22,7 +22,7 @@ These are the core capabilities. We're confident they work correctly based on th
 
 ## I. Core Arithmetic 🟢
 
-The foundational operations, inherited from Laurent polynomial ring theory. [[1]](https://www.notion.so/59c9e1c1871541798c1bd3a9075d4e1b)
+The foundational operations, inherited from Laurent polynomial ring theory.
 
 <table>
   <thead>
@@ -76,13 +76,13 @@ The foundational operations, inherited from Laurent polynomial ring theory. [[1]
   </tbody>
 </table>
 
-These follow directly from standard ring theory on Laurent polynomials. The algebra guarantees correctness. [[2]](https://www.notion.so/5643d945b40542bf944217104d0c6945)
+These follow directly from standard ring theory on Laurent polynomials. The algebra guarantees correctness.
 
 ---
 
 ## II. Provenance-Preserving Operations (Novel) 🟢
 
-The operations that *no other system* provides — the core contribution of this work. [[1]](https://www.notion.so/59c9e1c1871541798c1bd3a9075d4e1b)
+The operations that *no other system* provides — the core contribution of this work.
 
 <table>
   <thead>
@@ -145,7 +145,7 @@ The operations that *no other system* provides — the core contribution of this
 
 ## III. Single-Variable Differentiation 🟢
 
-All reduce to the same mechanism: evaluate `f(a + h)` where `h = ZERO`, read coefficients at negative dimensions. [[2]](https://www.notion.so/5643d945b40542bf944217104d0c6945)
+All reduce to the same mechanism: evaluate `f(a + h)` where `h = ZERO`, read coefficients at negative dimensions.
 
 | Operation | Mechanism | Confidence |
 |---|---|---|
@@ -242,7 +242,7 @@ These are implemented and appear correct, but edge cases, numerical stability, a
 
 ## VII. Transcendental Functions 🟡
 
-All implemented via Taylor series on Composite numbers — derivatives come free. [[2]](https://www.notion.so/5643d945b40542bf944217104d0c6945)
+All implemented via Taylor series on Composite numbers — derivatives come free.
 
 | Function | Status | Confidence |
 |---|---|---|
@@ -259,7 +259,7 @@ All implemented via Taylor series on Composite numbers — derivatives come free
 
 ## VIII. Multivariate Calculus 🟡
 
-Extends the same algebra using tuple dimensions (n,m) ∈ ℤ². [[3]](https://www.notion.so/18f42e9a065f44e5a3a99d100d2f200e)
+Extends the same algebra using tuple dimensions (n,m) ∈ ℤ².
 
 | Operation | Mechanism | Confidence |
 |---|---|---|
@@ -274,7 +274,7 @@ Extends the same algebra using tuple dimensions (n,m) ∈ ℤ². [[3]](https://w
 
 ## IX. Complex Analysis 🟡
 
-The single change: allow complex coefficients. The arithmetic is identical. [[4]](https://www.notion.so/e3c62a4f35054440ab0a4ec23d2b99c4)
+The single change: allow complex coefficients. The arithmetic is identical.
 
 | Operation | Mechanism | Confidence |
 |---|---|---|
@@ -286,7 +286,7 @@ The single change: allow complex coefficients. The arithmetic is identical. [[4]
 
 ## X. Asymptotic Analysis 🟡
 
-Evaluate at INF, read coefficients. [[4]](https://www.notion.so/e3c62a4f35054440ab0a4ec23d2b99c4)
+Evaluate at INF, read coefficients.
 
 | Operation | Mechanism | Confidence |
 |---|---|---|
@@ -304,7 +304,7 @@ These are theoretically supported by the system's structure. We believe they sho
 
 ## XI. ODE Solving 🔵
 
-One composite evaluation should give all derivative orders, enabling arbitrary-order Taylor stepping. [[4]](https://www.notion.so/e3c62a4f35054440ab0a4ec23d2b99c4)
+One composite evaluation should give all derivative orders, enabling arbitrary-order Taylor stepping.
 
 | Operation | Mechanism | Status |
 |---|---|---|
@@ -317,7 +317,7 @@ One composite evaluation should give all derivative orders, enabling arbitrary-o
 
 ## XII. Analytic Continuation 🔵
 
-Chain composite evaluations along a path, staying within convergence disks. [[4]](https://www.notion.so/e3c62a4f35054440ab0a4ec23d2b99c4)
+Chain composite evaluations along a path, staying within convergence disks.
 
 | Operation | Mechanism | Status |
 |---|---|---|
