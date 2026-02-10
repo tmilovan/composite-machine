@@ -8,6 +8,8 @@ This directory contains comprehensive documentation for the Composite Calculus l
 
 [API Reference](docs/API%20Reference.md)
 
+[Explainer: Core Composite Class — Annotated Reference](docs/Core%20Composite%20Class%20—%20Annotated%20Reference.md)
+
 [Implementation Guide](docs/Implementation%20Guide.md)
 
 [Examples](docs/Examples.md)
