@@ -453,38 +453,98 @@ def RR_const(value, nvars=2):
 # =============================================================================
 
 def mc_sin(x, terms=12):
-    """Sine via Taylor series. Always returns MC."""
+    """Sine via angle-addition splitting. Always returns MC."""
     if isinstance(x, (int, float)):
         x = MC.real(x, nvars=1)
-    result = MC({}, x.nvars)
-    for n in range(terms):
-        sign = (-1) ** n
-        coeff = sign / math.factorial(2*n + 1)
-        result = result + coeff * (x ** (2*n + 1))
-    return result
+
+    a = x.st()  # scalar part
+    zero_key = tuple([0] * x.nvars)
+    non_zero = {d: c for d, c in x.c.items()
+                if d != zero_key and abs(c) > 1e-15}
+
+    if not non_zero:
+        return MC({zero_key: math.sin(a)}, x.nvars)
+
+    # sin(a + h) = sin(a)*cos(h) + cos(a)*sin(h)
+    sin_a = math.sin(a)
+    cos_a = math.cos(a)
+    h = MC(non_zero, x.nvars)
+
+    # Taylor for sin(h) and cos(h) — h has no dim-0, converges fast
+    sin_h = MC({}, x.nvars)
+    cos_h = MC({zero_key: 1.0}, x.nvars)
+    h_power = MC({zero_key: 1.0}, x.nvars)
+
+    for n in range(1, terms):
+        h_power = h_power * h
+        if n % 2 == 1:  # odd terms → sin
+            sign = (-1) ** ((n - 1) // 2)
+            sin_h = sin_h + (sign / math.factorial(n)) * h_power
+        else:            # even terms → cos
+            sign = (-1) ** (n // 2)
+            cos_h = cos_h + (sign / math.factorial(n)) * h_power
+
+    return sin_a * cos_h + cos_a * sin_h
 
 
 def mc_cos(x, terms=12):
-    """Cosine via Taylor series. Always returns MC."""
+    """Cosine via angle-addition splitting. Always returns MC."""
     if isinstance(x, (int, float)):
         x = MC.real(x, nvars=1)
-    result = MC({}, x.nvars)
-    for n in range(terms):
-        sign = (-1) ** n
-        coeff = sign / math.factorial(2*n)
-        result = result + coeff * (x ** (2*n))
-    return result
+
+    a = x.st()  # scalar part
+    zero_key = tuple([0] * x.nvars)
+    non_zero = {d: c for d, c in x.c.items()
+                if d != zero_key and abs(c) > 1e-15}
+
+    if not non_zero:
+        return MC({zero_key: math.cos(a)}, x.nvars)
+
+    # cos(a + h) = cos(a)*cos(h) - sin(a)*sin(h)
+    sin_a = math.sin(a)
+    cos_a = math.cos(a)
+    h = MC(non_zero, x.nvars)
+
+    # Taylor for sin(h) and cos(h) — h has no dim-0, converges fast
+    sin_h = MC({}, x.nvars)
+    cos_h = MC({zero_key: 1.0}, x.nvars)
+    h_power = MC({zero_key: 1.0}, x.nvars)
+
+    for n in range(1, terms):
+        h_power = h_power * h
+        if n % 2 == 1:
+            sign = (-1) ** ((n - 1) // 2)
+            sin_h = sin_h + (sign / math.factorial(n)) * h_power
+        else:
+            sign = (-1) ** (n // 2)
+            cos_h = cos_h + (sign / math.factorial(n)) * h_power
+
+    return cos_a * cos_h - sin_a * sin_h
 
 
 def mc_exp(x, terms=15):
-    """Exponential via Taylor series. Always returns MC."""
+    """Exponential via base+perturbation splitting. Always returns MC."""
     if isinstance(x, (int, float)):
         x = MC.real(x, nvars=1)
-    result = MC({}, x.nvars)
-    for n in range(terms):
-        coeff = 1 / math.factorial(n)
-        result = result + coeff * (x ** n)
-    return result
+
+    a = x.st()
+    zero_key = tuple([0] * x.nvars)
+    non_zero = {d: c for d, c in x.c.items()
+                if d != zero_key and abs(c) > 1e-15}
+
+    if not non_zero:
+        return MC({zero_key: math.exp(a)}, x.nvars)
+
+    base = math.exp(a)
+    h = MC(non_zero, x.nvars)
+
+    exp_h = MC({zero_key: 1.0}, x.nvars)
+    h_power = MC({zero_key: 1.0}, x.nvars)
+    for n in range(1, terms):
+        h_power = h_power * h
+        exp_h = exp_h + (1.0 / math.factorial(n)) * h_power
+
+    return base * exp_h
 
 
 def mc_ln(x, terms=15):

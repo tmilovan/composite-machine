@@ -265,7 +265,10 @@ class Composite:
     def __eq__(self, other):
         if isinstance(other, (int, float)):
             other = Composite(other)
-        return _compare(self, other) == 0
+        result = _compare(self, other)
+        if isinstance(result, float) and math.isnan(result):
+            return False  # NaN != anything, including itself
+        return result == 0
 
     def __lt__(self, other):
         if isinstance(other, (int, float)):
@@ -286,7 +289,13 @@ class Composite:
         if isinstance(other, (int, float)):
             other = Composite(other)
         return _compare(self, other) >= 0
-
+    def __ne__(self, other):
+        if isinstance(other, (int, float)):
+            other = Composite(other)
+        result = _compare(self, other)
+        if isinstance(result, float) and math.isnan(result):
+            return True  # NaN != everything
+        return result != 0
 
 def _compare(a, b):
     """Lexicographic comparison by dimension (highest first)"""
@@ -296,6 +305,8 @@ def _compare(a, b):
     for dim in sorted(all_dims, reverse=True):
         ca = a.c.get(dim, 0)
         cb = b.c.get(dim, 0)
+        if math.isnan(ca) or math.isnan(cb):
+            return float('nan')  # NaN poisons comparison
         if ca < cb:
             return -1
         elif ca > cb:
@@ -356,27 +367,51 @@ h = ZERO                      # Alias: h is the infinitesimal
 # =============================================================================
 
 def sin(x, terms=12):
-    """Sine function for composite numbers via Taylor series"""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
-    result = Composite({})
-    for n in range(terms):
-        sign = (-1) ** n
-        coeff = sign / math.factorial(2*n + 1)
-        result = result + coeff * (x ** (2*n + 1))
-    return result
+    a = x.st()
+    h = Composite({d: c for d, c in x.c.items() if d != 0})
+    if not h.c:
+        return Composite({0: math.sin(a)})
+    # sin(a+h) = sin(a)*cos(h) + cos(a)*sin(h)
+    # cos(h) and sin(h) converge FAST because h has no dim-0 part
+    sin_a, cos_a = math.sin(a), math.cos(a)
+    # Taylor of sin(h) and cos(h) — h is purely infinitesimal
+    sin_h = Composite({})
+    cos_h = Composite({0: 1.0})
+    h_power = Composite({0: 1.0})
+    for n in range(1, terms):
+        h_power = h_power * h
+        if n % 2 == 1:
+            sign = (-1) ** ((n - 1) // 2)
+            sin_h = sin_h + (sign / math.factorial(n)) * h_power
+        else:
+            sign = (-1) ** (n // 2)
+            cos_h = cos_h + (sign / math.factorial(n)) * h_power
+    return sin_a * cos_h + cos_a * sin_h
 
 
 def cos(x, terms=12):
-    """Cosine function for composite numbers via Taylor series"""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
-    result = Composite({})
-    for n in range(terms):
-        sign = (-1) ** n
-        coeff = sign / math.factorial(2*n)
-        result = result + coeff * (x ** (2*n))
-    return result
+    a = x.st()
+    h = Composite({d: c for d, c in x.c.items() if d != 0})
+    if not h.c:
+        return Composite({0: math.cos(a)})
+    # cos(a+h) = cos(a)*cos(h) - sin(a)*sin(h)
+    sin_a, cos_a = math.sin(a), math.cos(a)
+    sin_h = Composite({})
+    cos_h = Composite({0: 1.0})
+    h_power = Composite({0: 1.0})
+    for n in range(1, terms):
+        h_power = h_power * h
+        if n % 2 == 1:
+            sign = (-1) ** ((n - 1) // 2)
+            sin_h = sin_h + (sign / math.factorial(n)) * h_power
+        else:
+            sign = (-1) ** (n // 2)
+            cos_h = cos_h + (sign / math.factorial(n)) * h_power
+    return cos_a * cos_h - sin_a * sin_h
 
 
 def exp(x, terms=15):
@@ -477,7 +512,7 @@ def sqrt(x, terms=12):
     return result
 
 
-def tan(x, terms=10):
+def tan(x, terms=12):
     """Tangent function via sin/cos"""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
@@ -587,8 +622,9 @@ def derivative(f: Callable, at: float, terms: int = 12) -> float:
 
 def nth_derivative(f: Callable, n: int, at: float, terms: int = 12) -> float:
     """Compute f^(n)(at) - the nth derivative at a point."""
+    effective_terms = max(terms, n + 2)  # need at least n+1 terms
     x = R(at) + ZERO
-    result = f(x)
+    result = f(x)  # but f's internal Taylor uses its own 'terms'...
     return result.d(n)
 
 
@@ -656,12 +692,9 @@ def antiderivative(f_composite: Composite, constant: float = 0) -> Composite:
 
 
 def definite_integral(f: Callable, a: float, b: float, terms: int = 12) -> float:
-    """Compute ∫ₐᵇ f(x) dx via antiderivative."""
-    x_a = R(a) + ZERO
-    x_b = R(b) + ZERO
-    F_a = antiderivative(f(x_a))
-    F_b = antiderivative(f(x_b))
-    return F_b.st() - F_a.st()
+    """Compute ∫ₐᵇ f(x) dx. Wrapper around integrate_adaptive."""
+    result, _ = integrate_adaptive(f, a, b, tol=1e-10, terms=terms)
+    return result.st()
 
 # =============================================================================
 # MULTI-POINT STEPPED INTEGRATION
