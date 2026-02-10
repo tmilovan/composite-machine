@@ -604,3 +604,5 @@ result = one / (one - x)  # → 1 + x + x² + ... (geometric series)
 | **Long division** | Multi-term ÷ via iterative leading-term cancellation | ~30 |
 
 **Total: ~120 lines of mechanism. Everything else is built on top.**
+
+© Toni Milovan. Documentation licensed under CC BY-SA 4.0. Code licensed under AGPL-3.0.

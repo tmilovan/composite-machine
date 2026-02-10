@@ -521,3 +521,5 @@ If you find an error in the reasoning, a gap in the tests, or a counterexample:
 3. Provide a concrete counterexample if possible
 
 We value honest critique over agreement.
+
+© Toni Milovan. Documentation licensed under CC BY-SA 4.0. Code licensed under AGPL-3.0.

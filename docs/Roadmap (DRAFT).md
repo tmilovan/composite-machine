@@ -400,3 +400,5 @@ The system's ℤ-graded sparse structure *should* be able to encode a Turing mac
 > 3. **A single ℤ-graded structure unifying multiple mathematical views** — this structural insight stands on its own
 > 4. **Reversible ×0 and ÷0** — no other arithmetic system does this while preserving distributivity
 > 5. **0/0 as a defined, provenance-dependent operation** — not indeterminate, not NaN, not ⊥
+
+© Toni Milovan. Documentation licensed under CC BY-SA 4.0. Code licensed under AGPL-3.0.

@@ -543,3 +543,5 @@ All arithmetic operations work unchanged!
 - [**Implementation Guide**](docs/Implementation%20Guide.md) - How it works internally
 - [**Examples**](docs/Examples.md) - Code snippets for common tasks
 - [**Roadmap (DRAFT)**](docs/Roadmap%20(DRAFT).md) - What's next
+
+© Toni Milovan. Documentation licensed under CC BY-SA 4.0. Code licensed under AGPL-3.0.

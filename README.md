@@ -398,3 +398,5 @@ A: Research and prototyping where you need all-order derivatives, algebraic limi
 ---
 
 **Built with curiosity. Shared for science. Use with caution.** 🚀
+
+© Toni Milovan. Documentation licensed under CC BY-SA 4.0. Code licensed under AGPL-3.0.

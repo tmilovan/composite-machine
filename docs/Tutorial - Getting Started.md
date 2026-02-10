@@ -280,3 +280,5 @@ all_derivatives(f, at=x, up_to=n)  # [f, f', f'', ..., f⁽ⁿ⁾]
 ---
 
 **You're ready to start using composite calculus!** 🎉
+
+© Toni Milovan. Documentation licensed under CC BY-SA 4.0. Code licensed under AGPL-3.0.
