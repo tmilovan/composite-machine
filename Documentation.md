@@ -20,7 +20,7 @@ This directory contains comprehensive documentation for the Composite Calculus l
 
 [Roadmap (DRAFT)](docs/Roadmap%20(DRAFT).md)
 
-[Exploration & research (Turing completeness)](docs/Turing%20Completeness%20—%20Evidence%20and%20Open%20Questions.md)
+[Exploration & research (Turing completeness playground)](docs/Turing_Completeness_Playground-Curiosity)
 
 ---
 
