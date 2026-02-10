@@ -11,14 +11,14 @@ This tutorial will teach you the basics of composite arithmetic and how to use i
 ## Installation
 
 ```bash
-pip install composite-calculus
+pip install composite-machine
 ```
 
 Or from source:
 
 ```bash
-git clone https://github.com/yourusername/composite-calculus.git
-cd composite-calculus
+git clone https://github.com/tmilovan/composite-machine.git
+cd composite-machine
 pip install -e .
 ```
 
@@ -234,9 +234,17 @@ print(f"Match: {abs(expected - actual) < 1e-10}")  # True
 
 Now that you understand the basics:
 
-1. **Read the [API Reference](api_reference.md)** for complete function documentation
-2. **Check out [Examples](examples/)** for more complex use cases
-3. **Read the [Implementation Guide](implementation.md)** to understand how it works
+[API Reference](docs/API%20Reference.md)
+
+[Explainer: Core Composite Class — Annotated Reference](docs/Core%20Composite%20Class%20—%20Annotated%20Reference.md)
+
+[Implementation Guide](docs/Implementation%20Guide.md)
+
+[Examples](docs/Examples.md)
+
+[Roadmap (DRAFT)](docs/Roadmap%20(DRAFT).md)
+
+[Exploration & research (Turing completeness)](docs/Turing%20Completeness%20—%20Evidence%20and%20Open%20Questions.md)
 
 ---
 
