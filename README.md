@@ -20,7 +20,7 @@ This is a working implementation of **composite arithmetic** — a number system
 ## The Idea in 30 Seconds
 
 ```python
-from composite_lib import R, ZERO
+from composite.composite_lib import R, ZERO
 
 # Traditional: Need N function evaluations for N derivatives
 # Composite: ONE evaluation → ALL derivatives
@@ -80,7 +80,7 @@ pip install -e .
 ### Derivatives (The Headline Feature)
 
 ```python
-from composite_lib import derivative, nth_derivative, all_derivatives
+from composite.composite_lib import derivative, nth_derivative, all_derivatives
 
 # Simple API
 derivative(lambda x: x**2, at=3)  # → 6
@@ -96,7 +96,7 @@ all_derivatives(lambda x: exp(x), at=0, up_to=5)
 ### Limits (No L'Hôpital Needed)
 
 ```python
-from composite_lib import limit
+from composite.composite_lib import limit
 
 limit(lambda x: sin(x)/x, as_x_to=0)  # → 1.0
 limit(lambda x: (x**2 - 4)/(x - 2), as_x_to=2)  # → 4.0
@@ -106,7 +106,7 @@ limit(lambda x: (3*x + 1)/(x + 2), as_x_to=float('inf'))  # → 3.0
 ### Integration (With Error Estimates)
 
 ```python
-from composite_lib import integrate_adaptive
+from composite.composite_lib import integrate_adaptive
 
 val, err = integrate_adaptive(lambda x: exp(-(x*x)), 1, 2)
 # val ≈ 0.1353, err ≈ 1e-15 (error estimate is FREE!)
@@ -210,13 +210,8 @@ result.d(3)   # 48   ← Third derivative (8 × 3!)
 ## Testing
 
 ```bash
-# Run all tests (175 tests, should all pass)
-pytest tests/
-
-# Run specific test suites
-pytest tests/test_core.py         # Core algebra
-pytest tests/test_calculus.py     # Derivatives, limits, integrals
-pytest tests/test_transcendental.py  # sin, exp, ln, etc.
+# Run specific test suites (all should pass)
+python tests/test_filename.py
 ```
 
 **Test coverage:**
