@@ -380,24 +380,44 @@ def cos(x, terms=12):
 
 
 def exp(x, terms=15):
-    """Exponential function for composite numbers via Taylor series"""
+    """
+    Exponential function for Composite numbers.
+
+    Uses base+perturbation splitting: exp(a + h) = math.exp(a) * exp(h)
+    where a = standard part (dim 0) and h = infinitesimal part (dims != 0).
+
+    math.exp(a) handles the scalar part exactly (IEEE 754).
+    Taylor series on h converges fast since h has no dim-0 component.
+
+    This avoids catastrophic cancellation of naive Taylor series
+    sum(x^n/n!) for large |x| (e.g., 15-term Taylor gives
+    exp(-10) = 466 instead of 4.5e-5).
+    """
     if isinstance(x, (int, float)):
-        x = Composite({0: float(x)})
+        return Composite({0: math.exp(float(x))})
 
-    # Check for infinite arguments (positive dimensions)
-    max_dim = max(x.c.keys()) if x.c else 0
-    if max_dim > 0:
-        lead_coeff = x.c[max_dim]
-        if lead_coeff < 0:
-            return Composite({})
-        else:
-            return Composite({1: float('inf')})
+    if not isinstance(x, Composite):
+        return Composite({0: math.exp(float(x))})
 
-    result = Composite({})
-    for n in range(terms):
-        coeff = 1 / math.factorial(n)
-        result = result + coeff * (x ** n)
-    return result
+    a = x.st()  # Dimension-0 coefficient
+    non_zero = {d: c for d, c in x.c.items() if d != 0 and abs(c) > 1e-15}
+
+    if not non_zero:
+        # Pure scalar Composite (only dim 0): math.exp directly
+        return Composite({0: math.exp(a)})
+
+    # Split: exp(a + h) = exp(a) * exp(h)
+    base = math.exp(a)
+    h = Composite(non_zero)
+
+    # Taylor series for exp(h) — converges fast, h has no dim-0 part
+    exp_h = Composite({0: 1.0})
+    h_power = Composite({0: 1.0})
+    for n in range(1, terms):
+        h_power = h_power * h
+        exp_h = exp_h + (1.0 / math.factorial(n)) * h_power
+
+    return base * exp_h
 
 
 def ln(x, terms=15):
