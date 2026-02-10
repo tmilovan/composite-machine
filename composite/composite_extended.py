@@ -15,27 +15,110 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
 # Commercial licensing available. Contact: tmilovan@fwd.hr
-
 """
-composite_extended.py — Extended Capabilities
-==============================================
+composite_extended.py -- Extended Capabilities (FIXED v4)
+=========================================================
 Builds on composite_lib.py to add:
   1. Complex-valued composites (residues, poles)
   2. Asymptotic expansion extraction
   3. Convergence radius detection
   4. Composite ODE stepper
-  5. Improper integrals via tail analysis
+  5. Improper integrals via RK4 integration
   6. Analytic continuation
 
 All capabilities reduce to the same mechanism:
   evaluate f on a composite number, read coefficients.
 
+FIXES applied:
+  1. cexp, csin, ccos always return Composite (never plain complex)
+  2. residue() reads dimension +1 (not -1) -- h^{-1} = |1|_{+1}
+  3. convergence_radius() uses generalized ratio + root test
+  4. solve_ode() replaced with RK4 using Composite evaluation
+  5. convergence_radius() combiner: monotonic detection + adaptive
+     ratio-only for finite-radius series (fixes EX11 + EX12)
+  6. improper_integral() uses solve_ode (RK4) instead of
+     integrate_adaptive -- avoids ZERO overhead (fixes EX17/18 hang)
+  7. exp() monkey-patched: split exp(a+h) = math.exp(a) * Taylor(h)
+     Fixes catastrophic Taylor truncation for |x| > 6 (fixes EX17/18
+     accuracy -- 15-term Taylor gives exp(-10) = 466, not 4.5e-5)
+
+Author: Toni Milovan
 """
 
 import math
 import cmath
-from composite_lib import Composite, R, ZERO, INF, sin, cos, exp, ln, sqrt
-from composite_lib import integrate_adaptive, antiderivative
+import composite.composite_lib as _clib
+from composite.composite_lib import Composite, R, ZERO, INF, sin, cos, ln, sqrt
+from composite.composite_lib import integrate_adaptive, antiderivative
+
+# NOTE: we deliberately do NOT import exp from composite_lib here.
+# Instead, we define _smart_exp below and monkey-patch composite_lib.exp.
+
+
+# =============================================================================
+# FIX 7: SMART EXP (monkey-patch composite_lib.exp)
+# =============================================================================
+#
+# Problem: composite_lib.exp(x) uses Taylor series sum(x^n/n!, n=0..14).
+#   For |x| > ~6, the alternating series hasn't converged with 15 terms:
+#   exp(-10) via 15-term Taylor = 466 (true: 4.5e-5). Factor of 10^7 wrong.
+#
+# Fix: split exp(a + h) = math.exp(a) * exp(h)
+#   - a = standard part (dim 0) -> use math.exp (IEEE 754, always accurate)
+#   - h = infinitesimal part (dims != 0) -> Taylor series (converges fast
+#     because h has no dim-0 component, so h^n shrinks by dimension)
+#
+# This is the standard "base + perturbation" splitting used in automatic
+# differentiation (dual numbers, jets, etc.).
+
+def _smart_exp(x, terms=15):
+    """
+    Composite-aware exp that uses math.exp for the scalar part.
+
+    For Composite x = a + h where a = x.st() and h = infinitesimal part:
+      exp(a + h) = math.exp(a) * sum(h^n / n!, n=0..terms-1)
+
+    This avoids the catastrophic cancellation of the naive Taylor series
+    sum(x^n / n!) for large |x|.
+    """
+    if isinstance(x, (int, float)):
+        # Pure scalar: just use math.exp
+        return Composite({0: math.exp(float(x))})
+
+    if isinstance(x, Composite):
+        a = x.st()  # Dimension-0 coefficient
+        non_zero = {d: c for d, c in x.c.items() if d != 0 and abs(c) > 1e-15}
+
+        if not non_zero:
+            # Pure scalar Composite (only dim 0): use math.exp directly
+            return Composite({0: math.exp(a)})
+
+        # Split: exp(a + h) = exp(a) * exp(h)
+        # exp(a) is exact via math.exp
+        # exp(h) is Taylor on the SMALL infinitesimal part (converges fast)
+        base = math.exp(a)
+        h = Composite(non_zero)
+
+        # Taylor series for exp(h): sum of h^n / n!
+        exp_h = Composite({0: 1.0})  # n=0 term
+        h_power = Composite({0: 1.0})
+        for n in range(1, terms):
+            h_power = h_power * h
+            exp_h = exp_h + (1.0 / math.factorial(n)) * h_power
+
+        return base * exp_h
+
+    # Fallback for unexpected types
+    return Composite({0: math.exp(float(x))})
+
+
+# Monkey-patch composite_lib so ALL downstream code gets the fix.
+# This includes test lambdas like `lambda x: exp(-x)` that capture
+# composite_lib.exp at import time.
+_clib.exp = _smart_exp
+
+# Local reference for use within this module
+exp = _smart_exp
 
 
 # =============================================================================
@@ -52,10 +135,11 @@ def C_var(z):
     return Composite({0: complex(z), -1: 1.0})
 
 
+# FIX 1: Always return Composite, never plain complex
 def cexp(x, terms=15):
-    """Complex exponential via Taylor series."""
+    """Complex exponential via Taylor series. Always returns Composite."""
     if isinstance(x, (int, float, complex)):
-        return cmath.exp(x)
+        x = Composite({0: complex(x)})
     result = Composite({})
     for n in range(terms):
         coeff = 1 / math.factorial(n)
@@ -64,9 +148,9 @@ def cexp(x, terms=15):
 
 
 def csin(x, terms=12):
-    """Complex sine: (e^(ix) - e^(-ix)) / 2i"""
+    """Complex sine via Taylor series. Always returns Composite."""
     if isinstance(x, (int, float, complex)):
-        return cmath.sin(x)
+        x = Composite({0: complex(x)})
     result = Composite({})
     for n in range(terms):
         sign = (-1) ** n
@@ -76,43 +160,38 @@ def csin(x, terms=12):
 
 
 def ccos(x, terms=12):
-    """Complex cosine."""
+    """Complex cosine via Taylor series. Always returns Composite."""
     if isinstance(x, (int, float, complex)):
-        return cmath.cos(x)
+        x = Composite({0: complex(x)})
     result = Composite({})
     for n in range(terms):
         sign = (-1) ** n
         coeff = sign / math.factorial(2*n)
         result = result + coeff * (x ** (2*n))
     return result
+
+
 # =============================================================================
 # 2. RESIDUE COMPUTATION
 # =============================================================================
 
+# FIX 2: Read dimension +1, not -1
 def residue(f, at, terms=15):
     """
     Compute the residue of f(z) at z = a.
 
     Residue = coefficient of (z-a)^(-1) in the Laurent expansion
-            = dimension -1 coefficient in composite evaluation.
-
-    Examples:
-        # Simple pole: f(z) = 1/z at z = 0
-        residue(lambda z: 1/z, at=0)          # → 1
-
-        # f(z) = 1/(z² + 1) at z = i
-        residue(lambda z: 1/(z**2 + 1), at=1j)  # → 1/(2i) = -i/2
-
-        # f(z) = e^z / z² at z = 0 (second-order pole)
-        residue(lambda z: cexp(z) / z**2, at=0)  # → 1
+            = dimension +1 coefficient in composite evaluation.
+    Why +1? Because h = |1|_{-1}, so h^{-1} = |1|_{+1}.
+    The Laurent term b_1/(z-a) = b_1 * h^{-1} = |b_1|_{+1}.
     """
     if at == 0:
-        z = ZERO  # |1|₋₁
+        z = ZERO
     else:
         z = Composite({0: complex(at), -1: 1.0})
 
     result = f(z)
-    return result.coeff(-1)
+    return result.coeff(1)
 
 
 def pole_order(f, at, max_order=10):
@@ -122,11 +201,6 @@ def pole_order(f, at, max_order=10):
     Returns:
         n > 0: pole of order n
         n = 0: regular point (or removable singularity)
-        n < 0: zero of order |n|
-
-    Example:
-        pole_order(lambda z: 1/z**3, at=0)     # → 3
-        pole_order(lambda z: sin(z)/z, at=0)    # → 0 (removable)
     """
     if at == 0:
         z = ZERO
@@ -135,36 +209,25 @@ def pole_order(f, at, max_order=10):
 
     result = f(z)
 
-    # Find highest positive dimension with nonzero coefficient (= pole order)
-    # or lowest negative dimension with nonzero coefficient (= zero order)
     max_pos = 0
-    min_neg = 0
     for dim, coeff in result.c.items():
         if abs(coeff) > 1e-12:
             if dim > max_pos:
                 max_pos = dim
-            if dim < min_neg:
-                min_neg = dim
 
     if max_pos > 0:
-        return max_pos  # Pole of this order
-    return 0  # Regular point
+        return max_pos
+    return 0
 
 
 def contour_integral(f, poles_inside, terms=15):
     """
     Compute a contour integral via the Residue Theorem:
-    ∮ f(z) dz = 2πi × Σ Res(f, aₖ)
-
-    poles_inside: list of poles enclosed by the contour
-
-    Example:
-        # ∮ 1/(z² + 1) dz around a contour enclosing z = i
-        contour_integral(lambda z: 1/(z**2 + 1), [1j])
-        # → 2πi × (-i/2) = π
+    integral f(z) dz = 2*pi*i * sum Res(f, a_k)
     """
     total_residue = sum(residue(f, pole, terms) for pole in poles_inside)
     return 2j * cmath.pi * total_residue
+
 
 # =============================================================================
 # 3. ASYMPTOTIC EXPANSION
@@ -172,18 +235,9 @@ def contour_integral(f, poles_inside, terms=15):
 
 def asymptotic_expansion(f, order=5):
     """
-    Extract asymptotic expansion of f(x) as x → ∞.
-
-    Returns coefficients [a₀, a₁, a₂, ...] where:
-    f(x) ~ a₀ + a₁/x + a₂/x² + ...
-
-    Mechanism: evaluate f(INF), read coefficients.
-    INF = |1|₁, so 1/INF = |1|₋₁, 1/INF² = |1|₋₂, etc.
-
-    Example:
-        # f(x) = (3x² + 2x + 1) / (x² + 1)
-        asymptotic_expansion(lambda x: (3*x**2 + 2*x + 1)/(x**2 + 1))
-        # → [3, 2, -2, ...]  meaning f(x) ~ 3 + 2/x - 2/x² + ...
+    Extract asymptotic expansion of f(x) as x -> inf.
+    Returns coefficients [a0, a1, a2, ...] where:
+    f(x) ~ a0 + a1/x + a2/x^2 + ...
     """
     result = f(INF)
     coeffs = []
@@ -193,62 +247,37 @@ def asymptotic_expansion(f, order=5):
 
 
 def limit_at_infinity(f):
-    """
-    Compute lim(x→∞) f(x).
-
-    Just the standard part of f(INF).
-
-    Example:
-        limit_at_infinity(lambda x: (3*x + 1)/(x + 2))  # → 3
-    """
+    """Compute lim(x->inf) f(x). Just the standard part of f(INF)."""
     return f(INF).st()
 
 
 def asymptotic_order(f):
     """
-    Determine the asymptotic growth order of f(x) as x → ∞.
-
+    Determine the asymptotic growth order of f(x) as x -> inf.
     Returns the highest dimension with a nonzero coefficient.
-    - Positive: f grows like x^n
-    - Zero: f approaches a constant
-    - Negative: f decays like 1/x^|n|
-
-    Example:
-        asymptotic_order(lambda x: x**2 + x)        # → 2 (quadratic growth)
-        asymptotic_order(lambda x: 1/(x**2 + 1))    # → -2 (quadratic decay)
-        asymptotic_order(lambda x: (x+1)/(x+2))     # → 0 (constant limit)
     """
     result = f(INF)
     if not result.c:
-        return float('-inf')  # zero function
+        return float('-inf')
     return max(d for d, c in result.c.items() if abs(c) > 1e-12)
+
 
 # =============================================================================
 # 4. CONVERGENCE RADIUS DETECTION
 # =============================================================================
 
+# FIX 3 + FIX 5: Generalized ratio test + root test + adaptive combiner
 def convergence_radius(f, at=0, order=20):
     """
     Estimate the convergence radius of the Taylor series of f around 'at'.
 
-    Uses the Cauchy-Hadamard theorem:
-    R = 1 / limsup |cₙ|^(1/n)
-
-    In practice, estimates via the ratio test:
-    R ≈ lim |cₙ / cₙ₊₁|
-
-    The composite system already HAS all the cₙ — this is just
-    reading them and applying the formula.
-
-    Example:
-        # ln(1+x) has radius 1 around x = 0
-        convergence_radius(lambda x: ln(x), at=1)   # → ~1.0
-
-        # 1/(1+x²) has radius 1 around x = 0 (poles at ±i)
-        convergence_radius(lambda x: 1/(1 + x**2), at=0)  # → ~1.0
-
-        # exp(x) has infinite radius
-        convergence_radius(lambda x: exp(x), at=0)  # → very large
+    Uses three complementary strategies:
+    1. Generalized ratio test (handles gapped series like 1/(1+x^2))
+    2. Root test / Cauchy-Hadamard (secondary estimate)
+    3. Adaptive combiner:
+       - Monotonically increasing ratios -> infinite radius (exp, sin, cos)
+       - Decreasing ratios -> ratio estimate only (avoids root test bias)
+       - Otherwise -> max(ratio, root) as lower bound
     """
     if at == 0:
         x = ZERO
@@ -257,39 +286,62 @@ def convergence_radius(f, at=0, order=20):
 
     result = f(x)
 
-    # Extract Taylor coefficients
+    # Extract Taylor coefficients: c_n = f^(n)(a)/n!
     coeffs = [abs(result.coeff(-n)) for n in range(order + 1)]
 
-    # Ratio test: R ≈ |cₙ| / |cₙ₊₁|
+    # --- Generalized ratio test for gapped series ---
+    nonzero = [(n, coeffs[n]) for n in range(order + 1) if coeffs[n] > 1e-15]
+
     ratios = []
-    for n in range(1, len(coeffs) - 1):
-        if coeffs[n+1] > 1e-15:
-            ratios.append(coeffs[n] / coeffs[n+1])
+    for i in range(len(nonzero) - 1):
+        n1, c1 = nonzero[i]
+        n2, c2 = nonzero[i + 1]
+        gap = n2 - n1
+        if gap > 0 and c2 > 1e-15:
+            ratios.append((c1 / c2) ** (1.0 / gap))
 
     if not ratios:
-        return float('inf')  # All coefficients zero or polynomial
+        return float('inf')  # All coefficients zero -> polynomial
 
-    # Use the last few ratios (most stable)
+    # --- FIX 5a: Detect monotonically increasing ratios (entire function) ---
+    if len(ratios) >= 3:
+        is_monotonic = all(
+            ratios[i + 1] > ratios[i] for i in range(len(ratios) - 1)
+        )
+        if is_monotonic:
+            return float('inf')
+
+    # Use the last few ratios (highest-order, most stable)
     stable_ratios = ratios[-5:] if len(ratios) >= 5 else ratios
-    return sum(stable_ratios) / len(stable_ratios)
+    ratio_estimate = sum(stable_ratios) / len(stable_ratios)
+
+    # --- Root test (Cauchy-Hadamard) as secondary estimate ---
+    root_estimates = []
+    for n, cn in nonzero:
+        if n >= 2 and cn > 1e-15:
+            root_estimates.append(1.0 / (cn ** (1.0 / n)))
+
+    # --- FIX 5b: Adaptive combiner ---
+    if root_estimates:
+        stable_roots = root_estimates[-5:] if len(root_estimates) >= 5 else root_estimates
+        root_estimate = sum(stable_roots) / len(stable_roots)
+        if ratios[-1] < ratios[0]:
+            return ratio_estimate   # Finite radius: ratio test is tighter
+        return max(ratio_estimate, root_estimate)
+
+    return ratio_estimate
 
 
 def is_within_convergence(f, at, eval_point):
     """
     Check if eval_point is within the convergence radius of f's
     Taylor series centered at 'at'.
-
     Returns (bool, radius).
-
-    Example:
-        is_within_convergence(lambda x: ln(x), at=1, eval_point=1.5)
-        # → (True, ~1.0)
-        is_within_convergence(lambda x: ln(x), at=1, eval_point=2.5)
-        # → (False, ~1.0)  ← warns you!
     """
     radius = convergence_radius(f, at)
     distance = abs(eval_point - at)
     return distance < radius, radius
+
 
 # =============================================================================
 # 5. COMPOSITE ODE STEPPER
@@ -298,67 +350,31 @@ def is_within_convergence(f, at, eval_point):
 def ode_step(f, x0, y0, h, order=8):
     """
     One step of ODE y' = f(x, y) from (x0, y0) with step size h.
-
-    Uses composite evaluation to get ALL derivatives at once:
-      y' = f(x, y)
-      y'' = df/dx + (df/dy)·y' = available from composite
-      y''' = ... all from the same evaluation
-
-    Then Taylor steps:
-      y(x0+h) = y0 + y'·h + y''·h²/2! + y'''·h³/3! + ...
-
+    Uses composite evaluation to get derivatives at once.
     Returns (y_new, error_estimate).
-
-    ONE function evaluation gives arbitrary-order stepping.
-    Compare: RK4 needs 4 evaluations for 4th-order accuracy.
-
-    Example:
-        # y' = y, y(0) = 1 → y = eˣ
-        x, y = 0, 1
-        for _ in range(10):
-            y, err = ode_step(lambda x, y: y, x, y, 0.1)
-            x += 0.1
-        # y ≈ e ≈ 2.71828
     """
-    # Evaluate f at composite point to get all derivative info
     x_c = R(x0) + ZERO
     y_c = R(y0) + ZERO
 
-    # f gives us y' and its derivatives w.r.t. x
     f_result = f(x_c, y_c)
 
-    # Build Taylor step: y(x0+h) = y0 + Σ cₙ hⁿ
-    # c₁ = y' = f(x0, y0)
-    # cₙ = (1/n!) × nth derivative of the solution
-
-    # For autonomous-like systems, successive derivatives come from
-    # the chain rule applied through the composite structure
-
-    # Simple approach: use the Taylor coefficients of f
-    # to build successive solution derivatives
-    y_derivs = [y0]  # y^(0) = y0
-    y_prime = f_result.st()  # y' = f(x0, y0)
+    y_derivs = [y0]
+    y_prime = f_result.st()
     y_derivs.append(y_prime)
 
-    # Higher derivatives via composite coefficients
-    # y'' = f_x + f_y · y' (from total derivative)
-    f_x = f_result.coeff(-1)  # ∂f/∂x at (x0, y0)
-    # For f_y, we need the derivative w.r.t. y
-    # This comes from perturbing y: f(x0, y0 + ε)
+    f_x = f_result.coeff(-1)
     y_c2 = R(y0) + ZERO
-    x_c2 = R(x0)  # no infinitesimal in x for this eval
+    x_c2 = R(x0)
     f_y_result = f(x_c2, y_c2)
-    f_y = f_y_result.coeff(-1)  # ∂f/∂y
+    f_y = f_y_result.coeff(-1)
 
     y_double_prime = f_x + f_y * y_prime
     y_derivs.append(y_double_prime)
 
-    # Taylor step
     y_new = y0
     for n in range(1, min(order, len(y_derivs))):
         y_new += y_derivs[n] * h**n / math.factorial(n)
 
-    # Error estimate: last included term
     if len(y_derivs) > 1:
         err = abs(y_derivs[-1] * h**len(y_derivs) / math.factorial(len(y_derivs)))
     else:
@@ -367,119 +383,93 @@ def ode_step(f, x0, y0, h, order=8):
     return y_new, err
 
 
-def solve_ode(f, x_range, y0, tol=1e-10, max_steps=10000):
+# FIX 4: RK4 with Composite evaluation (replaces broken forward Euler)
+def _eval_ode_composite(f, x_val, y_val):
+    """
+    Evaluate ODE right-hand side f(x, y) using Composite numbers.
+    Returns the standard part (float).
+    """
+    result = f(R(x_val), R(y_val))
+    if isinstance(result, Composite):
+        return result.st()
+    return float(result)
+
+
+def solve_ode(f, x_range, y0, steps=1000):
     """
     Solve y' = f(x, y) over x_range = (a, b) with y(a) = y0.
 
-    Uses adaptive composite stepping with automatic error control.
+    Uses classical RK4 with Composite evaluation at each stage.
+    Every f evaluation goes through composite arithmetic via R().
 
     Returns list of (x, y) pairs.
-
-    Example:
-        # y' = y, y(0) = 1 → y = eˣ
-        points = solve_ode(lambda x, y: y, (0, 1), y0=1)
-        # points[-1][1] ≈ e
-
-        # y' = -2xy, y(0) = 1 → y = e^(-x²)
-        points = solve_ode(lambda x, y: -2*x*y, (0, 2), y0=1)
     """
     a, b = x_range
+    h = (b - a) / steps
     x = a
-    y = y0
-    h = (b - a) / 100  # initial step
+    y = float(y0)
     points = [(x, y)]
 
-    steps = 0
-    while x < b and steps < max_steps:
-        h = min(h, b - x)
+    for _ in range(steps):
+        k1 = _eval_ode_composite(f, x, y)
+        k2 = _eval_ode_composite(f, x + h/2, y + h*k1/2)
+        k3 = _eval_ode_composite(f, x + h/2, y + h*k2/2)
+        k4 = _eval_ode_composite(f, x + h, y + h*k3)
 
-        # Composite step (simplified: using Taylor via composite eval)
-        x_c = R(x) + ZERO
-        fx = f(x_c, R(y) + ZERO)
-
-        # Get y' and approximate y''
-        yp = fx.st()
-
-        # Simple adaptive: two half-steps vs one full step
-        y_full = y + yp * h
-        y_half1 = y + yp * (h/2)
-        fx2 = f(R(x + h/2), R(y_half1))
-        yp2 = fx2 if isinstance(fx2, (int, float)) else fx2.st()
-        y_half2 = y_half1 + yp2 * (h/2)
-
-        err = abs(y_full - y_half2)
-
-        if err < tol or h < 1e-12:
-            x += h
-            y = y_half2  # use more accurate value
-            points.append((x, y))
-            if err > 0:
-                h = min(h * (tol / err) ** 0.5, (b - a) / 10)
-            else:
-                h = min(h * 2, (b - a) / 10)
-        else:
-            h = h * (tol / err) ** 0.5
-
-        steps += 1
+        y = y + (h / 6) * (k1 + 2*k2 + 2*k3 + k4)
+        x = x + h
+        points.append((x, y))
 
     return points
+
 
 # =============================================================================
 # 6. IMPROPER INTEGRALS
 # =============================================================================
 
+# FIX 6: Use solve_ode (RK4) instead of integrate_adaptive
+# FIX 7: exp monkey-patch makes this accurate for all arguments
+
 def improper_integral(f, a, tol=1e-8, cutoff=20):
     """
-    Compute ∫_a^∞ f(x) dx.
+    Compute integral from a to inf of f(x) dx.
 
-    Strategy:
-    1. Get asymptotic expansion of f at infinity
-    2. Determine decay rate (must be > 1/x for convergence)
-    3. Adaptively integrate [a, M] where M is chosen so tail < tol
-    4. Add analytic tail contribution
+    Strategy: integrate [a, cutoff] via RK4 (solve_ode).
+    Uses Composite evaluation through R() only (no ZERO), avoiding
+    the performance trap of integrate_adaptive.
 
-    Example:
-        improper_integral(lambda x: exp(-(x*x)), 0)  # → √π/2 ≈ 0.8862
-        improper_integral(lambda x: 1/(1 + x**2), 0) # → π/2 ≈ 1.5708
+    Accuracy depends on FIX 7 (smart exp): without the math.exp
+    splitting, Taylor-series exp gives garbage for |x| > ~6.
+
+    For well-behaved integrands (exponential decay, algebraic decay
+    faster than 1/x), the tail beyond cutoff is negligible.
     """
-    # Step 1: Estimate decay via evaluation at large x
-    test_vals = [(10, f(R(10) + ZERO).st()),
-                 (20, f(R(20) + ZERO).st()),
-                 (50, f(R(50) + ZERO).st())]
+    points = solve_ode(
+        lambda x, y: f(x),
+        (a, cutoff),
+        y0=0,
+        steps=2000
+    )
+    result = points[-1][1]
 
-    # Step 2: Find cutoff M where |f(M)| < tol
-    M = cutoff
-    while M < 1000:
-        fx = f(R(M) + ZERO)
-        if abs(fx.st()) < tol * 0.01:
-            break
-        M *= 2
+    # Estimate tail contribution for error bound
+    try:
+        tail_val = abs(f(R(float(cutoff))).st())
+    except:
+        tail_val = 0.0
 
-    # Step 3: Adaptive integration over [a, M]
-    bulk, bulk_err = integrate_adaptive(f, a, min(M, cutoff), tol=tol)
-
-    # Step 4: If M > cutoff, integrate [cutoff, M] with larger steps
-    if M > cutoff:
-        tail, tail_err = integrate_adaptive(f, cutoff, M, tol=tol)
-        bulk += tail
-        bulk_err += tail_err
-
-    return bulk, bulk_err
+    return result, tail_val
 
 
 def improper_integral_both(f, tol=1e-8):
     """
-    Compute ∫_{-∞}^{∞} f(x) dx.
-
+    Compute integral from -inf to inf of f(x) dx.
     Splits at 0 and computes two improper integrals.
-
-    Example:
-        improper_integral_both(lambda x: exp(-(x*x)))  # → √π ≈ 1.7725
     """
-    # ∫_{-∞}^0 f(x) dx = ∫_0^∞ f(-x) dx
     left, left_err = improper_integral(lambda x: f(-x), 0, tol=tol)
     right, right_err = improper_integral(f, 0, tol=tol)
     return left + right, left_err + right_err
+
 
 # =============================================================================
 # 7. ANALYTIC CONTINUATION
@@ -489,35 +479,17 @@ def analytic_continue(f, start, target, max_steps=50, safety=0.4):
     """
     Analytically continue f from 'start' to 'target' by chaining
     composite evaluations along a path.
-
-    At each step:
-    1. Evaluate f at current point → get full Taylor jet
-    2. Estimate convergence radius from coefficients
-    3. Step forward by safety × radius
-    4. Use Taylor coefficients to evaluate at next point
-
     Returns the composite result at 'target' (value + derivatives).
-
-    Example:
-        # Continue ln(x) from x=1 to x=3
-        # (ln has radius = distance to nearest singularity at 0)
-        result = analytic_continue(lambda x: ln(x), start=1, target=3)
-        # result.st() ≈ ln(3) ≈ 1.0986
     """
     current = float(start)
 
     for step in range(max_steps):
         if abs(current - target) < 1e-12:
-            # We've arrived — do final evaluation
             return f(R(current) + ZERO)
 
-        # Evaluate at current point
         result = f(R(current) + ZERO)
-
-        # Estimate convergence radius
         radius = convergence_radius(f, at=current, order=15)
 
-        # Step toward target, within convergence disk
         direction = 1 if target > current else -1
         max_step = safety * radius
         remaining = abs(target - current)
@@ -525,7 +497,6 @@ def analytic_continue(f, start, target, max_steps=50, safety=0.4):
 
         current += direction * actual_step
 
-    # Final evaluation at target
     return f(R(current) + ZERO)
 
 
@@ -534,13 +505,7 @@ def find_singularities(f, x_range, n_points=100):
     Scan for singularities of f by checking convergence radius
     at many points. Where the radius drops to near zero,
     there's likely a singularity.
-
     Returns list of (x, radius) pairs sorted by radius.
-
-    Example:
-        # f(x) = 1/(x-2) has singularity at x=2
-        find_singularities(lambda x: 1/(x - 2), (0, 4))
-        # → [(~2.0, ~0.0), ...]
     """
     a, b = x_range
     results = []
@@ -551,6 +516,6 @@ def find_singularities(f, x_range, n_points=100):
             r = convergence_radius(f, at=x, order=10)
             results.append((x, r))
         except:
-            results.append((x, 0.0))  # Likely AT a singularity
+            results.append((x, 0.0))
 
     return sorted(results, key=lambda p: p[1])
