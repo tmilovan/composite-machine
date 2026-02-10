@@ -173,10 +173,10 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 ## Comparison: Old vs New Notation
 
 | Old Notation | New Notation | Meaning |
-| --- | --- | --- |
-| `⟨_; 5 | _⟩` | `|5|` | Plain rational 5 |
-| `⟨0; 5 | 0⟩` | `|5|` | Same — phantom zeros don't exist |
-| `⟨2(0); 5 | 1(0)⟩` | `|2|₁ |5| |1|₋₁` | 2∞ + 5 + 1 zero |
+|---|---|---|
+| `⟨_; 5 \| _⟩` | `\|5\|` | Plain rational 5 |
+| `⟨0; 5 \| 0⟩` | `\|5\|` | Same — phantom zeros don't exist |
+| `⟨2(0); 5 \| 1(0)⟩` | `\|2\|₁ \|5\| \|1\|₋₁` | 2∞ + 5 + 1 zero |
 
 **The key difference:** In new notation, dimensions only exist if written. You can't accidentally have phantom `|0|₁` or `|0|₋₁` — they must be explicitly constructed.
 
