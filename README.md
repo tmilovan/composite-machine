@@ -6,7 +6,7 @@
 > <details>
 > <summary><strong>Let me address a few things here :)</strong>
 >
-> **1.** There has been a number of reactions on social media that this is some kind of AI slop project and while AI is used to do a cleanup on this repo and maintain the docs, and the code in at least usable and readable shape, **the main data structure, it's behavior, weird exceptions rules, main class, subclasses, implementation etc. are genuinely my work and based on my implementation and interpretation.** If anything AI has been more of a burden in its conception **because this system's artificial/made-up rules go against concepts LLM models have been trained with.** Klik to read more.
+> **1.** There has been a number of reactions on social media that this is some kind of AI slop project and while AI is used to do a cleanup on this repo and maintain the docs, and the code in at least usable and readable shape, **the main data structure, it's behavior, weird exceptions rules, main class, subclasses, implementation etc. are genuinely my work and based on my implementation and interpretation.** If anything AI has been more of a burden in its conception **because this system's artificial/made-up rules go against concepts LLM models have been trained with.** Click to read more.
 ></summary>
 > **2.** So why use AI at all? Well because **there is only one ME working on this project** part time. I can't do all the work needed to maintain public project of such a scale, which is changing so rapidly without help. **AI has been very useful for testing and rapid prototyping here.**
 >
