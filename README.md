@@ -1,5 +1,31 @@
 # README.md
 
+> [!NOTE]
+> ## 📢 LONG DISCLAIMER, PLEASE READ.
+>
+> <details>
+> <summary><strong>Let me address a few things here :)</strong>
+>
+> **1.** There has been a number of reactions on social media that this is some kind of AI slop project and while AI is used to do a cleanup on this repo and maintain the docs, and the code in at least usable and readable shape, **the main data structure, it's behavior, weird exceptions rules, main class, subclasses, implementation etc. are genuinely my work and based on my implementation and interpretation.** If anything AI has been more of a burden in its conception **because this system's artificial/made-up rules go against concepts LLM models have been trained with.**
+></summary>
+> **2.** So why use AI at all? Well because **there is only one ME working on this project** part time. I can't do all the work needed to maintain public project of such a scale, which is changing so rapidly without help. **AI has been very useful for testing and rapid prototyping here.**
+>
+> **3.** So what about paper? Yes, what about it? **The sole purpose of the paper is to provide explanation how the system works and that I have done basic homework and I'm not claiming I have invented already known things or methods**. I have tried to do it to the best of my abilities. I'm not career academician producing scientific papers for life and career advancement, neither am I software scientist meticulously researching and mapping down information science achievements.
+>
+> **I'm a software engineer trying to figure out what have I stumbled upon and to explain what I have noticed the best way I can.** Of course I have used AI to help me structure, shorten and clarify the document, **I wouldn't know how to do it properly without it.** The content is what matters and content is genuine. **So READ IT please before making any complaints about it.**
+>
+> **4.** And finally, what is this library here? **This is the result of my work on specific problem in audio domain. While I was trying to (unsuccessfully) resolve very specific computation problem I had created (designed?) data structure and a set of rules to calculate with it for which I hoped it will help me solve my problem.**
+>
+> **While working with it I have noticed some peculiar behaviors that led me to conclusion I don't need specific solution because I can do integrations, derivatives and limits directly with it (structure+rules). At the end it turned out I can do a lot more with it.** I don't claim I have invented some new mathematics here, but I have developed an implementation/interpretation of already known parts in a way I have not seen being done yet. If you have any examples I'll be eager to know about them, but believe me I've did my due diligence on it.
+>
+> **5.** And lastly, once I figured out I have a generic tool with potential usefulness for broader public I have created this repo to share it. **I don't know what this tool can do at the end. For now I know that I have managed to implement a wide array of math operations in it in very (unrealistically?) short time.** They seems to work in test and in controlled environments. I don't know of any other system where you can do so many different math operations inside singular platform/paradigm. I don't know what this means. **I know there are some similar systems but none can do all of this in one place.** That's why I'm using this annoyingly new notation, because everything seems work only with it.
+>
+> **6.** My goal now is to find practical applications and what are the limits of it. If you are interested, please join, fork and play with it. **The system is real, basic computations work, we just don't know yet for how many cases is this true and that is the goal of this journey here.** If you find this interesting clone it and try it. I'm eager to get your feedback.
+>
+> Thank you :)
+>
+> </details>
+
 # Composite Machine: Automatic Calculus via Dimensional Arithmetic
 
 ⚠️ **ALPHA VERSION** - Research code under active development. API may change. Performance optimization in progress.
