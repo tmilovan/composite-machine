@@ -83,29 +83,29 @@ The library is organized into four files, each extending the core system:
 ### Integration (`composite_lib.py` + extensions)
 - ✅ **Unified `integrate()` wrapper** — single entry point for 1D, 2D, 3D, line, and surface integrals
 - ✅ **Adaptive integration** with automatic error estimates — `integrate_adaptive()`
-- ✅ **Improper integrals** — handles `±∞` bounds and singularities
+- ✅ **Improper integrals (experimental)** — handles `±∞` bounds and singularities
 - ✅ **Antiderivative** via dimensional shift
-- ✅ **Double integrals** — `double_integral()` (in `composite_multivar.py`)
-- ✅ **Triple integrals** — `triple_integral()` (in `composite_vector.py`)
-- ✅ **Line integrals** — scalar and vector field: `line_integral_scalar()`, `line_integral_vector()`
-- ✅ **Surface integrals** — scalar and flux: `surface_integral_scalar()`, `surface_integral_vector()`
+- ✅ **Double integrals (experimental)** — `double_integral()` (in `composite_multivar.py`)
+- ✅ **Triple integrals (experimental)** — `triple_integral()` (in `composite_vector.py`)
+- ✅ **Line integrals (experimental)** — scalar and vector field: `line_integral_scalar()`, `line_integral_vector()`
+- ✅ **Surface integrals (experimental)** — scalar and flux: `surface_integral_scalar()`, `surface_integral_vector()`
 
 ### Multivariable Calculus (`composite_multivar.py`)
-- ✅ **MC class** — multi-composite with tuple dimensions, full arithmetic
-- ✅ **Partial derivatives** — `partial_derivative()`
-- ✅ **Differential operators** — `gradient_at()`, `hessian_at()`, `jacobian_at()`, `laplacian_at()`
-- ✅ **Vector operators** — `divergence_of()`, `curl_at()`, `directional_derivative()`
-- ✅ **Multivariate limits** — `multivar_limit()`
-- ✅ **Multivariate transcendentals** — `mc_sin`, `mc_cos`, `mc_exp`, `mc_ln`, `mc_sqrt`, `mc_tan`, `mc_power`
+- ✅ **MC class  (experimental)** — multi-composite with tuple dimensions, full arithmetic
+- ✅ **Partial derivatives  (experimental)** — `partial_derivative()`
+- ✅ **Differential operators  (experimental)** — `gradient_at()`, `hessian_at()`, `jacobian_at()`, `laplacian_at()`
+- ✅ **Vector operators (experimental)** — `divergence_of()`, `curl_at()`, `directional_derivative()`
+- ✅ **Multivariate limits (experimental)** — `multivar_limit()`
+- ✅ **Multivariate transcendentals (experimental)** — `mc_sin`, `mc_cos`, `mc_exp`, `mc_ln`, `mc_sqrt`, `mc_tan`, `mc_power`
 
 ### Complex Analysis (`composite_extended.py`)
-- ✅ **Complex composites** — `C()`, `C_var()`, `cexp()`, `csin()`, `ccos()`
-- ✅ **Residue computation** and **pole detection** — `residue()`, `pole_order()`
-- ✅ **Contour integrals** via residue theorem — `contour_integral()`
-- ✅ **Asymptotic expansion** — `asymptotic_expansion()`, `limit_at_infinity()`, `asymptotic_order()`
-- ✅ **Convergence radius** — generalized ratio test + root test
-- ✅ **ODE solver** — RK4 via composite evaluation
-- ✅ **Analytic continuation** and **singularity detection**
+- ✅ **Complex composites (experimental)** — `C()`, `C_var()`, `cexp()`, `csin()`, `ccos()`
+- ✅ **Residue computation (experimental)** and **pole detection** — `residue()`, `pole_order()`
+- ✅ **Contour integrals  (experimental)** via residue theorem — `contour_integral()`
+- ✅ **Asymptotic expansion (experimental)** — `asymptotic_expansion()`, `limit_at_infinity()`, `asymptotic_order()`
+- ✅ **Convergence radius (experimental)** — generalized ratio test + root test
+- ✅ **ODE solver  (experimental)** — RK4 via composite evaluation
+- ✅ **Analytic continuation  (experimental)** and **singularity detection**
 
 ---
 
