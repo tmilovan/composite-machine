@@ -16,14 +16,14 @@
 #
 # Commercial licensing available. Contact: tmilovan@fwd.hr
 """
-composite_extended.py -- Extended Capabilities (FIXED v4)
-=========================================================
+composite_extended.py -- Extended Capabilities (v5)
+====================================================
 Builds on composite_lib.py to add:
   1. Complex-valued composites (residues, poles)
   2. Asymptotic expansion extraction
   3. Convergence radius detection
   4. Composite ODE stepper
-  5. Improper integrals via RK4 integration
+  5. Improper integrals via integrate_adaptive
   6. Analytic continuation
 
 All capabilities reduce to the same mechanism:
@@ -36,13 +36,14 @@ FIXES applied:
   4. solve_ode() replaced with RK4 using Composite evaluation
   5. convergence_radius() combiner: monotonic detection + adaptive
      ratio-only for finite-radius series (fixes EX11 + EX12)
-  6. improper_integral() uses solve_ode (RK4) instead of
-     integrate_adaptive -- avoids ZERO overhead (fixes EX17/18 hang)
+  6. improper_integral() uses integrate_adaptive directly --
+     lift-at-the-gate handles structureless integrands (replaces
+     RK4 workaround from v3/v4)
   7. exp() monkey-patched: split exp(a+h) = math.exp(a) * Taylor(h)
-     Fixes catastrophic Taylor truncation for |x| > 6 (fixes EX17/18
-     accuracy -- 15-term Taylor gives exp(-10) = 466, not 4.5e-5)
+     Fixes catastrophic Taylor truncation for |x| > 6
 
 Author: Toni Milovan
+License: AGPL
 """
 
 import math
@@ -384,17 +385,6 @@ def ode_step(f, x0, y0, h, order=8):
 
 
 # FIX 4: RK4 with Composite evaluation (replaces broken forward Euler)
-def _eval_ode_composite(f, x_val, y_val):
-    """
-    Evaluate ODE right-hand side f(x, y) using Composite numbers.
-    Returns the standard part (float).
-    """
-    result = f(R(x_val), R(y_val))
-    if isinstance(result, Composite):
-        return result.st()
-    return float(result)
-
-
 def solve_ode(f, x_range, y0, steps=1000):
     """
     Solve y' = f(x, y) over x_range = (a, b) with y(a) = y0.
@@ -410,11 +400,17 @@ def solve_ode(f, x_range, y0, steps=1000):
     y = float(y0)
     points = [(x, y)]
 
+    def _eval(f, x_val, y_val):
+        result = f(R(x_val), R(y_val))
+        if isinstance(result, Composite):
+            return result.st()
+        return float(result)
+
     for _ in range(steps):
-        k1 = _eval_ode_composite(f, x, y)
-        k2 = _eval_ode_composite(f, x + h/2, y + h*k1/2)
-        k3 = _eval_ode_composite(f, x + h/2, y + h*k2/2)
-        k4 = _eval_ode_composite(f, x + h, y + h*k3)
+        k1 = _eval(f, x, y)
+        k2 = _eval(f, x + h/2, y + h*k1/2)
+        k3 = _eval(f, x + h/2, y + h*k2/2)
+        k4 = _eval(f, x + h, y + h*k3)
 
         y = y + (h / 6) * (k1 + 2*k2 + 2*k3 + k4)
         x = x + h
@@ -427,38 +423,38 @@ def solve_ode(f, x_range, y0, steps=1000):
 # 6. IMPROPER INTEGRALS
 # =============================================================================
 
-# FIX 6: Use solve_ode (RK4) instead of integrate_adaptive
-# FIX 7: exp monkey-patch makes this accurate for all arguments
+# FIX 6 (v5): Use integrate_adaptive directly (lift-at-the-gate handles
+# structureless integrands). Replaces solve_ode (RK4) workaround from v3/v4.
+# FIX 7: exp monkey-patch makes this accurate for all arguments.
 
 def improper_integral(f, a, tol=1e-8, cutoff=20):
     """
     Compute integral from a to inf of f(x) dx.
 
-    Strategy: integrate [a, cutoff] via RK4 (solve_ode).
-    Uses Composite evaluation through R() only (no ZERO), avoiding
-    the performance trap of integrate_adaptive.
+    Strategy: find a suitable upper bound M where f(x) is negligible,
+    then integrate [a, M] via integrate_adaptive.
+
+    The lift-at-the-gate mechanism in integrate_adaptive handles
+    integrands that don't propagate composite structure.
 
     Accuracy depends on FIX 7 (smart exp): without the math.exp
     splitting, Taylor-series exp gives garbage for |x| > ~6.
-
-    For well-behaved integrands (exponential decay, algebraic decay
-    faster than 1/x), the tail beyond cutoff is negligible.
     """
-    points = solve_ode(
-        lambda x, y: f(x),
-        (a, cutoff),
-        y0=0,
-        steps=2000
-    )
-    result = points[-1][1]
+    M = cutoff
+    while M < 1000:
+        fx = f(R(M) + ZERO)
+        if abs(fx.st()) < tol * 0.01:
+            break
+        M *= 2
 
-    # Estimate tail contribution for error bound
-    try:
-        tail_val = abs(f(R(float(cutoff))).st())
-    except:
-        tail_val = 0.0
+    bulk, bulk_err = integrate_adaptive(f, a, min(M, cutoff), tol=tol)
 
-    return result, tail_val
+    if M > cutoff:
+        tail, tail_err = integrate_adaptive(f, cutoff, M, tol=tol)
+        bulk = bulk + tail
+        bulk_err += tail_err
+
+    return bulk.st(), bulk_err
 
 
 def improper_integral_both(f, tol=1e-8):

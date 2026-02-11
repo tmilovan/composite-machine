@@ -702,6 +702,123 @@ def definite_integral(f: Callable, a: float, b: float, terms: int = 12) -> float
 #         Returns (Composite, float) — integral as Composite, error as float.
 # =============================================================================
 
+
+def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
+    """
+    One integral to rule them all.
+
+    1D definite/improper: composite-powered via integrate_adaptive
+    2D/3D box, line, surface: midpoint Riemann sums (simple, robust)
+    """
+
+    def _st(v):
+        return v.st() if isinstance(v, Composite) else float(v)
+
+    # --- LINE INTEGRAL ---
+    if curve is not None:
+        t_range = args[0] if args else (0, 1)
+        a_t, b_t = t_range
+        is_vector = isinstance(f, list)
+        N = 2000
+        dt = (b_t - a_t) / N
+        total = 0.0
+        eps = 1e-7
+        for i in range(N):
+            t = a_t + (i + 0.5) * dt
+            pos = curve(t)
+            coords = [float(p) for p in pos]
+            pos_p = curve(t + eps)
+            pos_m = curve(t - eps)
+            tangent = [(float(pos_p[j]) - float(pos_m[j])) / (2*eps)
+                       for j in range(len(coords))]
+            if is_vector:
+                F_vals = [_st(comp(*coords)) for comp in f]
+                total += sum(fv*tv for fv, tv in zip(F_vals, tangent)) * dt
+            else:
+                speed = math.sqrt(sum(tv**2 for tv in tangent))
+                total += _st(f(*coords)) * speed * dt
+        return total
+
+    # --- SURFACE INTEGRAL ---
+    if surface is not None:
+        uv = args[0] if args else ((0, 1), (0, 1))
+        (a_u, b_u), (a_v, b_v) = uv
+        is_vector = isinstance(f, list)
+        Nu, Nv = 300, 300
+        du = (b_u - a_u) / Nu
+        dv = (b_v - a_v) / Nv
+        total = 0.0
+        eps = 1e-7
+        for i in range(Nu):
+            u = a_u + (i + 0.5) * du
+            for j in range(Nv):
+                v = a_v + (j + 0.5) * dv
+                p0 = [float(x) for x in surface(u, v)]
+                pu = [float(x) for x in surface(u + eps, v)]
+                pv = [float(x) for x in surface(u, v + eps)]
+                du_vec = [(pu[k] - p0[k]) / eps for k in range(3)]
+                dv_vec = [(pv[k] - p0[k]) / eps for k in range(3)]
+                nx = du_vec[1]*dv_vec[2] - du_vec[2]*dv_vec[1]
+                ny = du_vec[2]*dv_vec[0] - du_vec[0]*dv_vec[2]
+                nz = du_vec[0]*dv_vec[1] - du_vec[1]*dv_vec[0]
+                if is_vector:
+                    F_vals = [_st(comp(*p0)) for comp in f]
+                    total += (F_vals[0]*nx + F_vals[1]*ny + F_vals[2]*nz) * du * dv
+                else:
+                    dS = math.sqrt(nx**2 + ny**2 + nz**2)
+                    total += _st(f(*p0)) * dS * du * dv
+        return total
+
+    # --- 1D DEFINITE / IMPROPER (composite-powered) ---
+    if len(args) == 2 and isinstance(args[0], (int, float)):
+        a_val, b_val = args
+        a_inf = math.isinf(a_val) and a_val < 0
+        b_inf = math.isinf(b_val) and b_val > 0
+        if a_inf and b_inf:
+            val, _ = improper_integral_both(f, tol=tol)
+            return val.st()
+        if b_inf:
+            val, _ = improper_integral(f, a_val, tol=tol)
+            return val.st()
+        if a_inf:
+            val, _ = improper_integral(lambda x: f(-x), -b_val, tol=tol)
+            return val.st()
+        result, _ = integrate_adaptive(f, a_val, b_val, tol=tol, terms=terms)
+        return result.st()
+
+    # --- 2D BOX (midpoint Riemann sum) ---
+    if len(args) == 2 and isinstance(args[0], tuple):
+        (a_x, b_x), (a_y, b_y) = args
+        N = 200
+        dx = (b_x - a_x) / N
+        dy = (b_y - a_y) / N
+        total = 0.0
+        for i in range(N):
+            x = a_x + (i + 0.5) * dx
+            for j in range(N):
+                y = a_y + (j + 0.5) * dy
+                total += _st(f(x, y)) * dx * dy
+        return total
+
+    # --- 3D BOX (midpoint Riemann sum) ---
+    if len(args) == 3 and isinstance(args[0], tuple):
+        (a_x, b_x), (a_y, b_y), (a_z, b_z) = args
+        N = 50
+        dx = (b_x - a_x) / N
+        dy = (b_y - a_y) / N
+        dz = (b_z - a_z) / N
+        total = 0.0
+        for i in range(N):
+            x = a_x + (i + 0.5) * dx
+            for j in range(N):
+                y = a_y + (j + 0.5) * dy
+                for k in range(N):
+                    z = a_z + (k + 0.5) * dz
+                    total += _st(f(x, y, z)) * dx * dy * dz
+        return total
+
+    raise ValueError(f"Could not determine integral type from arguments: {args}")
+
 def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms: int = 15):
     """Multi-point stepped integration with error estimate.
     Returns (Composite, float) — integral result as Composite, error as float."""
@@ -727,20 +844,47 @@ def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms:
         x0 += dx
     return total, total_error
 
+
 def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, terms: int = 15):
-    """Adaptive stepped integration with error estimate.
-    Returns (Composite, float) — integral result as Composite, error as float."""
+    """Adaptive stepped integration via composite dimensional shift.
+
+    If the integrand doesn't propagate composite structure, lifts it
+    once at the gate by wrapping it with numerical derivatives.
+    Every number is a composite — this function ensures it.
+
+    Returns (Composite, float) — integral result as Composite, error as float.
+    """
+    # --- LIFT AT THE GATE ---
+    probe = f(R((a + b) / 2) + ZERO)
+    if not any(dim < 0 for dim in probe.c):
+        f_original = f
+        eps = 1e-7
+        def f(x):
+            a_val = x.st()
+            val = f_original(R(a_val) + ZERO).st()
+            val_plus = f_original(R(a_val + eps) + ZERO).st()
+            val_minus = f_original(R(a_val - eps) + ZERO).st()
+            d1 = (val_plus - val_minus) / (2 * eps)
+            d2 = (val_plus - 2 * val + val_minus) / (eps ** 2)
+            return Composite({0: val, -1: d1, -2: d2 / 2})
+
+    # --- INTEGRATION LOOP ---
     total = Composite({})
     total_error = 0.0
     x0 = a
+
     while x0 < b:
         fx = f(R(x0) + ZERO)
+
+        # Step size: dim < -1 coefficients control truncation beyond captured Taylor
         max_coeff = max(
-            (abs(coeff) for dim, coeff in fx.c.items() if dim < -1),
+            (abs(c) for d, c in fx.c.items() if d < -1),
             default=1e-10
         )
         dx = min((tol / max(max_coeff, 1e-15)) ** 0.1, b - x0)
-        dx = max(dx, 1e-6)
+        dx = max(dx, (b - a) * 1e-8)
+
+        # Integrate via dimensional shift
         Fx = antiderivative(fx)
         neg_terms = {d: c for d, c in Fx.c.items() if d < 0}
         contribution = sum(
@@ -752,9 +896,11 @@ def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, term
             step_error = abs(neg_terms[min_dim] * dx ** abs(min_dim))
         else:
             step_error = 0.0
+
         total = total + Composite({0: contribution})
         total_error += step_error
         x0 += dx
+
     return total, total_error
 
 
