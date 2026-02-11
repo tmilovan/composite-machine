@@ -230,6 +230,8 @@ python tests/test_filename.py
 
 📄 **Preprint (coming soon):** "Provenance-Preserving Arithmetic: A Unified Framework for Automatic Calculus"
 
+[Milovan, T. (2026). Provenance-Preserving Arithmetic. Zenodo.](https://doi.org/10.5281/zenodo.18528788)
+
 **Core insight:** Reinterpret Laurent polynomials where z⁻¹ represents "zero with provenance" — an infinitesimal that remembers its origin. This single reinterpretation makes calculus algebraic.
 
 **Key results:**

@@ -22,6 +22,8 @@ This directory contains comprehensive documentation for the Composite Calculus l
 
 [Exploration & research (Turing completeness playground)](docs/Turing_Completeness_Playground-Curiosity)
 
+[Theory & Papars)](/papers)
+
 ---
 
 ## Quick Links
@@ -41,5 +43,22 @@ Check the **API Reference** for complete function documentation.
 ### For Learning by Example
 
 Browse the **Examples** directory for practical code snippets.
+
+### Theory & Papers
+
+📄 **Preprint (coming soon):** "Provenance-Preserving Arithmetic: A Unified Framework for Automatic Calculus"
+
+[Milovan, T. (2026). Provenance-Preserving Arithmetic. Zenodo.](https://doi.org/10.5281/zenodo.18528788)
+
+**Core insight:** Reinterpret Laurent polynomials where z⁻¹ represents "zero with provenance" — an infinitesimal that remembers its origin. This single reinterpretation makes calculus algebraic.
+
+**Key results:**
+
+- **Theorem 1:** Information preservation under ×0
+- **Theorem 2:** Zero-infinity duality (∞ × 0 = 1)
+- **Theorem 3:** Reversible zero operations
+- **Theorem 4:** Derivatives emerge from convolution (no separate rules needed)
+
+*Formal proofs available in `papers/` directory.*
 
 © Toni Milovan. Documentation licensed under CC BY-SA 4.0. Code licensed under AGPL-3.0.
