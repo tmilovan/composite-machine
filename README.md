@@ -39,39 +39,101 @@ print(result.d(10)) # ← 10th derivative!
 
 ---
 
+## Library Modules
+
+The library is organized into four files, each extending the core system:
+
+| Module | Purpose | Key features |
+|--------|---------|-------------|
+| `composite_lib.py` | Core engine | Composite class, all arithmetic, transcendentals, derivatives, limits, integration, antiderivative |
+| `composite_multivar.py` | Multivariable calculus | MC class (tuple dimensions), partial derivatives, gradient, Hessian, Jacobian, Laplacian, divergence, curl, double integrals |
+| `composite_extended.py` | Complex analysis | Complex composites, residues, poles, contour integrals, asymptotics, convergence radius, ODE solver, analytic continuation |
+| `composite_vector.py` | Vector calculus | Triple integrals, line integrals (scalar and vector), surface integrals (scalar and flux) |
+
+---
+
 ## What Works Now ✅
 
-- ✅ **All-order derivatives** from single evaluation (not just 1st or fixed order)
-- ✅ **Division by zero is defined** - reversible operations (5×0)/0 = 5
-- ✅ **Algebraic limits** - no L'Hôpital's rule, just substitute & read
-- ✅ **Adaptive integration** with automatic error estimates (free!)
-- ✅ **Improper integrals** - handles ∞ bounds and singularities
-- ✅ **Full transcendental library** - sin, cos, exp, ln, inverse trig, hyperbolic
-- ✅ **FFT-accelerated multiplication** via `CompositeFFT` (NumPy backend)
-- ✅ **175 passing tests** validating all claims
+### Core Arithmetic (`composite_lib.py`)
+- ✅ **Full arithmetic** — +, −, ×, ÷ with dimensional convolution/deconvolution
+- ✅ **Integer and real-exponent powers** — `x**n` and `power(x, r)`
+- ✅ **Division by zero is defined** — reversible operations: `(5×0)/0 = 5`
+- ✅ **0/0 = 1** — well-defined via dimensional cancellation
+- ✅ **∞ × 0 = 1** — zero-infinity duality
+- ✅ **Comparison operators** with NaN handling and total ordering across dimensions
+- ✅ **TracedComposite** for step-by-step operation tracing
+
+### Transcendental Functions (`composite_lib.py`)
+- ✅ **Trigonometric** — `sin`, `cos`, `tan`
+- ✅ **Inverse trigonometric** — `atan`, `asin`, `acos`
+- ✅ **Hyperbolic** — `sinh`, `cosh`, `tanh`
+- ✅ **Exponential and logarithmic** — `exp`, `ln`
+- ✅ **Other** — `sqrt`, `power` (real exponents)
+
+### Derivatives (`composite_lib.py`)
+- ✅ **All-order derivatives** from single evaluation — `d(n)`, `derivative()`, `nth_derivative()`
+- ✅ **All derivatives at once** — `all_derivatives()`, `taylor_coefficients()`
+- ✅ **Derivative verification** — `verify_derivative()`
+
+### Limits (`composite_lib.py`)
+- ✅ **Algebraic limits** — no L'Hôpital needed, just substitute and read
+- ✅ **One-sided limits** — `limit_left()`, `limit_right()`
+- ✅ **Limits at infinity**
+
+### Integration (`composite_lib.py` + extensions)
+- ✅ **Unified `integrate()` wrapper** — single entry point for 1D, 2D, 3D, line, and surface integrals
+- ✅ **Adaptive integration** with automatic error estimates — `integrate_adaptive()`
+- ✅ **Improper integrals** — handles `±∞` bounds and singularities
+- ✅ **Antiderivative** via dimensional shift
+- ✅ **Double integrals** — `double_integral()` (in `composite_multivar.py`)
+- ✅ **Triple integrals** — `triple_integral()` (in `composite_vector.py`)
+- ✅ **Line integrals** — scalar and vector field: `line_integral_scalar()`, `line_integral_vector()`
+- ✅ **Surface integrals** — scalar and flux: `surface_integral_scalar()`, `surface_integral_vector()`
+
+### Multivariable Calculus (`composite_multivar.py`)
+- ✅ **MC class** — multi-composite with tuple dimensions, full arithmetic
+- ✅ **Partial derivatives** — `partial_derivative()`
+- ✅ **Differential operators** — `gradient_at()`, `hessian_at()`, `jacobian_at()`, `laplacian_at()`
+- ✅ **Vector operators** — `divergence_of()`, `curl_at()`, `directional_derivative()`
+- ✅ **Multivariate limits** — `multivar_limit()`
+- ✅ **Multivariate transcendentals** — `mc_sin`, `mc_cos`, `mc_exp`, `mc_ln`, `mc_sqrt`, `mc_tan`, `mc_power`
+
+### Complex Analysis (`composite_extended.py`)
+- ✅ **Complex composites** — `C()`, `C_var()`, `cexp()`, `csin()`, `ccos()`
+- ✅ **Residue computation** and **pole detection** — `residue()`, `pole_order()`
+- ✅ **Contour integrals** via residue theorem — `contour_integral()`
+- ✅ **Asymptotic expansion** — `asymptotic_expansion()`, `limit_at_infinity()`, `asymptotic_order()`
+- ✅ **Convergence radius** — generalized ratio test + root test
+- ✅ **ODE solver** — RK4 via composite evaluation
+- ✅ **Analytic continuation** and **singularity detection**
 
 ---
 
 ## What Doesn't Work Yet ❌
 
-- ❌ **Performance**: ~500-1000× slower than PyTorch (dict-based implementation; FFT version is faster but not yet fully optimized)
-- ❌ **API stability**: May change before v1.0
-- ❌ **Production ready**: This is research code, use at own risk
+- ❌ **Inverse hyperbolics** — `asinh`, `acosh`, `atanh` not yet implemented
+- ❌ **Stokes'/Divergence/Green's theorem wrappers** — differential operators exist (`curl_at`, `divergence_of`) but no theorem-level verification functions
+- ❌ **Fourier/Laplace/Z transforms**
+- ❌ **Optimization routines** — gradient descent, Newton's method using composite derivatives
+- ❌ **Piecewise function support** — explored separately but not in the library
+- ❌ **Special functions** — Bessel, gamma, etc.
+- ❌ **Performance** — ~500-1000× slower than PyTorch (dict-based implementation)
+- ❌ **API stability** — may change before v1.0
 
-**But:** The math works. The tests pass. Optimization is in progress (vectorization, GPU, JIT).
+**But:** The math works. All 168 tests pass at 100%. Optimization is in progress.
 
 ---
 
 ## Installation
 
-```bash
+~~~bash
 # From source (only option for now)
 git clone https://github.com/tmilovan/composite-machine.git
 cd composite-machine
 pip install -e .
-```
+~~~
 
-**Requirements:** Python 3.7+, NumPy (that's it!)
+**Requirements:** Python 3.7+, NumPy (optional, for FFT-accelerated multiplication)
 
 ---
 
@@ -79,8 +141,8 @@ pip install -e .
 
 ### Derivatives (The Headline Feature)
 
-```python
-from composite.composite_lib import derivative, nth_derivative, all_derivatives
+~~~python
+from composite_lib import derivative, nth_derivative, all_derivatives, exp
 
 # Simple API
 derivative(lambda x: x**2, at=3)  # → 6
@@ -91,70 +153,113 @@ nth_derivative(lambda x: x**5, n=3, at=2)  # → 120
 # All at once
 all_derivatives(lambda x: exp(x), at=0, up_to=5)
 # → [1, 1, 1, 1, 1, 1]  (all derivatives of e^x)
-```
+~~~
 
 ### Limits (No L'Hôpital Needed)
 
-```python
-from composite.composite_lib import limit
+~~~python
+from composite_lib import limit, sin, R
 
 limit(lambda x: sin(x)/x, as_x_to=0)  # → 1.0
-limit(lambda x: (x**2 - 4)/(x - 2), as_x_to=2)  # → 4.0
-limit(lambda x: (3*x + 1)/(x + 2), as_x_to=float('inf'))  # → 3.0
-```
+limit(lambda x: (x**2 - R(4))/(x - R(2)), as_x_to=2)  # → 4.0
+limit(lambda x: (R(5)*x**2+R(3)*x)/(R(2)*x**2+R(1)),
+      as_x_to=float('inf'))  # → 2.5
+~~~
 
-### Integration (With Error Estimates)
+### Integration (Unified API)
 
-```python
-from composite.composite_lib import integrate_adaptive
+~~~python
+from composite_lib import integrate, exp, sin
+import math
 
-val, err = integrate_adaptive(lambda x: exp(-(x*x)), 1, 2)
-# val ≈ 0.1353, err ≈ 1e-15 (error estimate is FREE!)
-```
+# 1D definite integral
+integrate(lambda x: x**2, 0, 1)  # → 0.333...
+
+# 1D with error estimate
+integrate(lambda x: exp(-(x*x)), 1, 2)  # → 0.1353 (error estimate is FREE)
+
+# Improper integral (∞ bounds)
+integrate(lambda x: exp(-x), 0, float('inf'))  # → 1.0
+
+# 2D integral
+integrate(lambda x, y: x*y, 0, 1, 0, 1)  # → 0.25
+
+# Line integral along a curve
+integrate(lambda x, y: x + y, curve=lambda t: [t, t], t_range=(0, 1))
+
+# Surface integral
+integrate(f, surface=parametrization, u_range=(0, math.pi), v_range=(0, 2*math.pi))
+~~~
 
 ### Division by Zero (Yes, Really)
 
-```python
+~~~python
 from composite_lib import ZERO, R
 
 ZERO / ZERO  # → 1 (well-defined!)
 (R(5) * ZERO) / ZERO  # → 5 (reversible!)
-```
+(R(7) * ZERO * ZERO) / ZERO / ZERO  # → 7 (multi-depth recovery!)
+~~~
+
+### Multivariable Calculus
+
+~~~python
+from composite_multivar import MC, RR, RR_const, gradient_at, laplacian_at
+
+# Gradient of f(x,y) = x² + y² at (3, 4)
+gradient_at(lambda x, y: x**2 + y**2, [3, 4])  # → [6, 8]
+
+# Laplacian of f(x,y) = x² + y²
+laplacian_at(lambda x, y: x**2 + y**2, [3, 4])  # → 4
+~~~
+
+### Complex Analysis
+
+~~~python
+from composite_extended import residue, contour_integral, convergence_radius
+
+# Residue of 1/z at z=0
+residue(lambda z: 1/z, at=0)  # → 1.0
+
+# Convergence radius of a series
+convergence_radius(lambda z: 1/(1 - z), at=0)  # → 1.0
+~~~
 
 ---
 
 ## How Is This Different?
 
 | Feature | PyTorch/JAX | SymPy | Dual Numbers | **Composite** |
-| --- | --- | --- | --- | --- |
+|---------|-------------|-------|--------------|---------------|
 | All-order derivatives | ❌ | ✅ | ❌ (1st only) | ✅ |
 | One evaluation | ✅ | ❌ | ✅ | ✅ |
 | Division by zero | ❌ | ❌ | ❌ | ✅ |
 | Algebraic limits | ❌ | ✅ | ❌ | ✅ |
 | Integration + AD | ❌ | ✅ | ❌ | ✅ |
+| Multivariable calculus | ✅ (grad only) | ✅ | ❌ | ✅ |
+| Complex analysis | ❌ | ✅ | ❌ | ✅ |
+| Vector calculus | ❌ | partial | ❌ | ✅ |
 | Fast | ✅ | ❌ | ✅ | ❌ (yet) |
 
-**Unique combo:** All derivatives + integration + zero handling in ONE algebraic structure.
+**Unique combo:** All derivatives + integration + limits + zero handling + complex analysis + vector calculus in ONE algebraic structure.
 
 ---
 
 ## The Core Idea (For the Curious)
 
 ### Traditional calculus = Algorithms
-
 - Derivative → Build computation graph, apply chain rule
 - Integral → Pattern matching, special cases
 - Limit → L'Hôpital's rule, case analysis
 
 ### Composite arithmetic = Algebra
-
-- Derivative → Read coefficient at dimension -n
+- Derivative → Read coefficient at dimension −n
 - Integral → Dimensional shift + adaptive stepping
 - Limit → Substitute infinitesimal, take standard part
 
 **Example:**
 
-```python
+~~~python
 x = R(2) + ZERO  # 2 + infinitesimal h
 result = x**4    # (2+h)⁴ expanded via polynomial arithmetic
 
@@ -166,35 +271,69 @@ result.st()   # 16   ← Function value
 result.d(1)   # 32   ← First derivative (32 × 1!)
 result.d(2)   # 48   ← Second derivative (24 × 2!)
 result.d(3)   # 48   ← Third derivative (8 × 3!)
-```
+~~~
 
 **All derivatives emerge from polynomial convolution.** No separate algorithm needed!
+
+---
+
+## Testing
+
+~~~bash
+# Run all tests
+python test_composite.py                # ~105 tests — core + calculus + algebra
+python composite_stress_test.py         # 20 hard problems (limits, derivatives, integrals)
+python composite_hard_edges.py          # 20 hard edge cases (3rd/4th order, deep chains)
+python any_test_file.py                 # evergrowing test suite
+~~~
+
+**All 168 tests pass at 100%.**
+
+### Test Coverage
+
+| **Category** | **Tests** | **What's validated** |
+|---|---|---|
+| Paper Theorems (T1-T8) | ~45 | Information preservation, zero-infinity duality, provenance, reversibility, cancellation, identity, fractional orders, total ordering |
+| Algebraic Properties | ~8 | Associativity, commutativity, distributivity, negation |
+| Derivatives | ~21 | Polynomials, transcendentals, chain rule, Leibniz rule, 2nd-6th order, compositions |
+| Limits | ~20 | sin(x)/x, indeterminate forms, 3rd/4th order cancellations, nested compositions, limits at ∞ |
+| Integration | ~17 | Definite, improper, products, trig powers, Gaussian, adaptive error estimates |
+| Zero/Infinity | ~10 | 0/0 provenance, reversibility chains, deep dimension recovery |
+| Transcendentals | ~6 | sin, cos, exp identities and derivatives |
+| Multi-term Division | ~7 | Polynomial long division, rational functions |
+| Multivariate | ~5 | Partial derivatives, gradient, Laplacian, harmonic functions |
+| Edge Cases & Stress | ~16 | Deep chains, tiny/huge coefficients, FFT vs Dict cross-check, boundary conditions |
+| Standard Python Validation | ~23 | Cross-check against numerical differentiation, numerical limits, math.* functions |
 
 ---
 
 ## Project Status & Roadmap
 
 ### Current State (v0.1-alpha)
-
-- ✅ Core calculus working
-- ✅ Comprehensive test suite (175 tests)
-- ✅ Documentation & examples
+- ✅ Core single-variable calculus (derivatives, limits, integration)
+- ✅ Full transcendental library (trig, inverse trig, hyperbolic, exp, ln)
+- ✅ Multivariable calculus (gradient, Hessian, Jacobian, Laplacian, curl, divergence)
+- ✅ Vector calculus (line integrals, surface integrals, triple integrals)
+- ✅ Complex analysis (residues, poles, contour integrals, asymptotics, convergence)
+- ✅ Unified `integrate()` API across all integral types
+- ✅ 168 tests passing at 100%
 - ⚠️ Performance is SLOW (research code)
 - ⚠️ API may change
 
 ### Next Steps (v0.2)
-
+- 🚧 Inverse hyperbolics (asinh, acosh, atanh)
 - 🚧 Vectorization with NumPy (target: 10× speedup)
 - 🚧 JIT compilation with Numba (target: 50× speedup)
-- 🚧 More examples and tutorials
+- 🚧 Theorem-level verification (Stokes', Divergence, Green's)
+- 🚧 Optimization routines (gradient descent, Newton's method)
 - 🚧 API stabilization
-- 🚧 Practical application demos
 
 ### Future (v1.0)
-
 - 🔮 GPU support (CuPy/JAX backend)
+- 🔮 Fourier/Laplace transforms
+- 🔮 Special functions (Bessel, gamma)
 - 🔮 Production-ready performance
-- 🔮 Framework integrations
+- 🔮 PyPI package
 
 ---
 
