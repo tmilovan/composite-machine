@@ -40,23 +40,6 @@ This is a working implementation of **composite arithmetic** — a number system
 
 ---
 
-# Composite Machine: Automatic Calculus via Dimensional Arithmetic
-
-⚠️ **ALPHA VERSION** - Research code under active development. API may change. Performance optimization in progress.
-
-[![Tests](https://img.shields.io/badge/tests-175%20passing-brightgreen)]()
-
-[![Python](https://img.shields.io/badge/python-3.7%2B-blue)]()
-
-[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)]()
-
-> **What if all derivatives, integrals, and limits were just algebraic operations on a single number?**
->
-
-This is a working implementation of **composite arithmetic** — a number system where calculus operations reduce to coefficient manipulation. No symbolic engines, no computation graphs, just algebra.
-
----
-
 ## The Idea in 30 Seconds
 
 ```python
