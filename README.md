@@ -36,8 +36,16 @@
 
 > **What if all derivatives, integrals, and limits were just algebraic operations on a single number?**
 
-This is a working implementation of **composite arithmetic** — a number system where calculus operations reduce to coefficient manipulation. No symbolic engines, no computation graphs, just algebra.
+This is working implementation of **composite arithmetic** — a "number system" (actually just a data structure with arithmetic rules) where calculus operations reduce to coefficient manipulation. No symbolic engines, no computation graphs, just algebra. The surprising result is that those arithmetic rules happen to produce exact calculus results as a side effect of their algebra.
 
+**And no:), this is not some kind of attempt to redefine math:) or calculus. This is just an attept to try to make computation for some operations simpler or in some cases just easier for people to work with them.**
+
+What this gives us is unified, simple and easy to understand notation (interface?) for expressing various math
+functions and formulas in simple surprisingly elegant way, so users (programmers, analysts, engineers, teachers...) can work with them with much less friction than when working with comparable systems.
+
+I'm not aware there is anything like it that exists in similar form. The system seems elegant and like it is naturally emerging from the combination of those data structures and a specific set of rules applied on it. What I'm now trying to determine is if this can work reliably, which math operations are completely "safe" to be used in this way and which are unsafe because they are producing unanticipated consequences.
+
+And since I'm not a mathematician, please be tolerpatient with of me:)).
 ---
 
 ## The Idea in 30 Seconds
