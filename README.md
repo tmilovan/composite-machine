@@ -45,7 +45,8 @@ functions and formulas in simple surprisingly elegant way, so users (programmers
 
 I'm not aware there is anything like it that exists in similar form. The system seems elegant and like it is naturally emerging from the combination of those data structures and a specific set of rules applied on it. What I'm now trying to determine is if this can work reliably, which math operations are completely "safe" to be used in this way and which are unsafe because they are producing unanticipated consequences.
 
-And since I'm not a mathematician, please be tolerpatient with of me:)).
+And since I'm not a mathematician, please be patient with me:)).
+
 ---
 
 ## The Idea in 30 Seconds
