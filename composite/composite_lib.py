@@ -247,6 +247,100 @@ class Composite:
         """
         return self.c.get(-n, 0.0) * math.factorial(n)
 
+    # =========================================================================
+    # SERIALIZATION
+    # =========================================================================
+
+    def to_dict(self):
+        """
+        Serialize to JSON-safe dict.
+
+        Returns dict with string keys (JSON requires strings)
+        and float values. Round-trips perfectly via from_dict().
+
+        Example:
+            c = R(9) + 6 * ZERO
+            c.to_dict()  # → {'0': 9.0, '-1': 6.0}
+        """
+        return {str(k): v for k, v in self.c.items()}
+
+    @classmethod
+    def from_dict(cls, d):
+        """
+        Deserialize from dict. Accepts string or int keys.
+
+        Example:
+            Composite.from_dict({'0': 9.0, '-1': 6.0})
+            # → |9|₀ + |6|₋₁
+        """
+        return cls({int(k): v for k, v in d.items()})
+
+    def to_bytes(self):
+        """
+        Serialize to compact binary format.
+
+        Layout: sequence of (int32 dimension, float64 coefficient) pairs.
+        12 bytes per active dimension. No header — length is implicit.
+
+        Example:
+            data = result.to_bytes()   # 24 bytes for 2-term composite
+            restored = Composite.from_bytes(data)
+        """
+        import struct
+        parts = []
+        for dim, coeff in self.c.items():
+            parts.append(struct.pack('<id', dim, coeff))
+        return b''.join(parts)
+
+    @classmethod
+    def from_bytes(cls, data):
+        """Deserialize from binary. Inverse of to_bytes()."""
+        import struct
+        c = {}
+        for i in range(0, len(data), 12):
+            dim, coeff = struct.unpack('<id', data[i:i+12])
+            c[dim] = coeff
+        return cls(c)
+
+    def to_array(self, dims):
+        """
+        Extract coefficients at fixed dimensions as a flat list.
+
+        Useful for columnar storage (NumPy, Parquet, CSV).
+        Missing dimensions return 0.0.
+
+        Args:
+            dims: tuple/list of integer dimensions to extract.
+
+        Example:
+            c = R(9) + 6 * ZERO
+            c.to_array((0, -1, -2))  # → [9.0, 6.0, 0.0]
+        """
+        return [self.c.get(d, 0.0) for d in dims]
+
+    @classmethod
+    def from_array(cls, values, dims):
+        """
+        Reconstruct from flat list + dimension map.
+        Inverse of to_array().
+
+        Example:
+            Composite.from_array([9.0, 6.0, 0.0], (0, -1, -2))
+            # → |9|₀ + |6|₋₁
+        """
+        return cls({d: v for d, v in zip(dims, values) if v != 0})
+
+    def to_json(self):
+        """Serialize to JSON string."""
+        import json
+        return json.dumps(self.to_dict())
+
+    @classmethod
+    def from_json(cls, s):
+        """Deserialize from JSON string."""
+        import json
+        return cls.from_dict(json.loads(s))
+
     # -------------------------------------------------------------------------
     # Simplified integration operators (dimensional shifts)
     # -------------------------------------------------------------------------
