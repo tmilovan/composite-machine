@@ -38,7 +38,7 @@
 
 This is working implementation of **composite arithmetic** — a "number system" (actually just a data structure with arithmetic rules) where calculus operations reduce to coefficient manipulation. No symbolic engines, no computation graphs, just algebra. The surprising result is that those arithmetic rules happen to produce exact calculus results as a side effect of their algebra.
 
-**And no:), this is not some kind of attempt to redefine math:) or calculus. This is just an attept to try to make computation for some operations simpler or in some cases just easier for people to work with them.**
+**And no:), this is not some kind of attempt to redefine math:) or calculus. This is just an attempt to try to make computation for some operations simpler or in some cases just easier for people to work with them.**
 
 What this gives us is unified, simple and easy to understand notation (interface?) for expressing various math
 functions and formulas in simple surprisingly elegant way, so users (programmers, analysts, engineers, teachers...) can work with them with much less friction than when working with comparable systems.
