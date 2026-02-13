@@ -348,7 +348,7 @@ def is_within_convergence(f, at, eval_point):
 # 5. COMPOSITE ODE STEPPER
 # =============================================================================
 
-def ode_step(f, x0, y0, h, order=8):
+def ode_step(f, x0, y0, h, order=8, composite=False):
     """
     One step of ODE y' = f(x, y) from (x0, y0) with step size h.
     Uses composite evaluation to get derivatives at once.
@@ -380,43 +380,43 @@ def ode_step(f, x0, y0, h, order=8):
         err = abs(y_derivs[-1] * h**len(y_derivs) / math.factorial(len(y_derivs)))
     else:
         err = 0.0
-
+    if composite:
+        return y_new, err
     return y_new, err
 
 
 # FIX 4: RK4 with Composite evaluation (replaces broken forward Euler)
-def solve_ode(f, x_range, y0, steps=1000):
+def solve_ode(f, x_range, y0, steps=1000, composite=False):
     """
     Solve y' = f(x, y) over x_range = (a, b) with y(a) = y0.
 
-    Uses classical RK4 with Composite evaluation at each stage.
-    Every f evaluation goes through composite arithmetic via R().
+    Args:
+        composite:  If True, return full Composite y at each point
+                    (with sensitivities in y.d(1), y.d(2), etc.)
+                    If False (default), return float y.st() — same
+                    behavior as the current solver.
 
     Returns list of (x, y) pairs.
     """
     a, b = x_range
     h = (b - a) / steps
     x = a
-    y = float(y0)
+    y = R(float(y0)) + ZERO
     points = [(x, y)]
 
-    def _eval(f, x_val, y_val):
-        result = f(R(x_val), R(y_val))
-        if isinstance(result, Composite):
-            return result.st()
-        return float(result)
-
     for _ in range(steps):
-        k1 = _eval(f, x, y)
-        k2 = _eval(f, x + h/2, y + h*k1/2)
-        k3 = _eval(f, x + h/2, y + h*k2/2)
-        k4 = _eval(f, x + h, y + h*k3)
+        k1 = f(R(x),           y)
+        k2 = f(R(x + h/2),     y + (h/2) * k1)
+        k3 = f(R(x + h/2),     y + (h/2) * k2)
+        k4 = f(R(x + h),       y + h * k3)
 
         y = y + (h / 6) * (k1 + 2*k2 + 2*k3 + k4)
         x = x + h
         points.append((x, y))
 
-    return points
+    if composite:
+        return points
+    return [(x, y.st()) for x, y in points]
 
 
 # =============================================================================
