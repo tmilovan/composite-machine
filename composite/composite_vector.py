@@ -16,7 +16,7 @@
 #
 # Commercial licensing available. Contact: tmilovan@fwd.hr
 """
-composite_vector.py — Vector Calculus Extensions (FIXED v2)
+composite_vector.py — Vector Calculus Extensions (FIXED v3)
 ===========================================================
 Extends composite_multivar.py with complete vector calculus operations:
   - Triple integrals over 3D regions
@@ -28,7 +28,13 @@ Integration strategy:
     (real MC infinitesimal seeds → dimensional-shift antiderivative)
   - Line integrals: midpoint quadrature with composite curve derivatives
     (exact via .d(1) when curves return Composites, numerical fallback)
-  - Surface integrals: midpoint quadrature for both u and v axes
+  - Surface integrals: midpoint quadrature with composite surface partials
+    (exact via .partial() when surfaces return MCs, numerical fallback)
+
+v3 change: Surface normals now use composite-first evaluation via MC
+    with RR(u, var=0, nvars=2) and RR(v, var=1, nvars=2). Exact partial
+    derivatives r_u and r_v are read from .partial(1,0) and .partial(0,1).
+    Falls back to numerical differentiation for math.* surfaces.
 
 Why not integrate_adaptive everywhere?
   integrate_adaptive determines step size from dim < -1 coefficients.
@@ -40,6 +46,9 @@ Why not integrate_adaptive everywhere?
 
 Parametric curves accept both composite-compatible functions
 (sin, cos from composite_lib) and standard math.* functions.
+
+Parametric surfaces accept both composite-compatible functions
+(mc_sin, mc_cos from composite_multivar) and standard math.* functions.
 
 Requires: composite_lib.py, composite_multivar.py, composite_extended.py
 
@@ -72,6 +81,10 @@ def _to_float(val):
         return float(val.st())
     return float(val)
 
+
+# -----------------------------------------------------------------------------
+# Composite-first curve evaluation (v2)
+# -----------------------------------------------------------------------------
 
 def _try_composite_curve(curve, t_comp):
     """
@@ -137,28 +150,100 @@ def _curve_eval(curve, t_val):
     return positions, velocities
 
 
-def _surface_normal(surface, u_val, v_val):
-    """
-    Compute the (unnormalized) normal vector to a parametric surface
-    via numerical partial derivatives: normal = r_u × r_v.
+# -----------------------------------------------------------------------------
+# Composite-first surface evaluation (v3 NEW)
+# -----------------------------------------------------------------------------
 
-    Returns (point, normal_vector) as lists of floats.
+def _try_composite_surface(surface, u_mc, v_mc):
     """
+    Try to evaluate surface with MC parameters (u, v).
+
+    If the surface uses composite-compatible functions (mc_sin, mc_cos
+    from composite_multivar, or arithmetic on MC objects), this returns
+    a list of MC components with partial derivative information.
+    If it fails (e.g. math.sin silently converts via __float__),
+    returns None.
+
+    Safety: ALL 3 components must be MC. This prevents the
+    silent-float-conversion pitfall where math.sin(MC) succeeds
+    via __float__ but loses derivative information.
+    """
+    try:
+        point = surface(u_mc, v_mc)
+        if all(isinstance(p, MC) for p in point):
+            return point
+    except (TypeError, AttributeError):
+        pass
+    return None
+
+
+def _surface_eval(surface, u_val, v_val):
+    """
+    Evaluate surface at (u, v), returning (positions, r_u, r_v).
+
+    Strategy:
+    1. Try composite evaluation (exact partial derivatives via
+       .partial(1,0) and .partial(0,1)) by passing
+       RR(u, var=0, nvars=2) and RR(v, var=1, nvars=2).
+    2. Fall back to numerical differentiation if surface uses
+       math.* functions that silently lose derivative info.
+
+    Composite path works for surfaces like:
+        lambda u, v: [u * mc_cos(v), u * mc_sin(v), u]  # MC-compatible
+
+    Numerical fallback for surfaces like:
+        lambda u, v: [math.sin(u)*math.cos(v), ...]  # __float__ loses derivs
+
+    Args:
+        surface: parametric surface function returning [x, y, z]
+        u_val, v_val: float parameter values
+
+    Returns:
+        (positions, r_u, r_v) as lists of floats
+        where r_u = ∂surface/∂u and r_v = ∂surface/∂v
+    """
+    # Try composite evaluation for exact partial derivatives
+    u_mc = RR(u_val, var=0, nvars=2)
+    v_mc = RR(v_val, var=1, nvars=2)
+    point = _try_composite_surface(surface, u_mc, v_mc)
+    if point is not None:
+        positions = [p.st() for p in point]
+        r_u = [p.partial(1, 0) for p in point]
+        r_v = [p.partial(0, 1) for p in point]
+        return positions, r_u, r_v
+
+    # Fallback: numerical differentiation
     point = surface(u_val, v_val)
+    positions = [float(p) for p in point]
     eps = 1e-6
     point_u = surface(u_val + eps, v_val)
     point_v = surface(u_val, v_val + eps)
+    r_u = [(float(point_u[i]) - positions[i]) / eps for i in range(3)]
+    r_v = [(float(point_v[i]) - positions[i]) / eps for i in range(3)]
+    return positions, r_u, r_v
 
-    ru = [(float(point_u[i]) - float(point[i])) / eps for i in range(3)]
-    rv = [(float(point_v[i]) - float(point[i])) / eps for i in range(3)]
+
+def _surface_normal(surface, u_val, v_val):
+    """
+    Compute the (unnormalized) normal vector to a parametric surface.
+
+    Uses composite-first evaluation: tries MC with infinitesimal seeds
+    in u and v directions for exact partial derivatives via .partial().
+    Falls back to numerical differentiation for math.* parametrizations.
+
+    Normal = r_u × r_v (cross product of partial derivatives).
+
+    Returns (point, normal_vector) as lists of floats.
+    """
+    positions, r_u, r_v = _surface_eval(surface, u_val, v_val)
 
     normal = [
-        ru[1]*rv[2] - ru[2]*rv[1],
-        ru[2]*rv[0] - ru[0]*rv[2],
-        ru[0]*rv[1] - ru[1]*rv[0]
+        r_u[1]*r_v[2] - r_u[2]*r_v[1],
+        r_u[2]*r_v[0] - r_u[0]*r_v[2],
+        r_u[0]*r_v[1] - r_u[1]*r_v[0]
     ]
 
-    return [float(p) for p in point], normal
+    return positions, normal
 
 
 # =============================================================================
@@ -259,13 +344,14 @@ def line_integral_scalar(f, curve, t_range, tol=1e-8):
         line_integral_scalar(lambda x,y: 1, lambda t: [3*t, 4*t], (0,1))
         # → 5.0
 
-        # Circumference of unit circle
+        # Circumference of unit circle (composite-compatible curve)
+        from composite.composite_lib import sin, cos
         line_integral_scalar(
             lambda x,y: 1,
-            lambda t: [math.cos(t), math.sin(t)],
+            lambda t: [cos(t), sin(t)],
             (0, 2*math.pi)
         )
-        # → 2π  (uses numerical fallback for math.cos/sin)
+        # → 2π  (uses exact .d(1) derivatives)
     """
     t_start, t_end = t_range
     n_steps = max(100, int((t_end - t_start) / 0.01))
@@ -333,15 +419,30 @@ def surface_integral_scalar(f, surface, u_range, v_range, tol=1e-6):
     ∫∫_S f(x,y,z) dS where surface(u,v) = [x(u,v), y(u,v), z(u,v)]
 
     Uses midpoint quadrature for both u and v axes.
-    Surface normals computed via numerical partials (cross product).
+    Surface normals use composite-first evaluation: exact partial
+    derivatives via MC .partial() when surface returns MC objects,
+    automatic fallback to numerical partials for math.* surfaces.
 
     Args:
         f: scalar function f(x, y, z)
         surface: parametric surface returning [x, y, z]
+                 For exact derivatives, use mc_sin/mc_cos from
+                 composite_multivar or arithmetic on MC objects.
         u_range, v_range: parameter bounds
 
     Example:
-        # Surface area of unit sphere
+        # Surface area of unit sphere (composite-compatible)
+        from composite.composite_multivar import mc_sin, mc_cos
+        surface_integral_scalar(
+            lambda x,y,z: 1,
+            lambda u,v: [mc_sin(u)*mc_cos(v),
+                         mc_sin(u)*mc_sin(v),
+                         mc_cos(u)],
+            (0, math.pi), (0, 2*math.pi)
+        )
+        # → 4π ≈ 12.566  (uses exact .partial() derivatives)
+
+        # Same with math.* (numerical fallback, also works)
         surface_integral_scalar(
             lambda x,y,z: 1,
             lambda u,v: [math.sin(u)*math.cos(v),
@@ -349,7 +450,7 @@ def surface_integral_scalar(f, surface, u_range, v_range, tol=1e-6):
                          math.cos(u)],
             (0, math.pi), (0, 2*math.pi)
         )
-        # → 4π ≈ 12.566
+        # → 4π ≈ 12.566  (uses numerical fallback)
     """
     ua, ub = u_range
     va, vb = v_range
@@ -378,6 +479,7 @@ def surface_integral_vector(F, surface, u_range, v_range, tol=1e-6):
     ∫∫_S F · dS = ∫∫ F · (r_u × r_v) du dv
 
     Uses midpoint quadrature for both u and v axes.
+    Surface normals use composite-first evaluation (see above).
 
     Args:
         F: vector field [Fx, Fy, Fz] as list of callables
@@ -386,11 +488,12 @@ def surface_integral_vector(F, surface, u_range, v_range, tol=1e-6):
 
     Example:
         # Flux of F = [x,y,z] through unit sphere (divergence theorem: 4π)
+        from composite.composite_multivar import mc_sin, mc_cos
         surface_integral_vector(
             [lambda x,y,z: x, lambda x,y,z: y, lambda x,y,z: z],
-            lambda u,v: [math.sin(u)*math.cos(v),
-                         math.sin(u)*math.sin(v),
-                         math.cos(u)],
+            lambda u,v: [mc_sin(u)*mc_cos(v),
+                         mc_sin(u)*mc_sin(v),
+                         mc_cos(u)],
             (0, math.pi), (0, 2*math.pi)
         )
         # → 4π ≈ 12.566

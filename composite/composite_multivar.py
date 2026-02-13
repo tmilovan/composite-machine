@@ -601,3 +601,137 @@ def mc_power(x, s, terms=15):
     if isinstance(s, int):
         return x ** s
     return mc_exp(MC.real(s, x.nvars) * mc_ln(x, terms), terms)
+
+
+# =============================================================================
+# HIGH-LEVEL API: MULTI-VARIABLE CALCULUS
+# =============================================================================
+
+def partial_derivative(f, at: List[float], wrt: List[int]):
+    """
+    Compute partial derivative of f at a point.
+
+    f: function of multiple MC arguments
+    at: list of float values [x0, y0, ...]
+    wrt: list of derivative orders [nx, ny, ...]
+
+    Example:
+        # ∂²f/∂x∂y of f(x,y) = x²y at (3, 2)
+        partial_derivative(lambda x, y: x**2 * y, at=[3, 2], wrt=[1, 1])
+        # → 6.0
+    """
+    nvars = len(at)
+    args = [RR(at[i], var=i, nvars=nvars) for i in range(nvars)]
+    result = f(*args)
+    return result.partial(*wrt)
+
+
+def gradient_at(f, at: List[float]):
+    """
+    Compute gradient of f at a point.
+    Returns [∂f/∂x1, ∂f/∂x2, ...].
+    """
+    nvars = len(at)
+    args = [RR(at[i], var=i, nvars=nvars) for i in range(nvars)]
+    result = f(*args)
+    return result.gradient()
+
+
+def hessian_at(f, at: List[float]):
+    """
+    Compute Hessian matrix of f at a point.
+    Returns [[∂²f/∂xi∂xj]].
+    """
+    nvars = len(at)
+    args = [RR(at[i], var=i, nvars=nvars) for i in range(nvars)]
+    result = f(*args)
+    return result.hessian()
+
+
+def jacobian_at(fs: List[Callable], at: List[float]):
+    """
+    Compute Jacobian matrix of vector function F = [f1, f2, ...] at a point.
+    Returns [[∂fi/∂xj]].
+    """
+    nvars = len(at)
+    args = [RR(at[i], var=i, nvars=nvars) for i in range(nvars)]
+    J = []
+    for f in fs:
+        result = f(*args)
+        J.append(result.gradient())
+    return J
+
+
+def laplacian_at(f, at: List[float]):
+    """
+    Compute Laplacian ∇²f at a point.
+    Returns scalar: ∂²f/∂x² + ∂²f/∂y² + ...
+    """
+    nvars = len(at)
+    args = [RR(at[i], var=i, nvars=nvars) for i in range(nvars)]
+    result = f(*args)
+    return result.laplacian()
+
+
+def directional_derivative(f, at: List[float], direction: List[float]):
+    """
+    Compute directional derivative ∇f · v̂ at a point.
+    The direction vector is automatically normalized.
+    """
+    grad = gradient_at(f, at)
+    # Normalize direction
+    norm = math.sqrt(sum(d**2 for d in direction))
+    v_hat = [d / norm for d in direction]
+    return sum(g * v for g, v in zip(grad, v_hat))
+
+
+def multivar_limit(f, as_vars_to: List[float]):
+    """
+    Compute lim_{(x,y,...) → (a,b,...)} f(x,y,...).
+    """
+    nvars = len(as_vars_to)
+    args = []
+    for i, val in enumerate(as_vars_to):
+        if val == 0:
+            args.append(MC.zero_var(i, nvars))
+        else:
+            args.append(RR(val, var=i, nvars=nvars))
+    result = f(*args)
+    return result.st()
+
+
+def double_integral(f, x_range, y_range, tol=1e-8):
+    """
+    Compute ∫∫ f(x,y) dy dx by iterated single-variable integration.
+    x_range = (a, b), y_range = (c, d)
+
+    Uses composite adaptive integration in each variable.
+    """
+    from composite_lib import integrate_adaptive, R, ZERO, Composite
+
+    a, b = x_range
+    c, d = y_range
+
+    def inner(x_val):
+        """For fixed x, integrate over y."""
+        def g(y_comp):
+            x_mc = RR_const(x_val, nvars=2)
+            y_mc = MC({(0,0): y_comp.st(), (0,-1): y_comp.coeff(-1)}, nvars=2)
+            result_mc = f(x_mc, y_mc)
+            out = Composite({})
+            for dim, coeff in result_mc.c.items():
+                if dim[0] == 0:
+                    out.c[dim[1]] = out.c.get(dim[1], 0) + coeff
+            return out
+
+        val, err = integrate_adaptive(g, c, d, tol=tol)
+        return val
+
+    total = 0.0
+    n_steps = max(20, int((b - a) / 0.05))
+    dx = (b - a) / n_steps
+    for i in range(n_steps):
+        xi = a + (i + 0.5) * dx
+        total += inner(xi) * dx
+
+    return total
