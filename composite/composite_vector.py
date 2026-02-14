@@ -274,29 +274,14 @@ def triple_integral(f, x_range, y_range, z_range, tol=1e-8):
     def inner_z(x_val, y_val):
         """Integrate over z for fixed (x, y) via composite adaptive."""
         def g(z_comp):
-            x_mc = RR_const(x_val, nvars=3)
-            y_mc = RR_const(y_val, nvars=3)
-            # Build z as MC with infinitesimal seed in z-direction
-            z_mc = MC(
-                {(0,0,0): z_comp.st(), (0,0,-1): z_comp.coeff(-1)},
-                nvars=3
-            )
-            result_mc = f(x_mc, y_mc, z_mc)
-            # Handle plain numbers
-            if isinstance(result_mc, (int, float)):
-                return Composite({0: float(result_mc)})
-            elif isinstance(result_mc, MC):
-                # Project onto z-axis: keep only (0, 0, dz) terms
-                out = Composite({})
-                for dim, coeff in result_mc.c.items():
-                    if dim[0] == 0 and dim[1] == 0:
-                        out.c[dim[2]] = out.c.get(dim[2], 0) + coeff
-                return out if out.c else Composite({0: 0.0})
-            return result_mc
+            result = f(x_val, y_val, z_comp)
+            # If f returned a plain number, wrap it
+            if isinstance(result, (int, float)):
+                return Composite({0: float(result)})
+            return result
 
         val, _ = integrate_adaptive(g, za, zb, tol=tol)
         return _to_float(val)
-
     def inner_y(x_val):
         """Integrate over y for fixed x via midpoint quadrature."""
         total = 0.0

@@ -58,6 +58,10 @@ Author: Toni Milovan
 
 import math
 from typing import Callable, List, Optional, Union
+import struct
+import numpy as np
+
+from composite.backends import get_backend
 
 # =============================================================================
 # CORE: COMPOSITE NUMBER CLASS
@@ -80,20 +84,77 @@ class Composite:
         |3|₀+|2|₋₁ = 3 + 2h (3 plus 2 infinitesimals)
     """
 
-    __slots__ = ['c']
+    __slots__ = ['_data', '_backend']
 
-    def __init__(self, coefficients=None):
+    def __init__(self, coefficients=None, _data=None):
+        self._backend = get_backend()
+
+        if _data is not None:
+            # Internal fast path: created by arithmetic ops
+            self._data = _data
+            return
+
         if coefficients is None:
-            self.c = {}
+            self._data = self._backend.create_from_terms(
+                np.array([], dtype=np.int64),
+                np.array([], dtype=np.float64))
         elif isinstance(coefficients, (int, float)):
-            self.c = {0: float(coefficients)} if coefficients != 0 else {}
+            if coefficients == 0:
+                self._data = self._backend.create_from_terms(
+                    np.array([], dtype=np.int64),
+                    np.array([], dtype=np.float64))
+            else:
+                self._data = self._backend.create(0, float(coefficients))
         elif isinstance(coefficients, dict):
-            self.c = {k: v for k, v in coefficients.items() if v != 0}
+            items = {k: v for k, v in coefficients.items() if v != 0}
+            if items:
+                sorted_dims = sorted(items.keys())
+                dims = np.array(sorted_dims, dtype=np.int64)
+                vals = np.array([items[d] for d in sorted_dims], dtype=np.float64)
+                self._data = self._backend.create_from_terms(dims, vals)
+            else:
+                self._data = self._backend.create_from_terms(
+                    np.array([], dtype=np.int64),
+                    np.array([], dtype=np.float64))
         else:
             raise TypeError(f"Cannot create Composite from {type(coefficients)}")
 
     # -------------------------------------------------------------------------
-    # Constructors
+    # Internal helper
+    # -------------------------------------------------------------------------
+
+    @classmethod
+    def _wrap(cls, data):
+        """Create a Composite directly from backend data. No dict parsing."""
+        obj = cls.__new__(cls)
+        obj._backend = get_backend()
+        obj._data = data
+        return obj
+
+    # -------------------------------------------------------------------------
+    # Backward compatibility: .c property
+    # -------------------------------------------------------------------------
+    # This lets existing code that reads self.c (antiderivative, show,
+    # TracedComposite, transcendentals that check `x.c`) keep working.
+    # It reconstructs a dict from the backend data.
+    # MIGRATE AWAY FROM THIS over time — it defeats the purpose of
+    # the backend by creating a dict on every access.
+    # -------------------------------------------------------------------------
+
+    @property
+    def c(self):
+        """Backward-compatible dict view. Returns {dim: coeff} dict.
+
+        WARNING: This reconstructs a dict from backend data on every call.
+        Use read_dim / to_arrays for new code. This exists only so that
+        existing transcendental functions, antiderivative(), show(), and
+        TracedComposite keep working without changes.
+        """
+        dims, vals = self._backend.to_arrays(self._data)
+        return {int(d): float(v) for d, v in zip(dims, vals)}
+
+    # -------------------------------------------------------------------------
+    # Constructors (UNCHANGED — they use dict, which __init__ accepts)
     # -------------------------------------------------------------------------
 
     @classmethod
@@ -116,136 +177,29 @@ class Composite:
     # -------------------------------------------------------------------------
 
     def __repr__(self):
-        if not self.c:
+        dims, vals = self._backend.to_arrays(self._data)
+
+        if len(dims) == 0:
             return "|0|₀"
 
         sub = "₀₁₂₃₄₅₆₇₈₉"
         def fmt_dim(n):
+            n = int(n)
             if n >= 0:
                 return ''.join(sub[int(d)] for d in str(n))
             else:
                 return "₋" + ''.join(sub[int(d)] for d in str(-n))
 
         def fmt_coeff(c):
-            if isinstance(c, complex) and c.imag == 0:
-                c = c.real
-            if isinstance(c, float) and c == int(c):
+            c = float(c)
+            if c == int(c):
                 return str(int(c))
-            elif isinstance(c, float):
-                return f"{c:.6g}"
-            return str(c)
+            return f"{c:.6g}"
 
-        terms = sorted(self.c.items(), key=lambda x: -x[0])
-        parts = [f"|{fmt_coeff(coeff)}|{fmt_dim(dim)}" for dim, coeff in terms]
+        # Highest dimension first (descending)
+        parts = [f"|{fmt_coeff(vals[i])}|{fmt_dim(dims[i])}"
+                 for i in range(len(dims) - 1, -1, -1)]
         return " + ".join(parts)
-
-    # -------------------------------------------------------------------------
-    # Arithmetic operations
-    # -------------------------------------------------------------------------
-
-    def __add__(self, other):
-        if isinstance(other, (int, float)):
-            other = Composite(other)
-        result = dict(self.c)
-        for dim, coeff in other.c.items():
-            result[dim] = result.get(dim, 0) + coeff
-        return Composite(result)
-
-    def __radd__(self, other):
-        return self.__add__(other)
-
-    def __sub__(self, other):
-        if isinstance(other, (int, float)):
-            other = Composite(other)
-        result = dict(self.c)
-        for dim, coeff in other.c.items():
-            result[dim] = result.get(dim, 0) - coeff
-        return Composite(result)
-
-    def __rsub__(self, other):
-        return Composite(other).__sub__(self)
-
-    def __neg__(self):
-        return Composite({k: -v for k, v in self.c.items()})
-
-    def __mul__(self, other):
-        """Multiplication: dimensions add, coefficients multiply"""
-        if isinstance(other, (int, float)):
-            return Composite({k: v * other for k, v in self.c.items()})
-        result = {}
-        for d1, c1 in self.c.items():
-            for d2, c2 in other.c.items():
-                dim = d1 + d2
-                result[dim] = result.get(dim, 0) + c1 * c2
-        return Composite(result)
-
-    def __rmul__(self, other):
-        return self.__mul__(other)
-
-    def __truediv__(self, other):
-        """Division: dimensions subtract, coefficients divide"""
-        if isinstance(other, (int, float)):
-            if other == 0:
-                raise ZeroDivisionError("Cannot divide by Python zero. Use ZERO for structural zero.")
-            return Composite({k: v / other for k, v in self.c.items()})
-
-        if len(other.c) == 0:
-            raise ZeroDivisionError("Cannot divide by empty composite")
-
-        if len(other.c) == 1:
-            div_dim, div_coeff = list(other.c.items())[0]
-            result = {}
-            for dim, coeff in self.c.items():
-                result[dim - div_dim] = coeff / div_coeff
-            return Composite(result)
-
-        return _poly_divide(self, other)[0]
-
-    def __rtruediv__(self, other):
-        return Composite(other).__truediv__(self)
-
-    def __abs__(self):
-        """Absolute value of the standard part."""
-        return abs(self.st())
-    def __float__(self):
-        """Float conversion returns standard part."""
-        return float(self.st())
-    def __int__(self):
-        """Int conversion returns int of standard part."""
-        return int(self.st())
-    def __pow__(self, n):
-        """Integer power via repeated multiplication"""
-        if not isinstance(n, int):
-            raise TypeError("Power must be integer")
-        if n == 0:
-            return Composite({0: 1})
-        if n < 0:
-            return Composite({0: 1}) / (self ** (-n))
-        result = Composite({0: 1})
-        for _ in range(n):
-            result = result * self
-        return result
-
-    # -------------------------------------------------------------------------
-    # Extraction methods
-    # -------------------------------------------------------------------------
-
-    def st(self):
-        """Standard part: coefficient at dimension 0"""
-        return self.c.get(0, 0.0)
-
-    def coeff(self, dim):
-        """Get coefficient at specific dimension"""
-        return self.c.get(dim, 0.0)
-
-    def d(self, n=1):
-        """
-        Extract nth derivative.
-        d(1) = first derivative
-        d(2) = second derivative
-        etc.
-        """
-        return self.c.get(-n, 0.0) * math.factorial(n)
 
     # =========================================================================
     # SERIALIZATION
@@ -341,6 +295,128 @@ class Composite:
         import json
         return cls.from_dict(json.loads(s))
 
+
+    # -------------------------------------------------------------------------
+    # Arithmetic operations
+    # -------------------------------------------------------------------------
+
+    def __add__(self, other):
+        if isinstance(other, (int, float)):
+            other = Composite(other)
+        return Composite._wrap(self._backend.add(self._data, other._data))
+
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __sub__(self, other):
+        if isinstance(other, (int, float)):
+            other = Composite(other)
+        neg_other = self._backend.negate(other._data)
+        return Composite._wrap(self._backend.add(self._data, neg_other))
+
+    def __rsub__(self, other):
+        return Composite(other).__sub__(self)
+
+    def __neg__(self):
+        return Composite._wrap(self._backend.negate(self._data))
+
+    def __mul__(self, other):
+        """Multiplication: dimensions add, coefficients multiply"""
+        if isinstance(other, (int, float)):
+            return Composite._wrap(
+                self._backend.scalar_multiply(self._data, float(other)))
+        return Composite._wrap(
+            self._backend.convolve(self._data, other._data))
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
+    def __truediv__(self, other):
+        """Division: dimensions subtract, coefficients divide"""
+        if isinstance(other, (int, float)):
+            if other == 0:
+                raise ZeroDivisionError(
+                    "Cannot divide by Python zero. Use ZERO for structural zero.")
+            return Composite._wrap(
+                self._backend.scalar_multiply(self._data, 1.0 / other))
+
+        if isinstance(other, Composite):
+            other_dims = self._backend.active_dims(other._data)
+
+            if len(other_dims) == 0:
+                raise ZeroDivisionError("Cannot divide by empty composite")
+
+            # Fast path: single-term divisor → dimension shift
+            if len(other_dims) == 1:
+                div_dim = int(other_dims[0])
+                div_coeff = self._backend.read_dim(other._data, div_dim)
+                my_dims, my_vals = self._backend.to_arrays(self._data)
+                new_dims = my_dims - div_dim
+                new_vals = my_vals / div_coeff
+                return Composite._wrap(
+                    self._backend.create_from_terms(new_dims, new_vals))
+
+            # Multi-term: polynomial long division via backend
+            return Composite._wrap(
+                self._backend.deconvolve(self._data, other._data))
+
+        return NotImplemented
+
+    def __rtruediv__(self, other):
+        return Composite(other).__truediv__(self)
+
+    def __abs__(self):
+        """Absolute value of the standard part."""
+        return abs(self.st())
+
+    def __float__(self):
+        """Float conversion returns standard part."""
+        return float(self.st())
+
+    def __int__(self):
+        """Int conversion returns int of standard part."""
+        return int(self.st())
+
+    def __pow__(self, n):
+        """Integer power via repeated multiplication"""
+        if not isinstance(n, int):
+            raise TypeError("Power must be integer")
+        if n == 0:
+            return Composite({0: 1})
+        if n < 0:
+            return Composite({0: 1}) / (self ** (-n))
+        result = Composite({0: 1})
+        for _ in range(n):
+            result = result * self
+        return result
+
+    # -------------------------------------------------------------------------
+    # Extraction methods
+    # -------------------------------------------------------------------------
+
+    def st(self):
+        """Standard part: coefficient at dimension 0"""
+        return self._backend.read_dim(self._data, 0)
+
+    def coeff(self, dim):
+        """Get coefficient at specific dimension"""
+        return self._backend.read_dim(self._data, dim)
+
+    def d(self, n=1):
+        """
+        Extract nth derivative.
+        d(1) = first derivative
+        d(2) = second derivative
+        etc.
+        """
+        return self._backend.read_dim(self._data, -n) * math.factorial(n)
+
+    def __format__(self, fmt):
+        """Support format strings by formatting the standard part."""
+        if fmt:
+            return format(self.st(), fmt)
+        return repr(self)
+
     # -------------------------------------------------------------------------
     # Simplified integration operators (dimensional shifts)
     # -------------------------------------------------------------------------
@@ -348,9 +424,14 @@ class Composite:
     def eval_taylor(self, h_value):
         """
         Evaluate Taylor polynomial by substituting h → h_value.
+        Uses backend arrays instead of dict iteration.
         """
-        return sum(coeff * h_value ** (-dim)
-                   for dim, coeff in self.c.items() if dim < 0)
+        dims, vals = self._backend.to_arrays(self._data)
+        mask = dims < 0
+        neg_dims = dims[mask]
+        neg_vals = vals[mask]
+        return sum(float(v) * h_value ** (-int(d))
+                   for d, v in zip(neg_dims, neg_vals))
 
     def integrate_step(self, dx):
         """
@@ -368,7 +449,7 @@ class Composite:
             other = Composite(other)
         result = _compare(self, other)
         if isinstance(result, float) and math.isnan(result):
-            return False  # NaN != anything, including itself
+            return False
         return result == 0
 
     def __lt__(self, other):
@@ -390,24 +471,32 @@ class Composite:
         if isinstance(other, (int, float)):
             other = Composite(other)
         return _compare(self, other) >= 0
+
     def __ne__(self, other):
         if isinstance(other, (int, float)):
             other = Composite(other)
         result = _compare(self, other)
         if isinstance(result, float) and math.isnan(result):
-            return True  # NaN != everything
+            return True
         return result != 0
 
 def _compare(a, b):
-    """Lexicographic comparison by dimension (highest first)"""
-    all_dims = set(a.c.keys()) | set(b.c.keys())
-    if not all_dims:
+    """Lexicographic comparison by dimension (highest first).
+    Uses backend arrays instead of reading .c dicts."""
+    a_dims, a_vals = a._backend.to_arrays(a._data)
+    b_dims, b_vals = b._backend.to_arrays(b._data)
+
+    # Union of all dimensions
+    all_dims = np.union1d(a_dims, b_dims)
+    if len(all_dims) == 0:
         return 0
-    for dim in sorted(all_dims, reverse=True):
-        ca = a.c.get(dim, 0)
-        cb = b.c.get(dim, 0)
+
+    # Walk from highest dimension down
+    for dim in reversed(all_dims):
+        ca = a._backend.read_dim(a._data, int(dim))
+        cb = b._backend.read_dim(b._data, int(dim))
         if math.isnan(ca) or math.isnan(cb):
-            return float('nan')  # NaN poisons comparison
+            return float('nan')
         if ca < cb:
             return -1
         elif ca > cb:
@@ -415,7 +504,7 @@ def _compare(a, b):
     return 0
 
 
-def _poly_divide(numerator, denominator, max_terms=20):
+def _poly_divide(numerator, denominator, max_terms=50):
     """Polynomial long division for multi-term divisors"""
     if not denominator.c:
         raise ZeroDivisionError("Cannot divide by zero polynomial")

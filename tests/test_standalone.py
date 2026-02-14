@@ -53,7 +53,6 @@ from composite.composite_lib import (
     derivative, nth_derivative, all_derivatives,
     limit, antiderivative,
 )
-from composite.composite_lib import _poly_divide as poly_divide
 
 
 # =============================================================================
@@ -815,44 +814,44 @@ def test_multivariate():
 # =============================================================================
 
 def test_multiterm_division():
-    """Test multi-term division via poly_divide integration."""
-    suite = TestSuite("Multi-Term Division (poly_divide)")
+    """Test multi-term division via backend deconvolve."""
+    suite = TestSuite("Multi-Term Division")
     h = ZERO
-    # (x\u00b2 - 1) / (x - 1) = x + 1 at x=3 \u2192 st = 4
+    # Test: (x² - 1) / (x - 1) = x + 1 at x=3 → st = 4
     x = R(3) + h
     numer = x**2 - R(1)
     denom = x - R(1)
     result = numer / denom
-    suite.assert_eq("(x\u00b2-1)/(x-1) at x=3 = 4", result.st(), 4)
-    # (x\u00b3 - 1) / (x - 1) = x\u00b2 + x + 1 at x=2 \u2192 st = 7
+    suite.assert_eq("(x²-1)/(x-1) at x=3 = 4", result.st(), 4)
+    # Test: (x³ - 1) / (x - 1) = x² + x + 1 at x=2 → st = 7
     x = R(2) + h
     numer = x**3 - R(1)
     denom = x - R(1)
     result = numer / denom
-    suite.assert_eq("(x\u00b3-1)/(x-1) at x=2 = 7", result.st(), 7)
-    # (x\u2074 - 1) / (x - 1) at x=2 \u2192 st = 15
+    suite.assert_eq("(x³-1)/(x-1) at x=2 = 7", result.st(), 7)
+    # Test: (x⁴ - 1) / (x - 1) = x³ + x² + x + 1 at x=2 → st = 15
     x = R(2) + h
     numer = x**4 - R(1)
     denom = x - R(1)
     result = numer / denom
-    suite.assert_eq("(x\u2074-1)/(x-1) at x=2 = 15", result.st(), 15)
-    # sin(x)/x at x\u21920 via poly_divide
+    suite.assert_eq("(x⁴-1)/(x-1) at x=2 = 15", result.st(), 15)
+    # Test: sin(x)/x at x→0 via multi-term division
     x = h
     sin_x = sin_composite(x, terms=5)
-    quotient, remainder = poly_divide(sin_x, x)
-    suite.assert_eq("sin(x)/x at x\u21920 = 1", quotient.st(), 1, tol=1e-6)
-    # (1 + x) / (1 - x) at x\u21920 = 1
+    result = sin_x / x
+    suite.assert_eq("sin(x)/x at x→0 = 1", result.st(), 1, tol=1e-6)
+    # Test: (1 + x) / (1 - x) at x→0 = 1
     x = h
     numer = R(1) + x
     denom = R(1) - x
     result = numer / denom
-    suite.assert_eq("(1+x)/(1-x) at x\u21920 = 1", result.st(), 1, tol=1e-6)
-    # Single-term division fast path
+    suite.assert_eq("(1+x)/(1-x) at x→0 = 1", result.st(), 1, tol=1e-6)
+    # Test: Verify single-term division still works (fast path)
     result_single = R(10) / R(2)
     suite.assert_eq("10 / 2 = 5 (single-term fast path)", result_single.st(), 5)
-    # Division by structural zero
+    # Test: Division by structural zero still works
     result_zero = R(5) / ZERO
-    suite.assert_true("5 / 0 = |5|\u2081 (infinity)", 1 in result_zero.c and result_zero.c[1] == 5)
+    suite.assert_true("5 / 0 = |5|₁ (infinity)", 1 in result_zero.c and result_zero.c[1] == 5)
     return suite.report()
 
 def test_transcendental():

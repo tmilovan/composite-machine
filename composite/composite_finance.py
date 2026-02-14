@@ -71,7 +71,7 @@ class FinancialComposite(Composite):
     def from_composite(cls, c):
         """Wrap an existing Composite as FinancialComposite."""
         fc = cls.__new__(cls)
-        fc.c = dict(c.c)
+        Composite.__init__(fc, dict(c.c))
         return fc
 
     # --- Core accessors (actual derivative values) ---
