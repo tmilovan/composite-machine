@@ -1436,8 +1436,8 @@ def run_tests():
     print(f"d/dx[sin(x)] at x=0 = {d3}, expected 1 {'✓' if abs(d3-1)<1e-6 else '✗'}")
 
     d4 = nth_derivative(lambda x: x**5, n=3, at=2)
-    tests.append(("d³/dx³[x⁵] at x=2", d4, 120))
-    print(f"d³/dx³[x⁵] at x=2 = {d4}, expected 120 {'✓' if abs(d4-120)<1e-6 else '✗'}")
+    tests.append(("d³/dx³[x⁵] at x=2", d4, 240))
+    print(f"d³/dx³[x⁵] at x=2 = {d4}, expected 240 {'✓' if abs(d4-120)<1e-6 else '✗'}")
 
     # Limit tests
     print("\n--- Limits ---")
