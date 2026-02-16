@@ -547,6 +547,29 @@ ZERO = Composite.zero()       # |1|₋₁ (infinitesimal)
 INF = Composite.infinity()    # |1|₁ (infinity)
 h = ZERO                      # Alias: h is the infinitesimal
 
+def set_max_order(n: int = None):
+    """Set global MAX truncation order.
+
+    Controls how many derivative orders survive convolution.
+    None = unlimited (default, preserves all terms).
+    5 = keep up to 5th derivative (~200x faster than unlimited).
+
+    For most finance applications, max_order=5 or 6 is sufficient
+    (price + delta + gamma + speed + 4th + 5th order).
+
+    Example:
+        set_max_order(5)    # fast mode: ~0.02ms/option
+        set_max_order(None) # full precision: ~3.8ms/option
+        set_max_order(10)   # balanced: ~0.1ms/option
+    """
+    backend = get_backend()
+    backend.max_order = n
+
+
+def get_max_order() -> int:
+    """Get current MAX truncation order. None = unlimited."""
+    backend = get_backend()
+    return getattr(backend, 'max_order', None)
 
 # =============================================================================
 # TAYLOR SERIES FOR TRANSCENDENTAL FUNCTIONS

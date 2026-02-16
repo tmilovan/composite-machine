@@ -119,9 +119,11 @@ class SparseDenseBackend(CompositeBackend):
     exactly 2 elements of storage, not 10,000,001.
     """
 
-    def __init__(self, gap_threshold: int = 64, zero_tol: float = 0.0):
+    def __init__(self, gap_threshold: int = 64, zero_tol: float = 0.0,
+                 max_order: int = None):
         self.gap_threshold = gap_threshold
         self.zero_tol = zero_tol
+        self.max_order = max_order  # None = unlimited
 
     # --- lifecycle ---
 
@@ -130,6 +132,21 @@ class SparseDenseBackend(CompositeBackend):
             np.array([dim], dtype=np.int64),
             np.array([value], dtype=np.float64)
         )
+
+    def _truncate(self, data: SparseData) -> SparseData:
+        """Drop dimensions below -max_order (higher-order derivatives).
+
+        Keeps dims >= -max_order. So max_order=5 keeps dims
+        {..., -5, -4, -3, -2, -1, 0, 1, ...} and drops -6, -7, etc.
+        """
+        if self.max_order is None:
+            return data
+        if len(data.dims) == 0:
+            return data
+        mask = data.dims >= -self.max_order
+        if mask.all():
+            return data
+        return SparseData(data.dims[mask], data.vals[mask])
 
     def create_from_terms(self, dims: np.ndarray, vals: np.ndarray) -> SparseData:
         dims = np.asarray(dims, dtype=np.int64)
@@ -231,7 +248,8 @@ class SparseDenseBackend(CompositeBackend):
                 out_offset = offset_a + offset_b
                 results.append((out_offset, conv))
 
-        return _merge_cluster_outputs(results, self.zero_tol)
+        result =  _merge_cluster_outputs(results, self.zero_tol)
+        return self._truncate(result)
 
     def deconvolve(self, a: SparseData, b: SparseData) -> SparseData:
         """Polynomial long division in sparse form.

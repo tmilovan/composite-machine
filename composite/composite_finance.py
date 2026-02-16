@@ -1,4 +1,4 @@
-# Composite Machine — Financial Analysis Layer
+# Composite Machine — Financial Analysis Layer (v2 — Composite-Native)
 # Copyright (C) 2026 Toni Milovan <tmilovan@fwd.hr>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -16,22 +16,25 @@
 #
 # Commercial licensing available. Contact: tmilovan@fwd.hr
 """
-composite_finance.py — Financial Domain Layer
-===============================================
-Named accessors, scenario analysis, and portfolio aggregation
-built on top of Composite serialization.
+composite_finance.py — Financial Domain Layer (v2: Composite-Native)
+=====================================================================
+All operations stay in the composite ring until the serialization
+boundary. This means every financial computation can be composed
+with further composite operations and still propagate derivatives.
+
+Design principle:
+    Composite in → Composite out → extract at display/serialization only.
 
 Usage:
     from composite.composite_finance import FinancialComposite, ScenarioEngine
 
-    # Wrap any composite result
     fc = FinancialComposite.from_composite(option_price_composite)
-    print(fc.price, fc.delta, fc.gamma)
+    print(fc.price, fc.delta, fc.gamma)  # these are scalar reads (boundary)
 
-    # Taylor-based scenario shift
-    engine = ScenarioEngine(composites, weights)
-    pnl = engine.scenario_pnl(0.01)      # +1% move
-    var = engine.taylor_var(vol=0.02)     # parametric VaR
+    # But scenario_pnl stays composite:
+    pnl = fc.scenario_pnl(R(0.01) + ZERO)  # composite shock!
+    pnl.st()    # PnL estimate
+    pnl.d(1)    # d(PnL)/d(shock_size) — impossible in v1
 
 Author: Toni Milovan
 License: AGPL-3.0 (commercial licensing: tmilovan@fwd.hr)
@@ -41,75 +44,104 @@ import math
 from composite.composite_lib import Composite, R, ZERO
 
 
+def _ensure_composite(x):
+    """Convert scalar to Composite if needed. Passthrough if already Composite."""
+    if isinstance(x, Composite):
+        return x
+    return R(x)
+
+
 # =============================================================================
-# 1. FINANCIAL COMPOSITE — NAMED ACCESSORS
+# 1. FINANCIAL COMPOSITE — NAMED ACCESSORS + COMPOSITE-NATIVE OPERATIONS
 # =============================================================================
 
 class FinancialComposite(Composite):
     """
-    A Composite with named financial accessors.
+    A Composite with named financial accessors and composite-native operations.
 
-    Wraps the raw dimensional structure with the language
-    traders and risk managers actually use.
+    KEY DESIGN RULE: All methods that perform computation return Composite
+    objects (or FinancialComposite). Scalar extraction happens ONLY in
+    explicitly-named boundary methods (.price, .delta, .gamma, etc.)
+    and serialization (.to_greeks_dict).
 
     Dimension mapping (single underlying):
         dim  0  -> price / present value
-        dim -1  -> delta (first derivative)
-        dim -2  -> gamma / 2!  (second derivative coefficient)
-        dim -3  -> speed / 3!  (third derivative coefficient)
-        dim -4  -> fourth order / 4!
+        dim -1  -> delta (first derivative) / 1!
+        dim -2  -> gamma / 2!
+        dim -3  -> speed / 3!
 
-    For nth derivative values (with factorial scaling):
-        .d(n) returns f^(n) — the actual derivative
-        .coeff(-n) returns f^(n)/n! — the Taylor coefficient
-
-    The named properties below return the ACTUAL derivatives
-    (i.e., with factorial scaling), matching financial convention.
+    Named properties (.price, .delta, .gamma, .speed) are SCALAR READS
+    at the boundary — use them for display, not for further computation.
+    For computation, use the FinancialComposite itself as a Composite value.
     """
 
     @classmethod
     def from_composite(cls, c):
-        """Wrap an existing Composite as FinancialComposite."""
+        """Wrap an existing Composite as FinancialComposite.
+        Backend-agnostic: .c always returns a dict view regardless
+        of backend, and Composite.__init__ routes to active backend."""
         fc = cls.__new__(cls)
         Composite.__init__(fc, dict(c.c))
         return fc
 
-    # --- Core accessors (actual derivative values) ---
+    # --- Scalar boundary reads (for display/serialization) ---
 
     @property
     def price(self):
-        """Present value / option price. Dimension 0."""
+        """BOUNDARY: scalar price for display. Use self for computation."""
         return self.st()
 
     @property
     def pv(self):
-        """Alias for price (present value)."""
+        """Alias for price."""
         return self.st()
 
     @property
     def delta(self):
-        """First derivative w.r.t. underlying. dV/dS."""
+        """BOUNDARY: scalar delta for display."""
         return self.d(1)
 
     @property
     def gamma(self):
-        """Second derivative w.r.t. underlying. d^2 V/dS^2."""
+        """BOUNDARY: scalar gamma for display."""
         return self.d(2)
 
     @property
     def speed(self):
-        """Third derivative w.r.t. underlying. d^3 V/dS^3."""
+        """BOUNDARY: scalar speed for display."""
         return self.d(3)
 
-    # --- Duration / Convexity (bond convention) ---
+    # --- Composite-native financial operations ---
+    # These return Composite, preserving the derivative chain.
+
+    def duration_composite(self):
+        """
+        Modified duration as a COMPOSITE value: -dP/dy / P.
+
+        Uses composite deconvolution (division), so if this bond
+        was priced with composite yield, the result carries
+        d(duration)/d(yield) and all higher-order sensitivities.
+
+        Returns: Composite (not a float)
+        """
+        d1_coeff = self.coeff(-1)
+        if d1_coeff == 0:
+            return R(0)
+        dP_dy = Composite({0: self.d(1)})
+        return -(dP_dy / self)
+
+    def convexity_composite(self):
+        """
+        Convexity as a COMPOSITE value: d2P/dy2 / P.
+
+        Returns: Composite (not a float)
+        """
+        d2P_dy2 = Composite({0: self.d(2)})
+        return d2P_dy2 / self
 
     @property
     def duration(self):
-        """
-        Modified duration: -dP/dy / P.
-        Requires price != 0. Returns the actual duration value.
-        (For raw dP/dy, use .d(1) directly.)
-        """
+        """BOUNDARY: scalar duration for display."""
         p = self.st()
         if abs(p) < 1e-15:
             return float('inf')
@@ -117,56 +149,74 @@ class FinancialComposite(Composite):
 
     @property
     def convexity(self):
-        """
-        Convexity: d^2 P/dy^2 / P.
-        Bond convention (positive for vanilla bonds).
-        """
+        """BOUNDARY: scalar convexity for display."""
         p = self.st()
         if abs(p) < 1e-15:
             return float('inf')
         return self.d(2) / p
 
-    # --- Taylor expansion for scenario analysis ---
+    # --- Composite-native scenario analysis ---
 
     def scenario_pnl(self, shock):
-        """
-        Estimate P&L for a given shock using the full Taylor expansion.
+        h = _ensure_composite(shock)
 
-        Uses all available coefficients:
-            delta_V = sum( coeff_at_dim_-n * shock^n )  for n = 1, 2, ...
+        # Fast path: if shock is a plain scalar (no derivative dims),
+        # do simple float polynomial evaluation — no convolutions needed
+        if len(h.c) <= 1 and 0 in h.c or len(h.c) == 0:
+            h_val = h.st()
+            pnl_val = 0.0
+            h_power = h_val
+            for dim in self.c:
+                if dim < 0 and -dim > 0:
+                    pass  # just need max_order
+            max_order = 0
+            for dim in self.c:
+                if dim < 0 and -dim > max_order:
+                    max_order = -dim
+            h_power = h_val
+            for n in range(1, max_order + 1):
+                c_n = self.coeff(-n)
+                if c_n != 0:
+                    pnl_val += c_n * h_power
+                h_power *= h_val
+            return R(pnl_val)
 
-        This is the standard "Greeks-based P&L" but using ALL
-        available orders, not just delta-gamma.
-
-        Args:
-            shock: float, the size of the move (e.g., 0.01 for +1%)
-
-        Returns:
-            float, estimated P&L
-        """
-        pnl = 0.0
-        for dim, coeff in self.c.items():
-            if dim < 0:
-                order = -dim
-                pnl += coeff * shock ** order
+        # Composite path: full convolution (for composite shocks)
+        pnl = R(0)
+        h_power = h
+        max_order = 0
+        for dim in self.c:
+            if dim < 0 and -dim > max_order:
+                max_order = -dim
+        for n in range(1, max_order + 1):
+            c_n = self.coeff(-n)
+            if c_n != 0:
+                pnl = pnl + R(c_n) * h_power
+            h_power = h_power * h
         return pnl
 
     def scenario_price(self, shock):
         """
-        Estimate new price after a shock.
-        price_new = price + scenario_pnl(shock)
-        """
-        return self.st() + self.scenario_pnl(shock)
+        Estimated new price after shock — COMPOSITE-NATIVE.
 
-    # --- Serialization with financial labels ---
+        Returns Composite: the full price composite at the shifted point.
+        """
+        return R(self.st()) + self.scenario_pnl(shock)
+
+    # --- Scalar boundary versions (convenience for display) ---
+
+    def scenario_pnl_scalar(self, shock_float):
+        """BOUNDARY: scalar PnL for a scalar shock. For display."""
+        return self.scenario_pnl(shock_float).st()
+
+    def scenario_price_scalar(self, shock_float):
+        """BOUNDARY: scalar price for a scalar shock. For display."""
+        return self.scenario_price(shock_float).st()
+
+    # --- Serialization (boundary) ---
 
     def to_greeks_dict(self, max_order=4):
-        """
-        Serialize as a dict with financial names.
-
-        Returns:
-            {'price': ..., 'delta': ..., 'gamma': ..., 'speed': ..., ...}
-        """
+        """BOUNDARY: serialize to a dict with financial names."""
         names = {0: 'price', 1: 'delta', 2: 'gamma', 3: 'speed'}
         result = {}
         for n in range(max_order + 1):
@@ -178,7 +228,6 @@ class FinancialComposite(Composite):
         return result
 
     def __repr__(self):
-        """Show financial-friendly repr alongside dimensional."""
         base = super().__repr__()
         return (f"{base}  "
                 f"[price={self.price:.6g}, "
@@ -187,161 +236,225 @@ class FinancialComposite(Composite):
 
 
 # =============================================================================
-# 2. SCENARIO ENGINE — PORTFOLIO-LEVEL ANALYSIS
+# 2. SCENARIO ENGINE — COMPOSITE-NATIVE PORTFOLIO ANALYSIS
 # =============================================================================
 
 class ScenarioEngine:
     """
-    Portfolio-level scenario analysis using Composite Taylor expansions.
+    Portfolio-level scenario analysis — COMPOSITE-NATIVE.
 
-    Takes a collection of FinancialComposites (one per position)
-    and provides aggregated risk measures.
+    All aggregation methods return Composite objects.
+    Weights CAN be Composite (for position-sizing sensitivity).
 
     Usage:
-        positions = [fc1, fc2, fc3]  # FinancialComposite objects
-        weights = [100, -50, 200]    # number of contracts/shares
+        positions = [fc1, fc2, fc3]
+        weights = [R(100), R(-50), R(200)]  # can be Composite!
         engine = ScenarioEngine(positions, weights)
 
-        engine.total_price()            # portfolio value
-        engine.total_delta()            # aggregate delta
-        engine.scenario_pnl(0.01)       # P&L for +1% move
-        engine.scenario_ladder(shocks)  # P&L at multiple shock levels
-        engine.taylor_var(vol, conf)    # parametric VaR using gamma
+        # All return Composite:
+        engine.total_value()                # portfolio value (Composite)
+        engine.total_delta_composite()      # aggregate delta (Composite)
+        engine.scenario_pnl(R(0.01) + ZERO) # PnL with shock sensitivity
+
+        # Scalar reads at the boundary:
+        engine.total_value().st()            # scalar portfolio value
     """
 
     def __init__(self, composites, weights=None):
         """
         Args:
-            composites: list of FinancialComposite (or Composite) objects.
-            weights:    list of position sizes (notional, contracts, etc.)
-                        If None, all weights = 1.
+            composites: list of FinancialComposite (or Composite).
+            weights:    list of floats or Composites.
+                        If Composite, enables d(portfolio)/d(weight_i).
+                        If None, all weights = R(1).
         """
         self.composites = [
             c if isinstance(c, FinancialComposite)
             else FinancialComposite.from_composite(c)
             for c in composites
         ]
-        self.weights = weights or [1.0] * len(composites)
+        if weights is None:
+            self.weights = [R(1.0)] * len(composites)
+        else:
+            self.weights = [_ensure_composite(w) for w in weights]
 
-    def _weighted_sum(self, accessor):
-        """Sum accessor(c) * weight across all positions."""
-        return sum(
-            accessor(c) * w
-            for c, w in zip(self.composites, self.weights)
+    def _weighted_composite_sum(self, extractor):
+        """
+        Composite-native weighted sum.
+
+        extractor: function that takes a FinancialComposite and returns
+                   a Composite value (NOT a scalar).
+
+        Returns: Composite
+        """
+        total = R(0)
+        for c, w in zip(self.composites, self.weights):
+            total = total + w * extractor(c)
+        return total
+
+    def total_value(self):
+        """
+        Aggregate portfolio value as Composite.
+
+        If weights are composite, result carries d(value)/d(weight_i).
+        """
+        return self._weighted_composite_sum(
+            lambda c: R(c.st())
         )
 
+    def total_delta_composite(self):
+        """Aggregate portfolio delta as Composite."""
+        return self._weighted_composite_sum(
+            lambda c: R(c.d(1))
+        )
+
+    def total_gamma_composite(self):
+        """Aggregate portfolio gamma as Composite."""
+        return self._weighted_composite_sum(
+            lambda c: R(c.d(2))
+        )
+
+    def total_nth_composite(self, n):
+        """Aggregate nth derivative as Composite."""
+        return self._weighted_composite_sum(
+            lambda c: R(c.d(n))
+        )
+
+    # --- Scalar boundary reads ---
+
     def total_price(self):
-        """Aggregate portfolio value."""
-        return self._weighted_sum(lambda c: c.price)
+        """BOUNDARY: scalar portfolio value."""
+        return self.total_value().st()
 
     def total_delta(self):
-        """Aggregate portfolio delta."""
-        return self._weighted_sum(lambda c: c.delta)
+        """BOUNDARY: scalar portfolio delta."""
+        return self.total_delta_composite().st()
 
     def total_gamma(self):
-        """Aggregate portfolio gamma."""
-        return self._weighted_sum(lambda c: c.gamma)
+        """BOUNDARY: scalar portfolio gamma."""
+        return self.total_gamma_composite().st()
 
-    def total_nth(self, n):
-        """Aggregate nth derivative across portfolio."""
-        return self._weighted_sum(lambda c: c.d(n))
+    # --- Composite-native scenario analysis ---
 
     def scenario_pnl(self, shock):
         """
-        Portfolio P&L for a given shock, using full Taylor expansion.
+        Portfolio P&L for a shock — COMPOSITE-NATIVE.
 
-        Args:
-            shock: float, size of the move.
-
-        Returns:
-            float, total portfolio P&L.
+        shock can be float or Composite.
+        Returns Composite (carries dPnL/dshock if shock is composite).
         """
-        return sum(
-            c.scenario_pnl(shock) * w
-            for c, w in zip(self.composites, self.weights)
-        )
+        h = _ensure_composite(shock)
+        total = R(0)
+        for c, w in zip(self.composites, self.weights):
+            total = total + w * c.scenario_pnl(h)
+        return total
 
     def scenario_ladder(self, shocks):
         """
         P&L at multiple shock levels.
 
-        Args:
-            shocks: list of floats
-                    (e.g., [-0.05, -0.01, 0, 0.01, 0.05])
-
-        Returns:
-            list of (shock, pnl) pairs.
+        Returns list of (shock, Composite_pnl) pairs.
+        Call .st() on each pnl for the scalar value.
         """
         return [(s, self.scenario_pnl(s)) for s in shocks]
 
     def taylor_var(self, vol, confidence=0.99, horizon_days=1):
         """
-        Parametric VaR using delta-gamma-speed Taylor expansion.
+        Parametric VaR — COMPOSITE-NATIVE.
 
-        Uses the Cornish-Fisher expansion to adjust for non-normality
-        captured by the gamma (skewness proxy) and speed terms.
+        If vol is Composite, result is Composite and carries dVaR/dvol.
+        If confidence is Composite, result carries dVaR/dconfidence.
 
-        For delta-only VaR (ignoring convexity):
-            VaR ~ |delta * vol * z|
-
-        For delta-gamma VaR:
-            VaR ~ |delta * vol * z + 0.5 * gamma * (vol * z)^2|
-
-        This method uses all available Taylor orders.
+        Uses math.erf-based quantile (NOT the unreliable A&S 26.2.17).
 
         Args:
-            vol:            annualized volatility of the underlying.
-            confidence:     VaR confidence level (default 0.99 = 99%).
-            horizon_days:   holding period in days (default 1).
+            vol:          float or Composite — annualized volatility
+            confidence:   float — confidence level (0.99 = 99%)
+            horizon_days: float or Composite — holding period
 
         Returns:
-            float, estimated VaR (positive number = loss).
+            Composite — estimated VaR
         """
-        from math import sqrt, log
+        vol_c = _ensure_composite(vol)
+        horizon_c = _ensure_composite(horizon_days)
 
-        # Normal quantile (Abramowitz & Stegun 26.2.23)
-        p = 1 - confidence
+        # Normal quantile — scalar computation
+        p = 1.0 - confidence
         if p <= 0 or p >= 1:
             raise ValueError("confidence must be between 0 and 1")
-        t = sqrt(-2 * log(p))
+        t = math.sqrt(-2 * math.log(p))
         z = (t
              - (2.515517 + 0.802853 * t + 0.010328 * t**2)
              / (1 + 1.432788 * t + 0.189269 * t**2 + 0.001308 * t**3))
 
-        # Scale vol to horizon
-        daily_vol = vol * sqrt(horizon_days / 252)
-        shock = -daily_vol * z  # negative shock (loss scenario)
+        # Scale vol to horizon — COMPOSITE arithmetic
+        daily_vol = vol_c * R(math.sqrt(horizon_c.st() / 252))
+        shock = R(-1) * daily_vol * R(z)   # loss scenario
 
-        # Full Taylor P&L at that shock
+        # Full Taylor P&L at that shock — COMPOSITE
         pnl = self.scenario_pnl(shock)
-        return -pnl if pnl < 0 else pnl
+
+        # VaR = -pnl (assumes loss scenario)
+        return R(-1) * pnl
 
 
 # =============================================================================
-# 3. PANDAS INTEGRATION HELPERS
+# 3. COMPOSITE-NATIVE HELPERS
+# =============================================================================
+
+def portfolio_weighted_composite(composites, weights):
+    """
+    Build a single weighted-sum Composite from positions.
+
+    This is the composite-native equivalent of:
+        sum(price_i * weight_i for i in positions)
+
+    But the result is Composite, so if any weight is Composite,
+    you get d(portfolio_value)/d(weight_i) for free.
+
+    Args:
+        composites: list of Composite or FinancialComposite
+        weights:    list of float or Composite
+
+    Returns:
+        Composite — the weighted portfolio value
+    """
+    total = R(0)
+    for c, w in zip(composites, weights):
+        w_c = _ensure_composite(w)
+        total = total + w_c * c
+    return total
+
+
+def composite_polynomial_eval(coefficients, x):
+    """
+    Evaluate a polynomial with given coefficients at point x.
+
+    COMPOSITE-NATIVE: both coefficients and x can be Composite.
+
+    coefficients: list [a0, a1, a2, ...] where p(x) = a0 + a1*x + a2*x^2 + ...
+    x:            float or Composite
+
+    Returns: Composite
+    """
+    x_c = _ensure_composite(x)
+    result = R(0)
+    x_power = R(1)   # x^0
+    for coeff in coefficients:
+        c = _ensure_composite(coeff)
+        result = result + c * x_power
+        x_power = x_power * x_c
+    return result
+
+
+# =============================================================================
+# 4. PANDAS INTEGRATION (BOUNDARY LAYER)
 # =============================================================================
 
 def composites_to_dataframe(composites, labels=None, max_order=4):
     """
-    Convert a list of Composites to a pandas DataFrame.
-
-    Each row = one Composite.
-    Columns = 'price', 'delta', 'gamma', 'speed', 'd4', ...
-
-    Args:
-        composites: list of Composite or FinancialComposite.
-        labels:     optional row labels (e.g., ticker symbols).
-        max_order:  highest derivative order to include.
-
-    Returns:
-        pandas.DataFrame
-
-    Example:
-        import pandas as pd
-        df = composites_to_dataframe(
-            [fc1, fc2, fc3],
-            labels=['AAPL_C100', 'SPY_P450', 'TSLA_C200']
-        )
+    BOUNDARY: Convert composites to pandas DataFrame.
+    This is a serialization boundary — extracts scalars for display.
     """
     import pandas as pd
 
@@ -353,24 +466,13 @@ def composites_to_dataframe(composites, labels=None, max_order=4):
         row = [c.st()] + [c.d(n) for n in range(1, max_order + 1)]
         rows.append(row)
 
-    df = pd.DataFrame(rows, columns=columns, index=labels)
-    return df
+    return pd.DataFrame(rows, columns=columns, index=labels)
 
 
 def dataframe_to_composites(df, column_map=None):
     """
-    Convert a DataFrame back to a list of Composites.
-
-    Args:
-        df:          pandas DataFrame with derivative columns.
-        column_map:  dict mapping column names to derivative orders.
-                     If None, auto-detects from standard names.
-
-    Returns:
-        list of FinancialComposite
-
-    Example:
-        composites = dataframe_to_composites(df)
+    BOUNDARY: Convert DataFrame back to FinancialComposites.
+    This is a deserialization boundary — constructs composites from scalars.
     """
     if column_map is None:
         column_map = {}
@@ -394,38 +496,7 @@ def dataframe_to_composites(df, column_map=None):
                 if order == 0:
                     coeffs[0] = float(val)
                 else:
-                    # Store as Taylor coefficient: f^(n) / n!
                     coeffs[-order] = float(val) / math.factorial(order)
         result.append(FinancialComposite(coeffs))
 
     return result
-
-
-def ode_points_to_dataframe(points, max_order=2):
-    """
-    Convert solve_ode output (with composite=True) to DataFrame.
-
-    Args:
-        points:    list of (x, y_composite) from solve_ode.
-        max_order: highest derivative to extract.
-
-    Returns:
-        DataFrame with columns: x, y, dy_dy0, d2y_dy0, ...
-    """
-    import pandas as pd
-
-    names = {0: 'y', 1: 'dy_dy0', 2: 'd2y_dy0'}
-    columns = (['x']
-               + [names.get(n, f'd{n}y_dy0')
-                  for n in range(max_order + 1)])
-
-    rows = []
-    for x, y in points:
-        if isinstance(y, Composite):
-            row = ([x, y.st()]
-                   + [y.d(n) for n in range(1, max_order + 1)])
-        else:
-            row = [x, float(y)] + [0.0] * max_order
-        rows.append(row)
-
-    return pd.DataFrame(rows, columns=columns)

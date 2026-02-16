@@ -28,8 +28,7 @@ Validates all functionality in composite_finance.py:
   7. Taylor VaR
   8. Greeks dict serialization
   9. Pandas integration (composites_to_dataframe, dataframe_to_composites)
- 10. ODE points to DataFrame
- 11. Edge cases (zero price, empty composite, single-term)
+ 10. Edge cases (zero price, empty composite, single-term)
 
 Usage:
     python test_composite_finance.py
@@ -47,7 +46,6 @@ from composite.composite_finance import (
     ScenarioEngine,
     composites_to_dataframe,
     dataframe_to_composites,
-    ode_points_to_dataframe,
 )
 
 
@@ -170,9 +168,6 @@ def test_FC02_from_composite_type():
 def test_FC03_bond_duration_convexity():
     """FC03: Duration and convexity match bond conventions."""
     print("\n--- FC03: Duration & Convexity ---")
-    # Bond: P=100, dP/dy = -500, d2P/dy2 = 30000
-    # Duration = -dP/dy / P = 500/100 = 5.0
-    # Convexity = d2P/dy2 / P = 30000/100 = 300.0
     c = make_bond_composite(price=100.0, dP_dy=-500.0, d2P_dy2=30000.0)
     fc = FinancialComposite.from_composite(c)
 
@@ -193,20 +188,12 @@ def test_FC04_duration_zero_price():
 def test_FC05_scenario_pnl():
     """FC05: Scenario P&L uses full Taylor expansion."""
     print("\n--- FC05: Scenario P&L ---")
-    # price=10, delta=0.6, gamma=0.04
-    # For shock=1.0:
-    #   P&L = delta/1! * 1^1 + gamma/2! * 1^2
-    #       = 0.6 * 1 + 0.02 * 1 = 0.62
     c = make_option_composite(price=10.0, delta=0.6, gamma=0.04)
     fc = FinancialComposite.from_composite(c)
 
-    # shock = 1.0 for easy manual calculation
     pnl = fc.scenario_pnl(1.0)
-    # coeff(-1) = 0.6, coeff(-2) = 0.02
-    # P&L = 0.6 * 1^1 + 0.02 * 1^2 = 0.62
     check("pnl at shock=1.0", pnl, 0.62)
 
-    # shock = 0.0 should give 0
     check("pnl at shock=0.0", fc.scenario_pnl(0.0), 0.0)
 
 
@@ -219,7 +206,6 @@ def test_FC06_scenario_price():
     new_price = fc.scenario_price(1.0)
     check("scenario price at shock=1.0", new_price, 10.0 + 0.62)
 
-    # No shock = same price
     check("scenario price at shock=0.0", fc.scenario_price(0.0), 10.0)
 
 
@@ -243,7 +229,6 @@ def test_FC08_repr():
     fc = FinancialComposite.from_composite(c)
     r = repr(fc)
 
-    # Should contain dimensional notation AND financial summary
     check("repr contains 'price='", 'price=' in r, True)
     check("repr contains 'delta='", 'delta=' in r, True)
     check("repr contains 'gamma='", 'gamma=' in r, True)
@@ -274,7 +259,6 @@ def test_FC10_serialization_bytes_roundtrip():
     check("bytes rt: price", restored.st(), 10.0)
     check("bytes rt: delta", restored.d(1), 0.6)
     check("bytes rt: gamma", restored.d(2), 0.04)
-    # Check byte count: 3 terms * 12 bytes = 36
     check("bytes length", len(data), 36)
 
 
@@ -319,13 +303,8 @@ def test_FC13_scenario_engine_aggregation():
     weights = [100, 50, 200]
     engine = ScenarioEngine([c1, c2, c3], weights)
 
-    # total_price = 10*100 + 5*50 + 8*200 = 1000 + 250 + 1600 = 2850
     check("total price", engine.total_price(), 2850.0)
-
-    # total_delta = 0.6*100 + (-0.3)*50 + 0.7*200 = 60 - 15 + 140 = 185
     check("total delta", engine.total_delta(), 185.0)
-
-    # total_gamma = 0.04*100 + 0.02*50 + 0.05*200 = 4 + 1 + 10 = 15
     check("total gamma", engine.total_gamma(), 15.0)
 
 
@@ -349,13 +328,7 @@ def test_FC15_scenario_engine_pnl():
 
     engine = ScenarioEngine([c1, c2], weights=[100, 100])
 
-    # At shock=0, P&L = 0
     check("pnl at shock=0", engine.scenario_pnl(0.0), 0.0)
-
-    # At shock=1.0:
-    #   c1 pnl = 0.6*1 + 0.02*1 = 0.62, weighted: 62.0
-    #   c2 pnl = -0.3*1 + 0.01*1 = -0.29, weighted: -29.0
-    #   total = 33.0
     check("pnl at shock=1.0", engine.scenario_pnl(1.0), 33.0)
 
 
@@ -371,7 +344,6 @@ def test_FC16_scenario_ladder():
     check("ladder length", len(ladder), 3)
     check("ladder[0] shock", ladder[0][0], -1.0)
     check("ladder[1] pnl (zero shock)", ladder[1][1], 0.0)
-    # At shock=1.0: pnl = 0.6 + 0.02 = 0.62
     check("ladder[2] pnl", ladder[2][1], 0.62)
 
 
@@ -384,11 +356,9 @@ def test_FC17_taylor_var():
     var_99 = engine.taylor_var(vol=0.20, confidence=0.99)
     check("VaR is positive", var_99 > 0, True)
 
-    # Higher confidence should give higher VaR
     var_95 = engine.taylor_var(vol=0.20, confidence=0.95)
     check("VaR99 > VaR95", var_99 > var_95, True)
 
-    # Higher vol should give higher VaR
     var_high_vol = engine.taylor_var(vol=0.40, confidence=0.99)
     check("higher vol -> higher VaR", var_high_vol > var_99, True)
 
@@ -408,7 +378,6 @@ def test_FC18_taylor_var_horizon():
 def test_FC19_scenario_engine_accepts_raw_composites():
     """FC19: ScenarioEngine wraps raw Composites into FinancialComposite."""
     print("\n--- FC19: Engine Accepts Raw Composites ---")
-    # Pass plain Composite, not FinancialComposite
     c = Composite({0: 10.0, -1: 0.6, -2: 0.02})
     engine = ScenarioEngine([c])
 
@@ -419,14 +388,12 @@ def test_FC19_scenario_engine_accepts_raw_composites():
 def test_FC20_negative_shock():
     """FC20: Negative shock gives correct P&L direction."""
     print("\n--- FC20: Negative Shock ---")
-    # Long delta position: negative shock = loss
     c = make_option_composite(price=10.0, delta=0.6, gamma=0.04)
     fc = FinancialComposite.from_composite(c)
 
     pnl_down = fc.scenario_pnl(-1.0)
     pnl_up = fc.scenario_pnl(1.0)
 
-    # With positive delta, down shock should give negative P&L
     check("negative shock -> negative pnl", pnl_down < 0, True)
     check("positive shock -> positive pnl", pnl_up > 0, True)
 
@@ -474,7 +441,7 @@ def test_FC23_pandas_composites_to_dataframe():
     )
 
     check("df shape rows", df.shape[0], 2)
-    check("df shape cols", df.shape[1], 4)  # price, delta, gamma, speed
+    check("df shape cols", df.shape[1], 4)
     check("df OPT_A price", df.loc['OPT_A', 'price'], 10.0)
     check("df OPT_A delta", df.loc['OPT_A', 'delta'], 0.6)
     check("df OPT_B delta", df.loc['OPT_B', 'delta'], -0.3)
@@ -504,39 +471,9 @@ def test_FC24_pandas_dataframe_to_composites():
     check_type("rt[0] is FinancialComposite", restored[0], FinancialComposite)
 
 
-def test_FC25_pandas_ode_points():
-    """FC25: ode_points_to_dataframe handles composite and float y."""
-    print("\n--- FC25: Pandas ODE Points ---")
-    try:
-        import pandas as pd
-    except ImportError:
-        print("  (skipped — pandas not installed)")
-        return
-
-    # Simulate solve_ode output with composite=True
-    y1 = Composite({0: 1.0, -1: 1.0})   # y=1, dy/dy0=1
-    y2 = Composite({0: 0.5, -1: 0.5})   # y=0.5, dy/dy0=0.5
-    points = [(0.0, y1), (1.0, y2)]
-
-    df = ode_points_to_dataframe(points, max_order=1)
-
-    check("ode df shape", df.shape, (2, 3))  # x, y, dy_dy0
-    check("ode df x[0]", df.iloc[0]['x'], 0.0)
-    check("ode df y[0]", df.iloc[0]['y'], 1.0)
-    check("ode df dy_dy0[0]", df.iloc[0]['dy_dy0'], 1.0)
-    check("ode df y[1]", df.iloc[1]['y'], 0.5)
-
-    # Also test with plain float y (composite=False output)
-    points_scalar = [(0.0, 1.0), (1.0, 0.5)]
-    df2 = ode_points_to_dataframe(points_scalar, max_order=1)
-    check("scalar ode df y[0]", df2.iloc[0]['y'], 1.0)
-    check("scalar ode df dy_dy0[0]", df2.iloc[0]['dy_dy0'], 0.0)
-
-
 def test_FC26_symmetry_positive_negative_shock():
     """FC26: For pure-delta position, P&L is antisymmetric."""
     print("\n--- FC26: Shock Symmetry ---")
-    # Delta only, no gamma — P&L should be exactly antisymmetric
     c = Composite({0: 10.0, -1: 0.5})
     fc = FinancialComposite.from_composite(c)
 
@@ -549,33 +486,18 @@ def test_FC26_symmetry_positive_negative_shock():
 def test_FC27_gamma_convexity_effect():
     """FC27: With gamma, both up and down shocks gain value (long gamma)."""
     print("\n--- FC27: Gamma Convexity Effect ---")
-    # No delta, only gamma — should gain for any shock direction
-    c = Composite({0: 10.0, -2: 0.05})  # gamma/2! = 0.05, gamma = 0.1
+    c = Composite({0: 10.0, -2: 0.05})
     fc = FinancialComposite.from_composite(c)
 
     pnl_up = fc.scenario_pnl(1.0)
     pnl_down = fc.scenario_pnl(-1.0)
 
-    # Both should be positive (long gamma benefits from any move)
     check("long gamma: up shock gains", pnl_up > 0, True)
     check("long gamma: down shock gains", pnl_down > 0, True)
-    # And symmetric (even function)
     check("long gamma: symmetric", pnl_up, pnl_down)
 
 
-def test_FC28_total_nth_derivative():
-    """FC28: ScenarioEngine total_nth works for arbitrary order."""
-    print("\n--- FC28: total_nth ---")
-    c1 = make_option_composite(price=10.0, delta=0.6, gamma=0.04, speed=-0.003)
-    c2 = make_option_composite(price=5.0, delta=-0.3, gamma=0.02, speed=0.001)
-
-    engine = ScenarioEngine([c1, c2], weights=[10, 20])
-
-    # total speed = -0.003*10 + 0.001*20 = -0.03 + 0.02 = -0.01
-    check("total 3rd derivative", engine.total_nth(3), -0.01)
-
-
-def test_FC29_large_portfolio():
+def test_FC28_large_portfolio():
     """FC29: ScenarioEngine handles 100-position portfolio."""
     print("\n--- FC29: Large Portfolio ---")
     composites = [
@@ -585,13 +507,12 @@ def test_FC29_large_portfolio():
     weights = [1.0] * 100
     engine = ScenarioEngine(composites, weights)
 
-    # total price = sum(10.0 + i*0.1 for i in range(100))
     expected_price = sum(10.0 + i * 0.1 for i in range(100))
     check("100-position total price", engine.total_price(), expected_price)
-    check("100-position total delta", engine.total_delta(), 50.0)  # 0.5 * 100
+    check("100-position total delta", engine.total_delta(), 50.0)
 
 
-def test_FC30_greeks_dict_max_order():
+def test_FC29_greeks_dict_max_order():
     """FC30: to_greeks_dict respects max_order parameter."""
     print("\n--- FC30: Greeks Dict max_order ---")
     c = make_option_composite(price=10.0, delta=0.6, gamma=0.04, speed=-0.003)
@@ -640,12 +561,11 @@ def run_all():
     test_FC22_single_dim_composite()
     test_FC23_pandas_composites_to_dataframe()
     test_FC24_pandas_dataframe_to_composites()
-    test_FC25_pandas_ode_points()
+    # FC25 removed — ode_points_
     test_FC26_symmetry_positive_negative_shock()
     test_FC27_gamma_convexity_effect()
-    test_FC28_total_nth_derivative()
-    test_FC29_large_portfolio()
-    test_FC30_greeks_dict_max_order()
+    test_FC28_large_portfolio()
+    test_FC29_greeks_dict_max_order()
 
     print("\n" + "=" * 60)
     print(f"PASSED: {PASSED}/{TOTAL}")
