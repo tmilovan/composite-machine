@@ -48,3 +48,5 @@ htmlcov/
 *.log
 *.bak
 *.tmp
+.notion_sync_private.json
+.notion_sync_public.json
