@@ -127,10 +127,10 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 
 ## Modules
 
-- **[composite_lib.py](composite.composite_lib.py)** — Core engine. Composite class, all arithmetic, transcendentals, derivatives, limits, integration.
-- **[composite_multivar.py](composite.composite_multivar.py)** — Multivariable calculus. MC class, partial derivatives, gradient, Hessian, Jacobian, Laplacian, divergence, curl.
-- **[composite_extended.py](composite.composite_extended.py)** — Complex analysis. Complex composites, residues, poles, contour integrals, asymptotics, ODE solver.
-- **[composite_vector.py](composite.composite_vector.py)** — Vector calculus. Triple integrals, line integrals, surface integrals.
+- **[composite_lib.py](composite/composite_lib.py)** — Core engine. Composite class, all arithmetic, transcendentals, derivatives, limits, integration.
+- **[composite_multivar.py](composite/composite_multivar.py)** — Multivariable calculus. MC class, partial derivatives, gradient, Hessian, Jacobian, Laplacian, divergence, curl.
+- **[composite_extended.py](composite/composite_extended.py)** — Complex analysis. Complex composites, residues, poles, contour integrals, asymptotics, ODE solver.
+- **[composite_vector.py](composite/composite_vector.py)** — Vector calculus. Triple integrals, line integrals, surface integrals.
 
 ---
 
