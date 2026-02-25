@@ -1,404 +1,161 @@
-# Composite Machine — Supported Operations & Roadmap to Turing Completeness
+# docs/ROADMAP.md
 
-> 🎯 **This page catalogues every mathematical operation the Composite Machine system supports**, organized by confidence level: what we're confident works, what likely works but needs more validation, and what we haven't attempted yet but believe is reachable. The long-term goal is to confirm enough working operations — and assess their efficiency — to eventually claim Turing completeness or establish how close we get.
+# Composite Machine — What Works, What Doesn't, What's Next
 
----
-
-## How to Read This Page
-
-Each section marks operations with a confidence level:
-
-- 🟢 **Works** — we're confident this operates correctly
-- 🟡 **Likely works, needs validation** — implemented and appears correct, but edge cases and efficiency not fully explored
-- 🔵 **Not yet attempted** — theoretically supported by the system, will try
+An honest accounting of where the project stands.
 
 ---
 
-# Operations We're Confident In
+## What works
 
-These are the core capabilities. We're confident they work correctly based on the algebra and the implementations built so far.
+These are tested, stable, and used regularly.
 
----
+### Core arithmetic
 
-## I. Core Arithmetic 🟢
+Numbers are sparse dicts over integer dimensions. Multiplication is polynomial multiplication, division polynomial division. This follows from Laurent polynomial ring theory — nothing exotic about the arithmetic itself.
 
-The foundational operations, inherited from Laurent polynomial ring theory.
+- Addition, subtraction, negation
+- Multiplication
+- Division — single-term and multi-term (polynomial long division)
+- Integer and real-valued powers
 
-<table>
-  <thead>
-    <tr>
-      <th>Operation</th>
-      <th>What It Does</th>
-      <th>Confidence</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>Addition</td>
-      <td><code>|a|ₘ + |b|ₙ</code> — same-dim coefficients add, cross-dim terms coexist</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td>Subtraction</td>
-      <td><code>a - b</code> — additive inverse</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td>Multiplication</td>
-      <td><code>|a|ₘ × |b|ₙ = |ab|ₘ₊ₙ</code> — dimensions add, coefficients multiply</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td>Division (single-term)</td>
-      <td><code>|a|ₘ / |b|ₙ = |a/b|ₘ₋ₙ</code> — dimensions subtract</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td>Multi-term division</td>
-      <td>Polynomial long division for multi-term divisors</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td>Integer powers</td>
-      <td><code>(|a|ₙ)ᵏ = |aᵏ|ₙₖ</code></td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td>Real-valued powers</td>
-      <td><code>x^s</code> for any real s via <code>exp(s·ln(x))</code></td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td>Negation</td>
-      <td><code>-|a|ₙ = |-a|ₙ</code></td>
-      <td>🟢 Works</td>
-    </tr>
-  </tbody>
-</table>
+### Differentiation
 
-These follow directly from standard ring theory on Laurent polynomials. The algebra guarantees correctness.
+All derivatives from a single evaluation. Evaluate `f(a + ε)`, read the coefficients at negative dimensions. No tape, no graph, no separate differentiation pass.
+
+- First through nth derivative
+- All derivatives simultaneously
+- Taylor coefficients as direct coefficient reads
+- Chain rule and product rule handled automatically by dimensional convolution
+
+### Limits
+
+Plug in the infinitesimal or infinity, read the standard part. No L'Hôpital needed — composite division resolves indeterminate forms directly.
+
+- Limits at a point, at zero, at ±∞
+- One-sided limits
+- 0/0 and other indeterminate forms
+
+### Transcendental functions
+
+All implemented via Taylor series on composite numbers. Derivatives come free.
+
+- sin, cos, tan, exp, ln, sqrt
+- asin, acos, atan
+- sinh, cosh, tanh
+
+### Integration
+
+Works well for a wide range of functions. Adaptive stepping uses higher-order Taylor coefficients for error estimates.
+
+- Definite integrals
+- Improper integrals (infinite bounds)
+- Adaptive integration with automatic step-size control
+- Multi-dimensional integration
+
+168 tests cover all of the above. They all pass.
+
+### Provenance-preserving operations
+
+This is the part that's genuinely new. Multiplying by zero doesn't destroy information — it shifts it to dimension −1. Dividing by zero shifts it to dimension +1. You can recover the original value by reversing the operation.
+
+- `a × 0` → coefficient preserved at dim −1
+- `a / 0` → coefficient preserved at dim +1
+- `(a × 0) / 0` → recovers `a`
+- `0 / 0` → resolves to `1` (provenance-dependent)
+- Arbitrary chains of ×0 and ÷0 preserve and recover values
 
 ---
 
-## II. Provenance-Preserving Operations (Novel) 🟢
+## What works but needs more testing
 
-The operations that *no other system* provides — the core contribution of this work.
+Implemented and functional, but edge cases and numerical stability haven't been fully explored.
 
-<table>
-  <thead>
-    <tr>
-      <th>Operation</th>
-      <th>Result</th>
-      <th>Confidence</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><strong>a × 0</strong> (×ZERO)</td>
-      <td><code>|a|₋₁</code> — coefficient preserved</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td><strong>a / 0</strong> (÷ZERO)</td>
-      <td><code>|a|₁</code> — coefficient preserved</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td><strong>(a×0) / 0</strong></td>
-      <td><code>a</code> — original value recovered</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td><strong>(a/0) × 0</strong></td>
-      <td><code>a</code> — original value recovered</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td><strong>0 / 0</strong></td>
-      <td><code>1</code> (provenance-dependent)</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td><strong>0 × ∞</strong></td>
-      <td><code>1</code> (duality cancellation)</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td><strong>|a|₋₁ / |b|₋₁</strong></td>
-      <td><code>a/b</code> — ratio of provenances</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td><strong>Deep ×0/÷0 chains</strong></td>
-      <td>Repeated ×0 then ÷0 preserves value</td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td><strong>Mixed zero/infinity chains</strong></td>
-      <td><code>(a×0×∞)/∞/0 = a</code></td>
-      <td>🟢 Works</td>
-    </tr>
-  </tbody>
-</table>
+### Multivariable calculus
+
+Extends the algebra using tuple dimensions.
+
+- Partial derivatives (first and higher order)
+- Mixed partials
+- Gradient, Laplacian
+- Hessian, Jacobian
+- Divergence, curl
+
+### Vector calculus
+
+- Line integrals
+- Surface integrals
+- Triple integrals
+
+### Complex analysis
+
+Same arithmetic, complex coefficients.
+
+- Residue computation
+- Pole detection
+- Contour integrals via residue theorem
+- Convergence radius estimation
+- Analytic continuation (path stepping through convergence disks)
+
+### ODE solving
+
+- RK4 with composite evaluation
+- Works for basic problems, not rigorously validated
+
+### Asymptotic analysis
+
+- Asymptotic expansion at infinity
+- Growth order detection
 
 ---
 
-## III. Single-Variable Differentiation 🟢
+## What's not implemented yet
 
-All reduce to the same mechanism: evaluate `f(a + h)` where `h = ZERO`, read coefficients at negative dimensions.
-
-| Operation | Mechanism | Confidence |
-|---|---|---|
-| First derivative f′(a) | Read dimension −1, multiply by 1! | 🟢 Works |
-| Second derivative f″(a) | Read dimension −2, multiply by 2! | 🟢 Works |
-| nth derivative f⁽ⁿ⁾(a) | Read dimension −n, multiply by n! | 🟢 Works |
-| All derivatives at once | One evaluation → all coefficients | 🟢 Works |
-| Taylor coefficients | Direct coefficient read at −n | 🟢 Works |
+- Inverse hyperbolics (asinh, acosh, atanh)
+- Fourier, Laplace, Z transforms
+- Special functions (Bessel, gamma, etc.)
+- Optimization routines
+- Stiff ODE solvers
+- Systems of ODEs
+- Branch cut handling in analytic continuation
 
 ---
 
-## IV. Limits 🟢
+## Performance
 
-| Operation | Mechanism |
-|---|---|
-| lim x→0 f(x) | Evaluate f(ZERO), read st() |
-| lim x→a f(x) | Evaluate f(R(a)+ZERO), read st() |
-| lim x→∞ f(x) | Evaluate f(INF), read st() |
-| lim x→−∞ f(x) | Evaluate f(−INF), read st() |
-| Right-hand limit | Evaluate f(R(a)+ZERO) |
-| Left-hand limit | Evaluate f(R(a)−ZERO) |
-| L'Hôpital cases (0/0) | Composite division resolves automatically |
+Pure Python, dict-based sparse storage. Roughly 500–1000× slower than PyTorch for simple gradients.
+
+This is a research prototype. It's useful for problems where having all derivative orders, algebraic limits, or provenance matters more than throughput. It's not useful for production numerical computing — not yet.
 
 ---
 
-## V. Algebraic Properties (Ring Axioms) 🟢
+## Roadmap
 
-- **Associativity** — `(a × b) × c = a × (b × c)` 🟢
-- **Commutativity** — `a × b = b × a`, `a + b = b + a` 🟢
-- **Distributivity** — `a × (b + c) = ab + ac` 🟢
-- **Multiplicative identity** — `|1|₀` 🟢
-- **Additive inverse** — `a + (−a) = 0` 🟢
-- **Total ordering** — Full chain: `−∞ < −1 < −h < 0 < h < 1 < ∞` 🟢
-- **No universal additive identity** — intentional tradeoff for provenance 🟢
+In rough priority order:
 
----
+1. **Validate experimental modules** — systematic edge-case testing for multivariable, complex analysis, vector calculus, and ODE solving
+2. **Missing transcendentals** — inverse hyperbolics, special functions
+3. **Performance** — extending numpy support.
+4. **Transforms** — Fourier, Laplace. These should map naturally onto the dimensional structure.
+5. **Better ODE support** — implicit methods for stiff systems, adaptive order selection
 
-# Operations That Likely Work, Need More Validation
+### What's not on the roadmap
 
-These are implemented and appear correct, but edge cases, numerical stability, and efficiency haven't been fully explored.
+There's a theoretical question about whether this structure can encode a universal Turing machine (dimensions as tape positions, coefficients as symbols, ×0 as tape shift). It's an interesting idea but it's not something we're focusing on. If someone wants to try it, contributions are welcome. There is a basic set of tests in Turing playground that surprisingly pass, but this needs more scrutiny.
 
 ---
 
-## VI. Integration 🟡
+## The underlying idea
 
-<table>
-  <thead>
-    <tr>
-      <th>Operation</th>
-      <th>Mechanism</th>
-      <th>Confidence</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>Antiderivative</td>
-      <td>Dimensional shift: <code>|c|₋ₙ → |c/n|₋₍ₙ₊₁₎</code></td>
-      <td>🟢 Works</td>
-    </tr>
-    <tr>
-      <td>Definite integral ∫ₐᵇ f(x) dx</td>
-      <td>Antiderivative + boundary evaluation</td>
-      <td>🟡 Works for polynomials, needs validation on harder functions</td>
-    </tr>
-    <tr>
-      <td>Stepped integration</td>
-      <td>Multi-point Taylor stepping with free error estimate</td>
-      <td>🟡 Needs efficiency assessment</td>
-    </tr>
-    <tr>
-      <td>Adaptive integration</td>
-      <td>Automatic step-size control from higher-order coefficients</td>
-      <td>🟡 Needs efficiency assessment</td>
-    </tr>
-    <tr>
-      <td>Improper ∫ₐ^∞ f(x) dx</td>
-      <td>Adaptive stepping + asymptotic tail analysis</td>
-      <td>🟡 Needs more edge case validation</td>
-    </tr>
-    <tr>
-      <td>Improper ∫₋∞^∞ f(x) dx</td>
-      <td>Split at 0 + two improper integrals</td>
-      <td>🟡 Needs more edge case validation</td>
-    </tr>
-    <tr>
-      <td>Singular endpoint integrals</td>
-      <td>Approach singularity with offset</td>
-      <td>🟡 Needs more edge case validation</td>
-    </tr>
-  </tbody>
-</table>
+Every operation listed above uses the same mechanism: evaluate a function on a composite number, read coefficients at the right dimensions.
+
+- Dimension 0 → value
+- Dimension −n → nth derivative coefficient (× n!)
+- Dimension +n → antiderivative / growth structure
+- Dimension −1 (complex) → residue
+
+One algebraic structure. Multiple mathematical readings. That's the whole idea.
 
 ---
-
-## VII. Transcendental Functions 🟡
-
-All implemented via Taylor series on Composite numbers — derivatives come free.
-
-| Function | Status | Confidence |
-|---|---|---|
-| sin(x), cos(x) | sin²+cos²=1 identity holds | 🟢 Works |
-| exp(x) | exp(0)=1, d/dx exp=exp | 🟢 Works |
-| ln(x) | Via Mercator series | 🟡 Works near expansion point, convergence radius matters |
-| sqrt(x) | Via binomial series | 🟡 Works near expansion point |
-| tan(x) | sin/cos division | 🟡 Needs validation near singularities |
-| asin(x), acos(x), atan(x) | Inverse trig via derivative integration | 🟡 Needs more validation |
-| sinh(x), cosh(x), tanh(x) | Via exp combinations | 🟡 Likely correct, needs validation |
-| Complex exp, sin, cos | Complex-coefficient Taylor series | 🟡 Likely correct, needs validation |
-
----
-
-## VIII. Multivariate Calculus 🟡
-
-Extends the same algebra using tuple dimensions (n,m) ∈ ℤ².
-
-| Operation | Mechanism | Confidence |
-|---|---|---|
-| Partial derivative ∂f/∂xᵢ | Read tuple dimension with −1 in variable i | 🟢 Works |
-| Higher partials ∂²f/∂xᵢ² | Read tuple dimension with −2 in variable i | 🟡 Works for simple cases |
-| Mixed partials ∂²f/∂x∂y | Read tuple dimension (−1,−1) | 🟡 Works for simple cases |
-| Gradient ∇f | Vector of first partials | 🟢 Works |
-| Laplacian ∇²f | Sum of second partials | 🟡 Works, needs validation on complex functions |
-| Harmonic function detection | Laplacian = 0 check | 🟡 Works for polynomial cases |
-
----
-
-## IX. Complex Analysis 🟡
-
-The single change: allow complex coefficients. The arithmetic is identical.
-
-| Operation | Mechanism | Confidence |
-|---|---|---|
-| Residue computation | Read dimension −1 coefficient | 🟡 Works for simple poles, needs validation for higher-order |
-| Pole order detection | Highest positive dimension with nonzero coefficient | 🟡 Likely correct, needs more cases |
-| Contour integrals | 2πi × sum of residues (Residue Theorem) | 🟡 Depends on residue accuracy |
-
----
-
-## X. Asymptotic Analysis 🟡
-
-Evaluate at INF, read coefficients.
-
-| Operation | Mechanism | Confidence |
-|---|---|---|
-| Asymptotic expansion | f(INF) → coefficients at dim 0, −1, −2, … | 🟡 Works for rational functions, needs validation on transcendentals |
-| Growth order | Highest nonzero dimension of f(INF) | 🟡 Likely correct |
-| Convergence radius | Ratio test on Taylor coefficients | 🟡 Approximate — depends on coefficient quality |
-
----
-
-# Operations Not Yet Attempted
-
-These are theoretically supported by the system's structure. We believe they should work, but haven't built or validated them yet.
-
----
-
-## XI. ODE Solving 🔵
-
-One composite evaluation should give all derivative orders, enabling arbitrary-order Taylor stepping.
-
-| Operation | Mechanism | Status |
-|---|---|---|
-| Single ODE step | Composite eval → Taylor jet → step | 🔵 Implemented, not rigorously validated |
-| Adaptive ODE solving | Error-controlled stepping | 🔵 Implemented, accuracy and efficiency unknown |
-| Stiff ODEs | Would need implicit methods | 🔵 Not attempted |
-| Systems of ODEs | Multi-variable composite extension | 🔵 Not attempted |
-
----
-
-## XII. Analytic Continuation 🔵
-
-Chain composite evaluations along a path, staying within convergence disks.
-
-| Operation | Mechanism | Status |
-|---|---|---|
-| Path continuation | Step through overlapping convergence disks | 🔵 Implemented, not rigorously validated |
-| Singularity detection | Scan convergence radius across a region | 🔵 Implemented, accuracy unknown |
-| Branch cut handling | Would need signed path tracking | 🔵 Not attempted |
-
----
-
-## XIII. General Computation (Turing Machine Encoding) 🔵
-
-The system's ℤ-graded sparse structure *should* be able to encode a Turing machine tape, with coefficients as cell values and dimensions as positions. If this works for arbitrary machines, the system would be Turing complete.
-
-| Operation | Mechanism |
-|---|---|
-| Tape as Composite number | Dimension n = cell position, coefficient = symbol |
-| ×ZERO as tape shift | Shifts all cells down one dimension |
-| Universal TM simulation | Encode a UTM description on the tape and run it |
-| Arbitrary alphabet encoding | Any finite alphabet maps to integer coefficients |
-
----
-
-# The Unifying Principle
-
-> 💡 **One mechanism, many readings**
->
-> Every operation above uses the **same underlying mechanism:** evaluate a function on a Composite number, read coefficients at the right dimensions.
->
-> - **Dimension 0** → function value, limit, standard part
-> - **Dimension −n** → nth derivative coefficient (× n!)
-> - **Dimension −1** → residue (complex analysis)
-> - **Dimension +n** → antiderivative / growth order
-> - **Highest positive dim** → pole order
-> - **Coefficient ratios** → convergence radius
-> - **Arbitrary dimension** → tape cell (if TM encoding works)
->
-> The ℤ-graded sparse structure simultaneously serves as a **Taylor jet**, a **Laurent polynomial**, and a **provenance tracker**. Whether it also fully serves as a **universal computational tape** is the open question.
-
----
-
-# Summary
-
-| Category | Operations | Status |
-|---|---|---|
-| Core arithmetic | 8 | 🟢 Works |
-| Provenance-preserving (novel) | 9 | 🟢 Works |
-| Differentiation | 5 | 🟢 Works |
-| Limits | 7 | 🟢 Works |
-| Algebraic properties | 7 | 🟢 Works |
-| Integration | 7 | 🟡 Likely works, needs validation |
-| Transcendental functions | 12 | 🟡 Mostly works, edge cases need checking |
-| Multivariate calculus | 6 | 🟡 Works for simple cases, needs more |
-| Complex analysis | 3 | 🟡 Likely works, needs validation |
-| Asymptotic analysis | 3 | 🟡 Likely works, needs validation |
-| ODE solving | 4 | 🔵 Not yet validated |
-| Analytic continuation | 3 | 🔵 Not yet validated |
-| General computation (TM) | 4 | 🔵 Not yet validated |
-| **Total** | **78** | |
-
----
-
-# Roadmap
-
-> 🗺️ **The goal: confirm as many operations as possible and assess efficiency**
->
-> The path to a Turing completeness claim (or as close as we can get) is:
->
-> 1. **Validate 🟡 operations** — systematically check edge cases, numerical stability, and correctness against known results for integration, transcendentals, multivariate, complex analysis, and asymptotics
-> 2. **Attempt 🔵 operations** — build and validate ODE solving, analytic continuation, and the Turing machine encoding
-> 3. **Assess efficiency** — for each operation, measure how the Composite approach compares to standard methods (speed, accuracy, code complexity)
-> 4. **Attempt universal TM simulation** — if the tape encoding works, try running a universal Turing machine on it. This is the key milestone.
-> 5. **Document results honestly** — for each operation, record whether it works, how well, and where the limits are
-
-### What's unique regardless of the outcome
-
-> 💎 Whether or not we reach a full Turing completeness claim, the system already uniquely offers:
->
-> 1. **One evaluation → all derivatives** — equivalent to Taylor-mode AD but without graph construction
-> 2. **Calculus as coefficient reads** — derivatives, limits, integrals, residues all from the same algebraic object
-> 3. **A single ℤ-graded structure unifying multiple mathematical views** — this structural insight stands on its own
-> 4. **Reversible ×0 and ÷0** — no other arithmetic system does this while preserving distributivity
-> 5. **0/0 as a defined, provenance-dependent operation** — not indeterminate, not NaN, not ⊥
 
 © Toni Milovan. Documentation licensed under CC BY-SA 4.0. Code licensed under AGPL-3.0.
