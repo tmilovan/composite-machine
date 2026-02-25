@@ -1,5 +1,4 @@
-# README.md — new draft
-
+# README.md
 
 
 # Composite Machine
@@ -128,10 +127,10 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 
 ## Modules
 
-- **composite_[lib.py](http://lib.py)** — Core engine. Composite class, all arithmetic, transcendentals, derivatives, limits, integration.
-- **composite_[multivar.py](http://multivar.py)** — Multivariable calculus. MC class, partial derivatives, gradient, Hessian, Jacobian, Laplacian, divergence, curl.
-- **composite_[extended.py](http://extended.py)** — Complex analysis. Complex composites, residues, poles, contour integrals, asymptotics, ODE solver.
-- **composite_[vector.py](http://vector.py)** — Vector calculus. Triple integrals, line integrals, surface integrals.
+- **[composite_lib.py](composite.composite_lib.py)** — Core engine. Composite class, all arithmetic, transcendentals, derivatives, limits, integration.
+- **[composite_multivar.py](composite.composite_multivar.py)** — Multivariable calculus. MC class, partial derivatives, gradient, Hessian, Jacobian, Laplacian, divergence, curl.
+- **[composite_extended.py](composite.composite_extended.py)** — Complex analysis. Complex composites, residues, poles, contour integrals, asymptotics, ODE solver.
+- **[composite_vector.py](composite.composite_vector.py)** — Vector calculus. Triple integrals, line integrals, surface integrals.
 
 ---
 
@@ -186,9 +185,10 @@ Python 3.7+. NumPy is optional (used for FFT-accelerated multiplication).
 ## Testing
 
 ```bash
-python test_composite.py          # core + calculus + algebra
-python composite_stress_test.py   # hard problems
-python composite_hard_edges.py    # edge cases, high-order, deep chains
+python test_composite.py                # ~105 tests — core + calculus + algebra
+python composite_stress_test.py         # 20 hard problems (limits, derivatives, integrals)
+python composite_hard_edges.py          # 20 hard edge cases (3rd/4th order, deep chains)
+python any_test_file.py                 # evergrowing test suite
 ```
 
 168 tests, all passing.
@@ -207,10 +207,11 @@ Milovan, T. (2026). *Provenance-Preserving Arithmetic: A Unified Framework for A
 
 ## Docs
 
-- Tutorial — Getting Started (docs/Tutorial - Getting [Started.md](http://Started.md))
-- API Reference (docs/API [Reference.md](http://Reference.md))
-- Implementation Guide (docs/Implementation [Guide.md](http://Guide.md))
-- Examples (docs/[Examples.md](http://Examples.md))
+- [**Tutorial**](docs/Tutorial%20-%20Getting%20Started.md) - Get started quickly
+- [**API Reference**](docs/API%20Reference.md) - Complete function docs
+- [**Implementation Guide**](docs/Implementation%20Guide.md) - How it works internally
+- [**Examples**](docs/Examples.md) - Code snippets for common tasks
+- [**Roadmap (DRAFT)**](docs/Roadmap%20(DRAFT).md) - What's next
 
 ---
 
