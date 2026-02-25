@@ -19,7 +19,7 @@ Alpha stage. Research code. The math works, performance doesn't (yet).
 
 ## What's this
 
-Numbers are sparse dicts mapping integer dimensions to coefficients. Dimension 0 is the value. Negative dimensions store derivative info. Multiplication convolves dimensions — turns out that's the same thing as the product rule and chain rule, just expressed as data structure operations.
+Numbers are sparse dicts mapping integer dimensions to coefficients. Dimension 0 is the value. Negative dimensions store derivative info. Multiply dimensions — turns out that's the same thing as the product rule and chain rule, just expressed as data structure operations.
 
 ```python
 from composite.composite_lib import R, ZERO
