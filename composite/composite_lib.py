@@ -16,17 +16,15 @@
 #
 # Commercial licensing available. Contact: tmilovan@fwd.hr
 """
-composite_lib.py — Unified Calculus Library (Fixed v2: Line Integral Composite-First)
-=====================================================================================
+composite_lib.py — Unified Calculus Library (Fixed v3: Expressed Zero Preservation)
+====================================================================================
 All operations use composite arithmetic. No plain-number fast paths
 in transcendental functions. Integration accumulates as Composite.
 
-v2 changes:
-  - Line integral rewritten to composite-first (Option B: probe once, choose path)
-  - Phase 1: Composite tangent vectors via .d(1) — no epsilon
-  - Phase 2: Routes through integrate_adaptive — adaptive, error estimate
-  - Phase 3: F evaluated at composite curve positions — full Taylor in t
-  - Fallback for non-composite curves still benefits from Phase 2
+v3 changes:
+  - Composite(0) now produces |0|₀ (expressed zero at dim 0), not empty
+  - Dict construction preserves zero-valued coefficients
+  - Empty composite repr changed from |0|₀ to ∅
 
 Usage:
     from composite_lib import *
@@ -99,18 +97,18 @@ class Composite:
                 np.array([], dtype=np.int64),
                 np.array([], dtype=np.float64))
         elif isinstance(coefficients, (int, float)):
-            if coefficients == 0:
-                self._data = self._backend.create_from_terms(
-                    np.array([], dtype=np.int64),
-                    np.array([], dtype=np.float64))
-            else:
-                self._data = self._backend.create(0, float(coefficients))
+            # FIXED: Composite(0) → |0|₀ (expressed zero at dim 0)
+            # Previously: Composite(0) → {} (empty, indistinguishable from Composite())
+            # Now: any numeric input creates an expressed dimension 0
+            self._data = self._backend.create(0, float(coefficients))
         elif isinstance(coefficients, dict):
-            items = {k: v for k, v in coefficients.items() if v != 0}
-            if items:
-                sorted_dims = sorted(items.keys())
+            # FIXED: keep expressed zeros — if a dimension is in the dict,
+            # it was expressed, even if its coefficient is 0.0
+            # Previously: {k: v for k, v in ... if v != 0} stripped them
+            if coefficients:
+                sorted_dims = sorted(coefficients.keys())
                 dims = np.array(sorted_dims, dtype=np.int64)
-                vals = np.array([items[d] for d in sorted_dims], dtype=np.float64)
+                vals = np.array([coefficients[d] for d in sorted_dims], dtype=np.float64)
                 self._data = self._backend.create_from_terms(dims, vals)
             else:
                 self._data = self._backend.create_from_terms(
@@ -134,12 +132,6 @@ class Composite:
     # -------------------------------------------------------------------------
     # Backward compatibility: .c property
     # -------------------------------------------------------------------------
-    # This lets existing code that reads self.c (antiderivative, show,
-    # TracedComposite, transcendentals that check `x.c`) keep working.
-    # It reconstructs a dict from the backend data.
-    # MIGRATE AWAY FROM THIS over time — it defeats the purpose of
-    # the backend by creating a dict on every access.
-    # -------------------------------------------------------------------------
 
     @property
     def c(self):
@@ -154,7 +146,7 @@ class Composite:
         return {int(d): float(v) for d, v in zip(dims, vals)}
 
     # -------------------------------------------------------------------------
-    # Constructors (UNCHANGED — they use dict, which __init__ accepts)
+    # Constructors (UNCHANGED)
     # -------------------------------------------------------------------------
 
     @classmethod
@@ -180,7 +172,8 @@ class Composite:
         dims, vals = self._backend.to_arrays(self._data)
 
         if len(dims) == 0:
-            return "|0|₀"
+            # FIXED: was "|0|₀" — now distinguishable from expressed |0|₀
+            return "∅"
 
         sub = "₀₁₂₃₄₅₆₇₈₉"
         def fmt_dim(n):
@@ -206,40 +199,16 @@ class Composite:
     # =========================================================================
 
     def to_dict(self):
-        """
-        Serialize to JSON-safe dict.
-
-        Returns dict with string keys (JSON requires strings)
-        and float values. Round-trips perfectly via from_dict().
-
-        Example:
-            c = R(9) + 6 * ZERO
-            c.to_dict()  # → {'0': 9.0, '-1': 6.0}
-        """
+        """Serialize to JSON-safe dict."""
         return {str(k): v for k, v in self.c.items()}
 
     @classmethod
     def from_dict(cls, d):
-        """
-        Deserialize from dict. Accepts string or int keys.
-
-        Example:
-            Composite.from_dict({'0': 9.0, '-1': 6.0})
-            # → |9|₀ + |6|₋₁
-        """
+        """Deserialize from dict. Accepts string or int keys."""
         return cls({int(k): v for k, v in d.items()})
 
     def to_bytes(self):
-        """
-        Serialize to compact binary format.
-
-        Layout: sequence of (int32 dimension, float64 coefficient) pairs.
-        12 bytes per active dimension. No header — length is implicit.
-
-        Example:
-            data = result.to_bytes()   # 24 bytes for 2-term composite
-            restored = Composite.from_bytes(data)
-        """
+        """Serialize to compact binary format."""
         import struct
         parts = []
         for dim, coeff in self.c.items():
@@ -257,31 +226,12 @@ class Composite:
         return cls(c)
 
     def to_array(self, dims):
-        """
-        Extract coefficients at fixed dimensions as a flat list.
-
-        Useful for columnar storage (NumPy, Parquet, CSV).
-        Missing dimensions return 0.0.
-
-        Args:
-            dims: tuple/list of integer dimensions to extract.
-
-        Example:
-            c = R(9) + 6 * ZERO
-            c.to_array((0, -1, -2))  # → [9.0, 6.0, 0.0]
-        """
+        """Extract coefficients at fixed dimensions as a flat list."""
         return [self.c.get(d, 0.0) for d in dims]
 
     @classmethod
     def from_array(cls, values, dims):
-        """
-        Reconstruct from flat list + dimension map.
-        Inverse of to_array().
-
-        Example:
-            Composite.from_array([9.0, 6.0, 0.0], (0, -1, -2))
-            # → |9|₀ + |6|₋₁
-        """
+        """Reconstruct from flat list + dimension map."""
         return cls({d: v for d, v in zip(dims, values) if v != 0})
 
     def to_json(self):
@@ -294,7 +244,6 @@ class Composite:
         """Deserialize from JSON string."""
         import json
         return cls.from_dict(json.loads(s))
-
 
     # -------------------------------------------------------------------------
     # Arithmetic operations
@@ -403,12 +352,7 @@ class Composite:
         return self._backend.read_dim(self._data, dim)
 
     def d(self, n=1):
-        """
-        Extract nth derivative.
-        d(1) = first derivative
-        d(2) = second derivative
-        etc.
-        """
+        """Extract nth derivative."""
         return self._backend.read_dim(self._data, -n) * math.factorial(n)
 
     def __format__(self, fmt):
@@ -422,10 +366,7 @@ class Composite:
     # -------------------------------------------------------------------------
 
     def eval_taylor(self, h_value):
-        """
-        Evaluate Taylor polynomial by substituting h → h_value.
-        Uses backend arrays instead of dict iteration.
-        """
+        """Evaluate Taylor polynomial by substituting h → h_value."""
         dims, vals = self._backend.to_arrays(self._data)
         mask = dims < 0
         neg_dims = dims[mask]
@@ -434,9 +375,7 @@ class Composite:
                    for d, v in zip(neg_dims, neg_vals))
 
     def integrate_step(self, dx):
-        """
-        Integrate over interval [x, x+dx] where this composite represents f(x+h).
-        """
+        """Integrate over interval [x, x+dx]."""
         Fx = antiderivative(self)
         return Fx.eval_taylor(dx)
 
@@ -481,17 +420,14 @@ class Composite:
         return result != 0
 
 def _compare(a, b):
-    """Lexicographic comparison by dimension (highest first).
-    Uses backend arrays instead of reading .c dicts."""
+    """Lexicographic comparison by dimension (highest first)."""
     a_dims, a_vals = a._backend.to_arrays(a._data)
     b_dims, b_vals = b._backend.to_arrays(b._data)
 
-    # Union of all dimensions
     all_dims = np.union1d(a_dims, b_dims)
     if len(all_dims) == 0:
         return 0
 
-    # Walk from highest dimension down
     for dim in reversed(all_dims):
         ca = a._backend.read_dim(a._data, int(dim))
         cb = b._backend.read_dim(b._data, int(dim))
@@ -548,20 +484,7 @@ INF = Composite.infinity()    # |1|₁ (infinity)
 h = ZERO                      # Alias: h is the infinitesimal
 
 def set_max_order(n: int = None):
-    """Set global MAX truncation order.
-
-    Controls how many derivative orders survive convolution.
-    None = unlimited (default, preserves all terms).
-    5 = keep up to 5th derivative (~200x faster than unlimited).
-
-    For most finance applications, max_order=5 or 6 is sufficient
-    (price + delta + gamma + speed + 4th + 5th order).
-
-    Example:
-        set_max_order(5)    # fast mode: ~0.02ms/option
-        set_max_order(None) # full precision: ~3.8ms/option
-        set_max_order(10)   # balanced: ~0.1ms/option
-    """
+    """Set global MAX truncation order."""
     backend = get_backend()
     backend.max_order = n
 
@@ -574,10 +497,6 @@ def get_max_order() -> int:
 # =============================================================================
 # TAYLOR SERIES FOR TRANSCENDENTAL FUNCTIONS
 # =============================================================================
-# FIX 1: All functions now wrap plain (int, float) inputs into Composite
-#         instead of returning math.* results. Every call flows through
-#         composite arithmetic.
-# =============================================================================
 
 def sin(x, terms=12):
     if isinstance(x, (int, float)):
@@ -586,10 +505,7 @@ def sin(x, terms=12):
     h = Composite({d: c for d, c in x.c.items() if d != 0})
     if not h.c:
         return Composite({0: math.sin(a)})
-    # sin(a+h) = sin(a)*cos(h) + cos(a)*sin(h)
-    # cos(h) and sin(h) converge FAST because h has no dim-0 part
     sin_a, cos_a = math.sin(a), math.cos(a)
-    # Taylor of sin(h) and cos(h) — h is purely infinitesimal
     sin_h = Composite({})
     cos_h = Composite({0: 1.0})
     h_power = Composite({0: 1.0})
@@ -611,7 +527,6 @@ def cos(x, terms=12):
     h = Composite({d: c for d, c in x.c.items() if d != 0})
     if not h.c:
         return Composite({0: math.cos(a)})
-    # cos(a+h) = cos(a)*cos(h) - sin(a)*sin(h)
     sin_a, cos_a = math.sin(a), math.cos(a)
     sin_h = Composite({})
     cos_h = Composite({0: 1.0})
@@ -628,37 +543,22 @@ def cos(x, terms=12):
 
 
 def exp(x, terms=15):
-    """
-    Exponential function for Composite numbers.
-
-    Uses base+perturbation splitting: exp(a + h) = math.exp(a) * exp(h)
-    where a = standard part (dim 0) and h = infinitesimal part (dims != 0).
-
-    math.exp(a) handles the scalar part exactly (IEEE 754).
-    Taylor series on h converges fast since h has no dim-0 component.
-
-    This avoids catastrophic cancellation of naive Taylor series
-    sum(x^n/n!) for large |x| (e.g., 15-term Taylor gives
-    exp(-10) = 466 instead of 4.5e-5).
-    """
+    """Exponential function for Composite numbers."""
     if isinstance(x, (int, float)):
         return Composite({0: math.exp(float(x))})
 
     if not isinstance(x, Composite):
         return Composite({0: math.exp(float(x))})
 
-    a = x.st()  # Dimension-0 coefficient
+    a = x.st()
     non_zero = {d: c for d, c in x.c.items() if d != 0 and abs(c) > 1e-15}
 
     if not non_zero:
-        # Pure scalar Composite (only dim 0): math.exp directly
         return Composite({0: math.exp(a)})
 
-    # Split: exp(a + h) = exp(a) * exp(h)
     base = math.exp(a)
     h = Composite(non_zero)
 
-    # Taylor series for exp(h) — converges fast, h has no dim-0 part
     exp_h = Composite({0: 1.0})
     h_power = Composite({0: 1.0})
     for n in range(1, terms):
@@ -669,10 +569,7 @@ def exp(x, terms=15):
 
 
 def ln(x, terms=15):
-    """
-    Natural logarithm for composite numbers.
-    Uses ln(a + h) = ln(a) + ln(1 + h/a) and Mercator series.
-    """
+    """Natural logarithm for composite numbers."""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
 
@@ -812,9 +709,7 @@ def tanh(x, terms=15):
 # =============================================================================
 
 def power(x, s, terms=15):
-    """
-    x^s for any real s, via exp(s * ln(x)).
-    """
+    """x^s for any real s, via exp(s * ln(x))."""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if isinstance(s, int):
@@ -835,9 +730,9 @@ def derivative(f: Callable, at: float, terms: int = 12) -> float:
 
 def nth_derivative(f: Callable, n: int, at: float, terms: int = 12) -> float:
     """Compute f^(n)(at) - the nth derivative at a point."""
-    effective_terms = max(terms, n + 2)  # need at least n+1 terms
+    effective_terms = max(terms, n + 2)
     x = R(at) + ZERO
-    result = f(x)  # but f's internal Taylor uses its own 'terms'...
+    result = f(x)
     return result.d(n)
 
 
@@ -891,10 +786,7 @@ def taylor_coefficients(f: Callable, at: float, up_to: int = 5, terms: int = 12)
 
 
 def antiderivative(f_composite: Composite, constant: float = 0) -> Composite:
-    """
-    Compute antiderivative via dimensional shift.
-    Each |c|₋ₙ → |c/n|₋₍ₙ₊₁₎
-    """
+    """Compute antiderivative via dimensional shift."""
     result = {0: constant}
     for dim, coeff in f_composite.c.items():
         new_dim = dim - 1
@@ -905,41 +797,27 @@ def antiderivative(f_composite: Composite, constant: float = 0) -> Composite:
 
 
 def definite_integral(f: Callable, a: float, b: float, terms: int = 12) -> float:
-    """Compute ∫ₐᵇ f(x) dx. Wrapper around integrate_adaptive."""
+    """Compute ∫ₐᵇ f(x) dx."""
     result, _ = integrate_adaptive(f, a, b, tol=1e-10, terms=terms)
     return result.st()
 
 # =============================================================================
 # MULTI-POINT STEPPED INTEGRATION
-# FIX 2: Accumulate as Composite instead of plain float.
-#         Returns (Composite, float) — integral as Composite, error as float.
 # =============================================================================
 
 
 def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
-    """
-    One integral to rule them all.
-
-    1D definite/improper: composite-powered via integrate_adaptive
-    2D/3D box: midpoint Riemann sums (simple, robust)
-    Line integral: composite-first with fallback (v2)
-    Surface integral: midpoint Riemann sums
-    """
+    """One integral to rule them all."""
 
     def _st(v):
         return v.st() if isinstance(v, Composite) else float(v)
 
-    # --- LINE INTEGRAL (v2: COMPOSITE-FIRST, Option B: probe once) ---
-    # Phase 1: Composite tangent vectors via .d(1) — no epsilon
-    # Phase 2: Routes through integrate_adaptive — adaptive, error estimate
-    # Phase 3: F evaluated at composite coords — full Taylor in t
-    # Fallback: finite-diff tangents + float F, still through integrate_adaptive
+    # --- LINE INTEGRAL ---
     if curve is not None:
         t_range = args[0] if args else (0, 1)
         a_t, b_t = t_range
         is_vector = isinstance(f, list)
 
-        # Probe: can the curve accept Composite input?
         t_mid = (a_t + b_t) / 2
         try:
             probe = curve(R(t_mid) + ZERO)
@@ -948,69 +826,48 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
             composite_curve = False
 
         if composite_curve:
-            # --- COMPOSITE PATH (Phase 1+2+3) ---
             def _line_integrand(t_comp):
-                """
-                Scalar integrand g(t) for the line integral.
-
-                Vector field:  g(t) = F(r(t)) · r'(t)
-                Scalar field:  g(t) = f(r(t)) · |r'(t)|
-
-                Phase 1: Tangent via composite .d(1) — exact, no epsilon.
-                Phase 3: F at composite positions — chain rule propagates d/dt.
-                """
-                pos_comp = curve(t_comp)                      # each component is Composite in t
-                tangent = [p.d(1) for p in pos_comp]           # exact dr/dt (Phase 1)
+                pos_comp = curve(t_comp)
+                tangent = [p.d(1) for p in pos_comp]
 
                 if is_vector:
-                    # Phase 3: F at composite positions → chain rule propagates d/dt
-                    F_comp = [comp(*pos_comp) for comp in f]   # F_j(r(t)) as Composite in t
-                    # Dot product: F · r'  (F_comp is Composite, tangent is float)
+                    F_comp = [comp(*pos_comp) for comp in f]
                     F_comp = [Composite({0: float(fc)}) if isinstance(fc, (int, float)) else fc
-							          for fc in F_comp]
+                              for fc in F_comp]
                     return sum(fc * tv for fc, tv in zip(F_comp, tangent))
                 else:
-                    # Phase 3: f at composite positions
-                    f_comp = f(*pos_comp)                      # f(r(t)) as Composite in t
+                    f_comp = f(*pos_comp)
                     if isinstance(f_comp, (int, float)):
                         f_comp = Composite({0: float(f_comp)})
-                    speed = math.sqrt(sum(tv**2 for tv in tangent))  # |r'(t)| as float
+                    speed = math.sqrt(sum(tv**2 for tv in tangent))
                     return f_comp * speed
         else:
-            # --- FALLBACK PATH (finite-diff tangent, float F, Phase 2 only) ---
-            if composite_curve:
-                # --- COMPOSITE PATH (unchanged) ---
-                def _line_integrand(t_comp):
-                    ...  # (keep as-is)
-            else:
-                # --- FALLBACK: classical midpoint Riemann (N=2000) ---
-                N = 2000
-                dt = (b_t - a_t) / N
-                total = 0.0
-                for i in range(N):
-                    t_mid = a_t + (i + 0.5) * dt
-                    pt = curve(t_mid)
-                    eps_fd = 1e-7
-                    pt_fwd = curve(t_mid + eps_fd)
-                    tangent = [(float(pt_fwd[j]) - float(pt[j])) / eps_fd
-                                for j in range(len(pt))]
-                    if is_vector:
-                        F_vals = [_st(comp(*[float(p) for p in pt])) for comp in f]
-                        total += sum(fv * tv for fv, tv in zip(F_vals, tangent)) * dt
-                    else:
-                        speed = math.sqrt(sum(tv**2 for tv in tangent))
-                        total += _st(f(*[float(p) for p in pt])) * speed * dt
-                return total
-        # Composite path feeds into integrate_adaptive
+            N = 2000
+            dt = (b_t - a_t) / N
+            total = 0.0
+            for i in range(N):
+                t_mid = a_t + (i + 0.5) * dt
+                pt = curve(t_mid)
+                eps_fd = 1e-7
+                pt_fwd = curve(t_mid + eps_fd)
+                tangent = [(float(pt_fwd[j]) - float(pt[j])) / eps_fd
+                            for j in range(len(pt))]
+                if is_vector:
+                    F_vals = [_st(comp(*[float(p) for p in pt])) for comp in f]
+                    total += sum(fv * tv for fv, tv in zip(F_vals, tangent)) * dt
+                else:
+                    speed = math.sqrt(sum(tv**2 for tv in tangent))
+                    total += _st(f(*[float(p) for p in pt])) * speed * dt
+            return total
         result, err = integrate_adaptive(_line_integrand, a_t, b_t, tol=tol, terms=terms)
         return result.st()
-    # --- SURFACE INTEGRAL (v2: COMPOSITE-FIRST, Option B: probe once) ---
+
+    # --- SURFACE INTEGRAL ---
     if surface is not None:
         uv = args[0] if args else ((0, 1), (0, 1))
         (a_u, b_u), (a_v, b_v) = uv
         is_vector = isinstance(f, list)
 
-        # Probe: can the surface accept Composite input?
         from composite.composite_multivar import MC
         composite_surface = True
         try:
@@ -1030,15 +887,12 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
             composite_surface = False
 
         if composite_surface:
-            # --- COMPOSITE PATH: exact normals via .d(1) cross product ---
             def _surface_integrand(u_val, v_val):
                 u_mc = MC.var(0, 2, val=u_val)
                 v_mc = MC.var(1, 2, val=v_val)
                 S = surface(u_mc, v_mc)
-                # Exact partial derivatives from composite structure
-                dSdu = [S[i].d(1, 0) for i in range(3)]  # ∂S/∂u
-                dSdv = [S[i].d(1, 1) for i in range(3)]  # ∂S/∂v
-                # Cross product dS/du × dS/dv
+                dSdu = [S[i].d(1, 0) for i in range(3)]
+                dSdv = [S[i].d(1, 1) for i in range(3)]
                 nx = dSdu[1] * dSdv[2] - dSdu[2] * dSdv[1]
                 ny = dSdu[2] * dSdv[0] - dSdu[0] * dSdv[2]
                 nz = dSdu[0] * dSdv[1] - dSdu[1] * dSdv[0]
@@ -1052,7 +906,6 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
                 else:
                     return _st(f(*pos)) * norm
 
-            # Nested 1D adaptive integration (composite accumulation)
             def _inner_v(u_val):
                 def g(v_val):
                     return _surface_integrand(u_val, v_val)
@@ -1069,7 +922,6 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
             return outer.st()
 
         else:
-            # --- FALLBACK: classical N×N midpoint Riemann (totally independent) ---
             Nu, Nv = 300, 300
             du = (b_u - a_u) / Nu
             dv = (b_v - a_v) / Nv
@@ -1095,7 +947,7 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
                         total += _st(f(*p0)) * dS * du * dv
             return total
 
-    # --- 1D DEFINITE / IMPROPER (composite-powered) ---
+    # --- 1D DEFINITE / IMPROPER ---
     if len(args) == 2 and isinstance(args[0], (int, float)):
         a_val, b_val = args
         a_inf = math.isinf(a_val) and a_val < 0
@@ -1112,7 +964,7 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
         result, _ = integrate_adaptive(f, a_val, b_val, tol=tol, terms=terms)
         return result.st()
 
-    # --- 2D BOX (midpoint Riemann sum) ---
+    # --- 2D BOX ---
     if len(args) == 2 and isinstance(args[0], tuple):
         (a_x, b_x), (a_y, b_y) = args
         N = 200
@@ -1126,7 +978,7 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
                 total += _st(f(x, y)) * dx * dy
         return total
 
-    # --- 3D BOX (midpoint Riemann sum) ---
+    # --- 3D BOX ---
     if len(args) == 3 and isinstance(args[0], tuple):
         (a_x, b_x), (a_y, b_y), (a_z, b_z) = args
         N = 50
@@ -1146,8 +998,7 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
     raise ValueError(f"Could not determine integral type from arguments: {args}")
 
 def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms: int = 15):
-    """Multi-point stepped integration with error estimate.
-    Returns (Composite, float) — integral result as Composite, error as float."""
+    """Multi-point stepped integration with error estimate."""
     total = Composite({})
     total_error = 0.0
     x0 = a
@@ -1172,15 +1023,7 @@ def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms:
 
 
 def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, terms: int = 15):
-    """Adaptive stepped integration via composite dimensional shift.
-
-    If the integrand doesn't propagate composite structure, lifts it
-    once at the gate by wrapping it with numerical derivatives.
-    Every number is a composite — this function ensures it.
-
-    Returns (Composite, float) — integral result as Composite, error as float.
-    """
-    # --- LIFT AT THE GATE ---
+    """Adaptive stepped integration via composite dimensional shift."""
     probe = f(R((a + b) / 2) + ZERO)
     if not any(dim < 0 for dim in probe.c):
         f_original = f
@@ -1194,7 +1037,6 @@ def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, term
             d2 = (val_plus - 2 * val + val_minus) / (eps ** 2)
             return Composite({0: val, -1: d1, -2: d2 / 2})
 
-    # --- INTEGRATION LOOP ---
     total = Composite({})
     total_error = 0.0
     x0 = a
@@ -1202,7 +1044,6 @@ def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, term
     while x0 < b:
         fx = f(R(x0) + ZERO)
 
-        # Step size: dim < -1 coefficients control truncation beyond captured Taylor
         max_coeff = max(
             (abs(c) for d, c in fx.c.items() if d < -1),
             default=1e-10
@@ -1210,7 +1051,6 @@ def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, term
         dx = min((tol / max(max_coeff, 1e-15)) ** 0.1, b - x0)
         dx = max(dx, (b - a) * 1e-8)
 
-        # Integrate via dimensional shift
         Fx = antiderivative(fx)
         neg_terms = {d: c for d, c in Fx.c.items() if d < 0}
         contribution = sum(
@@ -1232,7 +1072,6 @@ def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, term
 
 # =============================================================================
 # IMPROPER INTEGRALS
-# FIX 3: Now returns (Composite, float) since integrate_adaptive does.
 # =============================================================================
 
 def improper_integral(f: Callable, a: float, tol: float = 1e-8, cutoff: float = 20):
@@ -1251,13 +1090,13 @@ def improper_integral(f: Callable, a: float, tol: float = 1e-8, cutoff: float = 
     return bulk, bulk_err
 
 def improper_integral_both(f: Callable, tol: float = 1e-8):
-    """Compute ∫_{-∞}^{∞} f(x) dx. Splits at 0. Returns (Composite, float)."""
+    """Compute ∫_{-∞}^{∞} f(x) dx. Returns (Composite, float)."""
     left, left_err = improper_integral(lambda x: f(-x), 0, tol=tol)
     right, right_err = improper_integral(f, 0, tol=tol)
     return left + right, left_err + right_err
 
 def improper_integral_to(f: Callable, a: float, b: float, tol: float = 1e-8):
-    """Compute ∫_a^b f(x) dx where f has a singularity at a or b. Returns (Composite, float)."""
+    """Compute ∫_a^b f(x) dx where f has a singularity. Returns (Composite, float)."""
     eps = tol ** 0.25
     try:
         f(R(a + eps) + ZERO).st()
@@ -1438,7 +1277,7 @@ def verify_derivative(f: Callable, f_prime: Callable, at: float, tol: float = 1e
 def run_tests():
     """Run basic tests to verify the library works"""
     print("=" * 60)
-    print("COMPOSITE LIBRARY TEST SUITE (FIXED v2: LINE INTEGRAL COMPOSITE)")
+    print("COMPOSITE LIBRARY TEST SUITE (FIXED v3: EXPRESSED ZERO)")
     print("=" * 60)
 
     tests = []
@@ -1460,7 +1299,7 @@ def run_tests():
 
     d4 = nth_derivative(lambda x: x**5, n=3, at=2)
     tests.append(("d³/dx³[x⁵] at x=2", d4, 240))
-    print(f"d³/dx³[x⁵] at x=2 = {d4}, expected 240 {'✓' if abs(d4-120)<1e-6 else '✗'}")
+    print(f"d³/dx³[x⁵] at x=2 = {d4}, expected 240 {'✓' if abs(d4-240)<1e-6 else '✗'}")
 
     # Limit tests
     print("\n--- Limits ---")
@@ -1523,17 +1362,37 @@ def run_tests():
     # v2 verification: line integral through integrate_adaptive
     print("\n--- v2: Line Integral (Composite-First) ---")
 
-    # Vector field: ∫_C F · dr where F = [y, -x], curve = unit circle
-    # Expected: -2π
     line_result = integrate(
         [lambda x, y: y, lambda x, y: -x],
         (0, 2 * math.pi),
         curve=lambda t: [cos(t), sin(t)]
     )
     expected_line = -2 * math.pi
-    line_ok = abs(line_result - expected_line) < 0.1  # wider tol for adaptive
+    line_ok = abs(line_result - expected_line) < 0.1
     tests.append(("∫_C F·dr (unit circle)", line_result, expected_line))
     print(f"∫_C [y,-x]·dr (unit circle) = {line_result:.6f}, expected {expected_line:.6f} {'✓' if line_ok else '✗'}")
+
+    # v3 verification: expressed zero preservation
+    print("\n--- Fix 3: Expressed Zero Preservation ---")
+
+    zero_sub = R(1) - R(1)
+    has_dim0 = 0 in zero_sub.c
+    tests.append(("R(1)-R(1) retains dim 0", 1 if has_dim0 else 0, 1))
+    print(f"R(1) - R(1) = {zero_sub}")
+    print(f"  dim 0 retained: {has_dim0} {'✓' if has_dim0 else '✗'}")
+    print(f"  .c = {zero_sub.c}")
+
+    comp_zero = Composite(0)
+    has_dim0 = 0 in comp_zero.c
+    tests.append(("Composite(0) retains dim 0", 1 if has_dim0 else 0, 1))
+    print(f"Composite(0) = {comp_zero}")
+    print(f"  dim 0 retained: {has_dim0} {'✓' if has_dim0 else '✗'}")
+
+    empty = Composite()
+    is_empty = len(empty.c) == 0
+    tests.append(("Composite() is truly empty", 1 if is_empty else 0, 1))
+    print(f"Composite() = {empty}")
+    print(f"  truly empty: {is_empty} {'✓' if is_empty else '✗'}")
 
     # All derivatives at once
     print("\n--- All Derivatives ---")

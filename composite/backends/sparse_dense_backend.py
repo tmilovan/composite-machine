@@ -49,12 +49,10 @@ def _cluster_terms(
         return []
 
     clusters = []
-    # Find split points: where gap between consecutive dims > threshold
     gaps = np.diff(dims)
     split_mask = gaps > gap_threshold
-    split_indices = np.nonzero(split_mask)[0] + 1  # +1 for right edge
+    split_indices = np.nonzero(split_mask)[0] + 1
 
-    # Split dims and vals at those points
     dim_groups = np.split(dims, split_indices)
     val_groups = np.split(vals, split_indices)
 
@@ -80,7 +78,6 @@ def _merge_cluster_outputs(
         return SparseData(np.array([], dtype=np.int64),
                           np.array([], dtype=np.float64))
 
-    # Collect all (dim, val) pairs
     all_dims = []
     all_vals = []
     for offset, dense in results:
@@ -91,17 +88,14 @@ def _merge_cluster_outputs(
     all_dims = np.concatenate(all_dims)
     all_vals = np.concatenate(all_vals)
 
-    # Sort by dimension
     order = np.argsort(all_dims, kind='mergesort')
     all_dims = all_dims[order]
     all_vals = all_vals[order]
 
-    # Sum duplicates (overlapping cluster outputs)
     unique_dims, inverse = np.unique(all_dims, return_inverse=True)
     summed_vals = np.zeros(len(unique_dims), dtype=np.float64)
     np.add.at(summed_vals, inverse, all_vals)
 
-    # Strip zeros
     nonzero = np.abs(summed_vals) > zero_tol
     return SparseData(unique_dims[nonzero], summed_vals[nonzero])
 
@@ -123,7 +117,7 @@ class SparseDenseBackend(CompositeBackend):
                  max_order: int = None):
         self.gap_threshold = gap_threshold
         self.zero_tol = zero_tol
-        self.max_order = max_order  # None = unlimited
+        self.max_order = max_order
 
     # --- lifecycle ---
 
@@ -134,11 +128,7 @@ class SparseDenseBackend(CompositeBackend):
         )
 
     def _truncate(self, data: SparseData) -> SparseData:
-        """Drop dimensions below -max_order (higher-order derivatives).
-
-        Keeps dims >= -max_order. So max_order=5 keeps dims
-        {..., -5, -4, -3, -2, -1, 0, 1, ...} and drops -6, -7, etc.
-        """
+        """Drop dimensions below -max_order (higher-order derivatives)."""
         if self.max_order is None:
             return data
         if len(data.dims) == 0:
@@ -162,23 +152,16 @@ class SparseDenseBackend(CompositeBackend):
             return float(data.vals[idx])
         return 0.0
 
+    # FIXED: write_dim — always write the value, even if zero.
+    # Previously: deleted existing dim if value==0, skipped insert if value==0.
+    # Now: expressed zeros are preserved (canon rule: if zero is expressed, retain it).
     def write_dim(self, data: SparseData, dim: int, value: float) -> SparseData:
         idx = np.searchsorted(data.dims, dim)
         if idx < len(data.dims) and data.dims[idx] == dim:
-            # Overwrite existing
             new_vals = data.vals.copy()
             new_vals[idx] = value
-            if value == 0.0:
-                # Remove zero term
-                return SparseData(
-                    np.delete(data.dims, idx),
-                    np.delete(new_vals, idx)
-                )
             return SparseData(data.dims.copy(), new_vals)
         else:
-            # Insert new term
-            if value == 0.0:
-                return data  # don't insert zeros
             new_dims = np.insert(data.dims, idx, dim)
             new_vals = np.insert(data.vals, idx, value)
             return SparseData(new_dims, new_vals)
@@ -191,6 +174,8 @@ class SparseDenseBackend(CompositeBackend):
 
     # --- arithmetic ---
 
+    # FIXED: add — keep all union dimensions, do NOT strip zeros.
+    # Canon rule: 1-1 = |0|₀ (zero at dimension 0, dimension retained).
     def add(self, a: SparseData, b: SparseData) -> SparseData:
         """Merge-add: like merge step of merge sort, O(n+m)."""
         if len(a.dims) == 0:
@@ -198,10 +183,8 @@ class SparseDenseBackend(CompositeBackend):
         if len(b.dims) == 0:
             return a
 
-        # Union of dimensions
         all_dims = np.union1d(a.dims, b.dims)
 
-        # Lookup values from each
         a_idx = np.searchsorted(a.dims, all_dims)
         b_idx = np.searchsorted(b.dims, all_dims)
 
@@ -217,23 +200,10 @@ class SparseDenseBackend(CompositeBackend):
         )
 
         result_vals = a_vals + b_vals
-
-        # Strip zeros
-        nonzero = np.abs(result_vals) > self.zero_tol
-        return SparseData(all_dims[nonzero], result_vals[nonzero])
+        return SparseData(all_dims, result_vals)
 
     def convolve(self, a: SparseData, b: SparseData) -> SparseData:
-        """Clustered convolution: cluster × cluster → merge.
-
-        1. Cluster both operands by proximity
-        2. For each (cluster_a, cluster_b) pair:
-           - np.convolve their local dense arrays
-           - output offset = offset_a + offset_b
-        3. Merge all outputs back into sparse form
-
-        Mathematically exact — distributive property guarantees
-        sum of partial convolutions equals full convolution.
-        """
+        """Clustered convolution: cluster × cluster → merge."""
         if len(a.dims) == 0 or len(b.dims) == 0:
             return SparseData(np.array([], dtype=np.int64),
                               np.array([], dtype=np.float64))
@@ -248,9 +218,13 @@ class SparseDenseBackend(CompositeBackend):
                 out_offset = offset_a + offset_b
                 results.append((out_offset, conv))
 
-        result =  _merge_cluster_outputs(results, self.zero_tol)
+        result = _merge_cluster_outputs(results, self.zero_tol)
         return self._truncate(result)
 
+    # FIXED: deconvolve — use highest dim with non-zero coeff as leading term.
+    # With expressed zero preservation, the highest dim may have coeff 0.0,
+    # which would cause division by zero / NaN in the quotient step.
+    # Also clean near-zero remainder artifacts after each step.
     def deconvolve(self, a: SparseData, b: SparseData) -> SparseData:
         """Polynomial long division in sparse form.
 
@@ -260,43 +234,46 @@ class SparseDenseBackend(CompositeBackend):
         if len(b.dims) == 0:
             raise ZeroDivisionError("Cannot deconvolve by empty Composite")
 
-        # Leading term of divisor
-        lead_dim = b.dims[-1]
-        lead_val = b.vals[-1]
+        # FIXED: Leading term — highest dim with non-zero coeff
+        nonzero_mask = np.abs(b.vals) > 1e-15
+        if not np.any(nonzero_mask):
+            raise ZeroDivisionError("Cannot deconvolve by zero Composite")
+        lead_dim = b.dims[nonzero_mask][-1]
+        lead_val = b.vals[nonzero_mask][-1]
 
-        # Work on a copy of the dividend
-        remainder_dims = a.dims.copy()
-        remainder_vals = a.vals.copy()
+        # Strip near-zero terms from dividend for clean division
+        a_mask = np.abs(a.vals) > 1e-15
+        remainder_dims = a.dims[a_mask].copy()
+        remainder_vals = a.vals[a_mask].copy()
 
         q_dims = []
         q_vals = []
 
-        max_iter = max(len(a.dims) + len(b.dims), 50)  # safety
+        max_iter = max(len(a.dims) + len(b.dims), 50)
         for _ in range(max_iter):
             if len(remainder_dims) == 0:
                 break
 
-            # Highest remaining term
             r_dim = remainder_dims[-1]
             r_val = remainder_vals[-1]
 
-            # Quotient term
             q_dim = r_dim - lead_dim
             q_val = r_val / lead_val
             q_dims.append(q_dim)
             q_vals.append(q_val)
 
-            # Subtract q_term * b from remainder
             sub_dims = b.dims + q_dim
             sub_vals = b.vals * q_val
 
-            # Merge-subtract
             remainder = self.add(
                 SparseData(remainder_dims, remainder_vals),
                 SparseData(sub_dims, -sub_vals)
             )
-            remainder_dims = remainder.dims
-            remainder_vals = remainder.vals
+            # FIXED: Clean near-zero remainder terms (division artifacts,
+            # not user-expressed zeros — safe to strip here).
+            mask = np.abs(remainder.vals) > 1e-15
+            remainder_dims = remainder.dims[mask]
+            remainder_vals = remainder.vals[mask]
 
         if len(q_dims) == 0:
             return SparseData(np.array([], dtype=np.int64),

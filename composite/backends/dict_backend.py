@@ -40,12 +40,12 @@ class DictBackend(CompositeBackend):
     def read_dim(self, data: DictData, dim: int) -> float:
         return data.terms.get(dim, 0.0)
 
+    # FIXED: write_dim — always write the value, even if zero.
+    # Previously: popped the dim if value==0.0.
+    # Now: expressed zeros are preserved (canon rule: if zero is expressed, retain it).
     def write_dim(self, data: DictData, dim: int, value: float) -> DictData:
         new_terms = dict(data.terms)
-        if value == 0.0:
-            new_terms.pop(dim, None)
-        else:
-            new_terms[dim] = value
+        new_terms[dim] = value
         return DictData(new_terms)
 
     def to_arrays(self, data: DictData) -> Tuple[np.ndarray, np.ndarray]:
@@ -60,12 +60,12 @@ class DictBackend(CompositeBackend):
     def active_dims(self, data: DictData) -> np.ndarray:
         return np.array(sorted(data.terms.keys()), dtype=np.int64)
 
+    # FIXED: add — do NOT delete zero-sum dimensions.
+    # Canon rule: 1-1 = |0|₀ (zero at dimension 0, dimension retained).
     def add(self, a: DictData, b: DictData) -> DictData:
         result = dict(a.terms)
         for dim, val in b.terms.items():
             result[dim] = result.get(dim, 0.0) + val
-            if result[dim] == 0.0:
-                del result[dim]
         return DictData(result)
 
     def convolve(self, a: DictData, b: DictData) -> DictData:
@@ -74,15 +74,24 @@ class DictBackend(CompositeBackend):
             for d_b, v_b in b.terms.items():
                 d_out = d_a + d_b
                 result[d_out] = result.get(d_out, 0.0) + v_a * v_b
-        # Strip zeros
         return DictData({d: v for d, v in result.items() if v != 0.0})
 
+    # FIXED: deconvolve — use highest dim with non-zero coeff as leading term.
+    # With expressed zero preservation, the highest dim may have coeff 0.0,
+    # which would cause division by zero / NaN in the quotient step.
+    # Also clean near-zero terms from inputs before division.
     def deconvolve(self, a: DictData, b: DictData) -> DictData:
         if not b.terms:
             raise ZeroDivisionError("Cannot deconvolve by empty Composite")
 
-        remainder = dict(a.terms)
-        b_sorted = sorted(b.terms.items())
+        # FIXED: clean near-zero terms from dividend
+        remainder = {d: v for d, v in a.terms.items() if abs(v) > 1e-15}
+
+        # FIXED: Leading term — highest dim with non-zero coeff
+        b_nonzero = {d: v for d, v in b.terms.items() if abs(v) > 1e-15}
+        if not b_nonzero:
+            raise ZeroDivisionError("Cannot deconvolve by zero Composite")
+        b_sorted = sorted(b_nonzero.items())
         lead_dim, lead_val = b_sorted[-1]
         quotient = {}
 
@@ -97,7 +106,7 @@ class DictBackend(CompositeBackend):
             q_val = r_val / lead_val
             quotient[q_dim] = q_val
 
-            for d_b, v_b in b.terms.items():
+            for d_b, v_b in b_nonzero.items():
                 out_d = q_dim + d_b
                 remainder[out_d] = remainder.get(out_d, 0.0) - q_val * v_b
                 if abs(remainder[out_d]) < 1e-15:
