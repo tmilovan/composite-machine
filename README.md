@@ -13,7 +13,7 @@ A data structure and a set of arithmetic rules that give you derivatives, integr
 > *The residue is infinitesimal, structured, and it contains the derivative of every operation that produced it.*
 >
 
-Alpha stage. Research code. The math works, performance doesn't (yet).
+Alpha stage. Research code. The math works, ~~performance doesn't (yet)~~. AGPL-licensed. A PyTorch/CUDA backend is available under commercial license."
 
 ---
 
@@ -168,6 +168,8 @@ Pure Python, dict-based sparse storage. Roughly 500–1000x slower than PyTorch 
 
 Fine for research, prototyping, and problems where higher-order derivatives or algebraic limits matter more than throughput.
 
+A high-performance backend using PyTorch with CUDA and MPS acceleration is available under commercial license. Contact [tmilovan@fwd.hr](mailto:tmilovan@fwd.hr).
+
 ---
 
 ## Installation
@@ -219,7 +221,6 @@ Milovan, T. (2026). *Provenance-Preserving Arithmetic: A Unified Framework for A
 
 Contributions welcome. Useful areas:
 
-- Performance — vectorization, JIT, GPU backends
 - Special functions — Bessel, gamma, etc.
 - Bug reports and edge cases
 - Docs and examples
