@@ -615,9 +615,8 @@ def test_calculus_derivatives():
     f_linear = lambda t: 3*t + 2
     deriv_linear = (f_linear(x + h) - f_linear(x)) / h
     suite.assert_eq("d/dx[3x+2] = 3", deriv_linear.st(), 3)
-    x = R(10)
-    deriv_const = (R(7) - R(7)) / h
-    suite.assert_eq("d/dx[7] = 0", deriv_const.st(), 0)
+    x = R(10) + ZERO
+    suite.assert_eq("d/dx[7] = 0", R(7).d(1), 0)
     x = R(2)
     f_expanded = (x + h)**3
     second_deriv_coeff = f_expanded.c.get(-2, 0)
@@ -877,6 +876,48 @@ def test_transcendental():
     return suite.report()
 
 
+def test_subtraction_rules():
+    """Fundamental subtraction rules for composite arithmetic."""
+    suite = TestSuite("Subtraction Rules")
+
+    z2 = ZERO * ZERO
+    z3 = ZERO * ZERO * ZERO
+    z4 = ZERO * ZERO * ZERO * ZERO
+
+    # Rule 1: R(5)-R(5) = 0 at dim[0]. No shift.
+    r55 = R(5) - R(5)
+    suite.assert_eq("R(5)-R(5) is zero", r55.st(), 0)
+    suite.assert_eq("R(5)-R(5) stays at dim[0]", r55.coeff(0), 0)
+    suite.assert_eq("R(5)-R(5) no dim[-1]", r55.coeff(-1), 0)
+
+    # Rule 2: R(1)-R(1) = 0 at dim[0], same
+    r11 = R(1) - R(1)
+    suite.assert_eq("R(1)-R(1) is zero", r11.st(), 0)
+    suite.assert_eq("R(1)-R(1) stays at dim[0]", r11.coeff(0), 0)
+
+    # Rule 3: R(0)-R(0) = 0² = ZERO²
+    r00 = R(0) - R(0)
+    suite.assert_eq("R(0)-R(0) = ZERO²", r00.c == z2.c, True)
+
+    # Rule 4: ZERO-ZERO = 0² = ZERO²
+    zz = ZERO - ZERO
+    suite.assert_eq("ZERO-ZERO = ZERO²", zz.c == z2.c, True)
+
+    # Rule 5: ZERO²-ZERO² = 0³ = ZERO³
+    z2z2 = z2 - z2
+    suite.assert_eq("ZERO²-ZERO² = ZERO³", z2z2.c == z3.c, True)
+
+    # Rule 6: ZERO³-ZERO³ = 0⁴ = ZERO⁴
+    z3z3 = z3 - z3
+    suite.assert_eq("ZERO³-ZERO³ = ZERO⁴", z3z3.c == z4.c, True)
+
+    # Rule 7: normal subtraction still works
+    suite.assert_eq("R(5)-R(3) = 2", (R(5) - R(3)).st(), 2)
+    suite.assert_eq("R(10)-R(7) = 3", (R(10) - R(7)).st(), 3)
+
+    return suite.report()
+
+
 # =============================================================================
 # MAIN RUNNER
 # =============================================================================
@@ -911,6 +952,7 @@ def run_all_tests():
     all_results.append(("Multivariate", test_multivariate()))
     all_results.append(("Transcendental Functions", test_transcendental()))
     all_results.append(("Multi-Term Division", test_multiterm_division()))
+    all_results.append(("Subtraction Rules", test_subtraction_rules()))
 
     # Summary
     print("\n" + "#" * 70)

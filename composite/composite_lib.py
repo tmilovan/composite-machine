@@ -261,7 +261,31 @@ class Composite:
         if isinstance(other, (int, float)):
             other = Composite(other)
         neg_other = self._backend.negate(other._data)
-        return Composite._wrap(self._backend.add(self._data, neg_other))
+        result = Composite._wrap(self._backend.add(self._data, neg_other))
+        # Subtraction rules:
+        #   R(5)-R(5) = 0 at dim[0]. No shift — no multiplication.
+        #   R(0)-R(0) = 0·0 = 0². Multiplication with zero → shift.
+        #   ZERO-ZERO = 0·0 = 0². Same — ZERO is 0.
+        #   ZERO²-ZERO² = 0·(0²) = 0³. Shift via multiplication.
+        _, result_vals = self._backend.to_arrays(result._data)
+        if (len(result_vals) > 0
+                and np.all(np.abs(result_vals) < 1e-15)):
+            if self.st() != 0.0:
+                # Non-zero real cancellation: zero at dim[0], no shift
+                return result
+            # Zero-valued operand: 0·operand = multiplication with zero.
+            #   R(0): dim 0  → 0² (power 2)
+            #   ZERO: dim -1 → 0² (power 2)
+            #   ZERO²: dim -2 → 0³ (power 3)
+            #   ZERO³: dim -3 → 0⁴ (power 4)
+            self_dims = self._backend.active_dims(self._data)
+            min_dim = int(self_dims[0]) if len(self_dims) > 0 else 0
+            power = max(2, 1 - min_dim)
+            z = ZERO
+            for _ in range(power - 1):
+                z = z * ZERO
+            return z
+        return result
 
     def __rsub__(self, other):
         return Composite(other).__sub__(self)
