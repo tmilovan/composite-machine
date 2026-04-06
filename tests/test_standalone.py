@@ -513,14 +513,14 @@ def test_theorem_8_total_ordering():
     x, y, z = R(-100), R(0), R(100)
     suite.assert_true("Transitivity: -100 < 0 < 100", x < y < z)
     h = ZERO
-    suite.assert_true("0 < h (infinitesimal is positive)", R(0) < h)
+    suite.assert_true("R(0) == ZERO (same number)", R(0) == h)
     suite.assert_true("h < 0.0001", h < R(0.0001))
     suite.assert_true("h < 1e-100", h < R(1e-100))
     neg_inf = Composite({1: -1})
     neg_h = Composite({-1: -1})
-    chain = [neg_inf, R(-1), neg_h, R(0), h, R(1), INF]
+    chain = [neg_inf, R(-1), neg_h, R(0), R(1), INF]
     all_ordered = all(chain[i] < chain[i+1] for i in range(len(chain)-1))
-    suite.assert_true("Full chain: -\u221e < -1 < -h < 0 < h < 1 < \u221e", all_ordered)
+    suite.assert_true("Full chain: -\u221e < -1 < -h < 0 < 1 < \u221e", all_ordered)
     return suite.report()
 
 
@@ -895,11 +895,11 @@ def test_subtraction_rules():
     suite.assert_eq("R(1)-R(1) is zero", r11.st(), 0)
     suite.assert_eq("R(1)-R(1) stays at dim[0]", r11.coeff(0), 0)
 
-    # Rule 3: R(0)-R(0) = 0² = ZERO²
+    # Rule 3: R(0)-R(0) = ZERO-ZERO = 0² = ZERO² (R(0) is ZERO)
     r00 = R(0) - R(0)
     suite.assert_eq("R(0)-R(0) = ZERO²", r00.c == z2.c, True)
 
-    # Rule 4: ZERO-ZERO = 0² = ZERO²
+    # Rule 4: ZERO-ZERO = 0² = ZERO² (same as rule 3)
     zz = ZERO - ZERO
     suite.assert_eq("ZERO-ZERO = ZERO²", zz.c == z2.c, True)
 

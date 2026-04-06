@@ -67,10 +67,12 @@ Dimensions are indexed on an integer scale with **rational as origin (0)**:
 
 ### The Value Zero and Infinity
 
-**`0 = 1(0) = |0| = |1|₋₁`** — two forms of zero with the same *value* but different *algebraic roles*:
+**`0 = 1(0) = |0| = |1|₋₁`** — these are the **same value** in two equivalent representations (the Ladder of Absences: `|0|ₙ = |1|ₙ₋₁`).
 
-- `|0|` — zero as a value (additive identity, multiplicative annihilator)
-- `|1|₋₁` — one structural zero (same value, dimension shifter, preserves provenance)
+- `|0|₀` — zero expressed as coefficient 0 at dimension 0
+- `|1|₋₁` — zero expressed as coefficient 1 at dimension -1
+
+Both follow the same multiplication rule: `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`. There is no annihilation — only standard coefficient arithmetic and dimension addition.
 
 **`∞ = |1|₁`** — one first-order infinity (the "unit infinity").
 
@@ -173,10 +175,10 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 ## Comparison: Old vs New Notation
 
 | Old Notation | New Notation | Meaning |
-|---|---|---|
-| `⟨_; 5 \| _⟩` | `\|5\|` | Plain rational 5 |
-| `⟨0; 5 \| 0⟩` | `\|5\|` | Same — phantom zeros don't exist |
-| `⟨2(0); 5 \| 1(0)⟩` | `\|2\|₁ \|5\| \|1\|₋₁` | 2∞ + 5 + 1 zero |
+| --- | --- | --- |
+| `⟨_; 5 | _⟩` | `|5|` | Plain rational 5 |
+| `⟨0; 5 | 0⟩` | `|5|` | Same — phantom zeros don't exist |
+| `⟨2(0); 5 | 1(0)⟩` | `|2|₁ |5| |1|₋₁` | 2∞ + 5 + 1 zero |
 
 **The key difference:** In new notation, dimensions only exist if written. You can't accidentally have phantom `|0|₁` or `|0|₋₁` — they must be explicitly constructed.
 
@@ -402,9 +404,9 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 - `|0|₋₁` → `|0|₋₂` = contributes 0 to dim -2
 - **Result:** `|0| |5|₋₁ |0|₋₂`
 
-**Simplification:** Zero coefficients can be omitted → `|5|₋₁`
+**Ladder equivalence:** By `|0|ₙ = |1|ₙ₋₁`, we have `|0|₀ = |1|₋₁` and `|0|₋₂ = |1|₋₃`, so the full result is equivalently `|1|₋₁ |5|₋₁ |1|₋₃`. Zero coefficients are **not omitted** — they carry structural meaning via the Ladder.
 
-✓ **Consistent!** Explicit zeros collapse away naturally.
+✓ **Consistent!** Explicit zeros are preserved and interpretable.
 
 #### Test 4.3: Zero as a Value (REVISED)
 
@@ -426,12 +428,12 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 **Result:** `|5|₋₁` ✓
 
-**Key insight:** Multiplying by `|0|` zeros the value. Multiplying by `|1|₋₁` (or ×0) shifts to zero dimension.
+**Key insight:** Both `|0|₀` and `|1|₋₁` are the same value (the Ladder of Absences: `|0|ₙ = |1|ₙ₋₁`). Both follow the same rule `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`:
 
-- `|0|` acts as **multiplicative annihilator**
-- `|1|₋₁` acts as **dimension shifter**
+- `|5|₀ × |0|₀ = |0|₀` — coefficients multiply (5×0=0), dimensions add (0+0=0)
+- `|5|₀ × |1|₋₁ = |5|₋₁` — coefficients multiply (5×1=5), dimensions add (0+(-1)=-1)
 
-Both represent zero as a *value*, but behave differently as *operators*.
+The different-looking results `|0|₀` and `|5|₋₁` are themselves equivalent via the Ladder: `|0|₀ = |1|₋₁` and `|5×0|₀ = |5|₋₁`.
 
 #### Test 4.4: Commutativity
 
@@ -476,16 +478,16 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 **Process (9 terms):**
 
 | Term A | × | Term B | = | Result |
-|--------|---|--------|---|--------|
-| `\|2\|₁` | × | `\|1\|₁` | = | `\|2\|₂` |
-| `\|2\|₁` | × | `\|2\|` | = | `\|4\|₁` |
-| `\|2\|₁` | × | `\|1\|₋₁` | = | `\|2\|` |
-| `\|3\|` | × | `\|1\|₁` | = | `\|3\|₁` |
-| `\|3\|` | × | `\|2\|` | = | `\|6\|` |
-| `\|3\|` | × | `\|1\|₋₁` | = | `\|3\|₋₁` |
-| `\|1\|₋₁` | × | `\|1\|₁` | = | `\|1\|` |
-| `\|1\|₋₁` | × | `\|2\|` | = | `\|2\|₋₁` |
-| `\|1\|₋₁` | × | `\|1\|₋₁` | = | `\|1\|₋₂` |
+| --- | --- | --- | --- | --- |
+| `|2|₁` | × | `|1|₁` | = | `|2|₂` |
+| `|2|₁` | × | `|2|` | = | `|4|₁` |
+| `|2|₁` | × | `|1|₋₁` | = | `|2|` |
+| `|3|` | × | `|1|₁` | = | `|3|₁` |
+| `|3|` | × | `|2|` | = | `|6|` |
+| `|3|` | × | `|1|₋₁` | = | `|3|₋₁` |
+| `|1|₋₁` | × | `|1|₁` | = | `|1|` |
+| `|1|₋₁` | × | `|2|` | = | `|2|₋₁` |
+| `|1|₋₁` | × | `|1|₋₁` | = | `|1|₋₂` |
 
 **Collect by dimension:**
 
@@ -581,17 +583,11 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 
 **Result:** `|2|₂ |0|₁ |-8|`
 
-**Question:** Should `|0|₁` be kept or dropped?
+**Result:** `|2|₂ |0|₁ |-8|`
 
-- If dropped: `|2|₂ |-8|`
-- If kept: `|2|₂ |0|₁ |-8|`
+**✅ Resolved:** By the Ladder of Absences, `|0|ₙ = |1|ₙ₋₁`. A zero coefficient at dimension n is equivalent to coefficient 1 at dimension n-1. So `|0|₁` = `|1|₀` = `|1|` — the dimension exists and carries meaning. Zero coefficients are always preserved.
 
-**⚠️ POTENTIAL ISSUE:** Does `|0|ₙ` (zero coefficient in dimension n) mean:
-
-1. The dimension exists but is empty? (keep it)
-2. The dimension doesn't exist? (drop it)
-
-**Status:** 🟡 Needs semantic decision
+**Status:** ✅ Resolved via Ladder of Absences
 
 ---
 
@@ -601,14 +597,14 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 
 **Test A:** `(|2|₁ |3|) × |0|` (multiply by value-zero)
 
-**Process:**
+**Process:** By the Ladder, `|0|₀ = |1|₋₁`, so normalize first:
 
-- `|2|₁ × |0|₀ = |0|₁`
-- `|3|₀ × |0|₀ = |0|₀`
+- `|2|₁ × |1|₋₁ = |2|₀ = |2|`
+- `|3|₀ × |1|₋₁ = |3|₋₁`
 
-**Result:** `|0|₁ |0|` = `|0|` (simplified, or keep `|0|₁` per Decision 2)
+**Result:** `|2| |3|₋₁` ✓
 
-**Interpretation:** Everything becomes zero. Value-zero annihilates.
+**Interpretation:** Identical to Test B — because `|0|` and `|1|₋₁` are the same value, they must produce the same result. The Ladder normalization is always applied before arithmetic.
 
 **Test B:** `(|2|₁ |3|) × |1|₋₁` (multiply by structural-zero)
 
@@ -628,7 +624,7 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 
 **Key finding:** `×|1|₋₁` and `×0` (shift operator) produce **identical results**.
 
-But `×|0|` annihilates to zero. These are different operations!
+Since `|0|₀ = |1|₋₁` (Ladder of Absences), `×|0|` also produces an equivalent result — the different-looking outputs are the same values expressed in different dimensional representations. All three follow the single rule `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`.
 
 ---
 
@@ -761,7 +757,7 @@ But `×|0|` annihilates to zero. These are different operations!
 - `|0|₁` ≠ (no dimension 1) — structural difference preserved
 - A dimension with `|0|ₙ` still participates in operations
 
-**Example:** `|0|₁ × |3|₋₁ = |0|₀` — the zero coefficient propagates, it doesn't vanish.
+**Example:** `|0|₁ × |3|₋₁ = |3|₋₁` — by the Ladder, `|0|₁ = |1|₀`, so `|1|₀ × |3|₋₁ = |3|₋₁`. The Ladder normalization applies before coefficient multiplication.
 
 ---
 
@@ -863,15 +859,17 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 ### Test 6.8: Adding Zero Forms (REVISED)
 
-**Definition:** `0 = |0| = |1|₋₁`
+**Definition:** `0 = |0|₀ = |1|₋₁` (same value, two representations — Ladder of Absences)
 
-**Test A:** `|5| + |0|` (add value-zero)
+**Test A:** `|5| + |0|` (add zero as `|0|₀`)
 
 **Process:** Dim 0: `|5+0| = |5|`
 
-**Result:** `|5|` ✓ **This IS the additive identity!**
+**Result:** `|5|` ✓
 
-**Test B:** `|5| + |1|₋₁` (add structural-zero)
+**Note:** Addition operates on the representation as written — `|0|₀` shares dim 0 with `|5|₀`, so coefficients combine (5+0=5).
+
+**Test B:** `|5| + |1|₋₁` (add zero as `|1|₋₁`)
 
 **Process:**
 
@@ -880,14 +878,11 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 **Result:** `|5| |1|₋₁`
 
-**Interpretation:** Structural zero leaves a trace! Value unchanged, but provenance added.
+**Note:** `|1|₋₁` occupies dim -1, which doesn't overlap with dim 0, so both terms remain.
 
-**Key finding:**
+**Key finding:** Since `|0|₀ = |1|₋₁` (Ladder of Absences), these two additions are adding the **same value** — the different results (`|5|` vs `|5| |1|₋₁`) reflect the choice of dimensional representation, not different algebraic behavior. Both results are equivalent via the Ladder: `|5|₀` = `|5|₀ |1|₋₁` (the `|1|₋₁` is the zero that's always implicitly present at dim -1).
 
-- `|0|` is the **additive identity**: `|5| + |0| = |5|` ✓
-- `|1|₋₁` is **NOT** the additive identity: `|5| + |1|₋₁ = |5| |1|₋₁` (leaves trace)
-
-**Status:** ✅ Consistent with the revised definition
+**Status:** ✅ Consistent with the Ladder of Absences
 
 ---
 
@@ -1012,24 +1007,17 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 ---
 
-## Key Finding: Two Forms of Zero (REVISED)
+## Key Finding: Zero and the Ladder of Absences
 
-Test 6.8 confirms the distinction:
+`|0|₀ = |1|₋₁` — these are the **same value** in two equivalent representations (Ladder of Absences: `|0|ₙ = |1|ₙ₋₁`).
 
-```jsx
-|5| + |0| = |5|           // additive identity ✓
-|5| + |1|₋₁ = |5| |1|₋₁   // leaves provenance trace
-```
+All operations follow the same rules regardless of representation:
 
-**Two forms of zero:**
+- Multiplication: `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`
+- Addition: `|a|ₙ + |b|ₙ = |a+b|ₙ` (same-dimension terms combine)
+- Division: `|a|ₘ / |b|ₙ = |a/b|ₘ₋ₙ`
 
-1. `|0|` — value zero, **additive identity**, no provenance
-2. `|1|₋₁` — structural zero, same value, **leaves trace**
-
-Both equal zero as a *value*, but have different algebraic behavior:
-
-- `|0|` annihilates in multiplication, identity in addition
-- `|1|₋₁` shifts dimensions in multiplication, adds provenance in addition
+There is no "annihilation" and no special-cased additive identity among composites. The system has **one zero** with multiple dimensional representations, all connected by the Ladder.
 
 ---
 
@@ -1072,7 +1060,7 @@ Now let's stress-test with indeterminate forms, identities, and pathological cas
 
 **Result:** `|0|₁` (zero infinities)
 
-**Value:** 0 — value-zero annihilates
+**Value:** By the Ladder, `|0|₁ = |1|₀ = |1|` — so this also equals 1
 
 **Test B:** `|1|₋₁ × |1|₁` (structural-zero × infinity)
 
@@ -1329,10 +1317,7 @@ This would require `(|3| |1|₋₁)² = |9| |6|₋₁ |1|₋₂`
 
 **Interpretation:** `|1|₋₁` = 1 zero = the "unit zero" = 0 (as a value)
 
-But structurally, `|1|₋₁ ≠ |0|`:
-
-- `|1|₋₁` has the zero dimension
-- `|0|` only has rational dimension
+By the Ladder of Absences, `|1|₋₁ = |0|₀` — same value, different dimensional representations.
 
 **Test:** `|1|₋₁ × ∞`
 
@@ -1496,7 +1481,7 @@ Rational expressions can later be expanded to infinite series if needed (like `1
 
 **Rationale:** The system has no undefined values. Division always has a result — either a finite composite or a rational expression.
 
-**Future development:**
+**Future development:** 
 
 - Formalize rational expression notation and simplification rules
 - Define when/how to expand to infinite series
@@ -1549,5 +1534,3 @@ This reinforces that all operations are fundamentally about **dimension shifting
 
 - How does this help with multi-term division?
 - Can we express rational expressions as dimension-shift operators?
-
-© Toni Milovan. Documentation licensed under CC BY-SA 4.0. Code licensed under AGPL-3.0.

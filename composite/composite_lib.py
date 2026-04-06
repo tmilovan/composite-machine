@@ -264,8 +264,7 @@ class Composite:
         result = Composite._wrap(self._backend.add(self._data, neg_other))
         # Subtraction rules:
         #   R(5)-R(5) = 0 at dim[0]. No shift — no multiplication.
-        #   R(0)-R(0) = 0·0 = 0². Multiplication with zero → shift.
-        #   ZERO-ZERO = 0·0 = 0². Same — ZERO is 0.
+        #   R(0)-R(0) = ZERO-ZERO = 0·0 = 0². Multiplication with zero → shift.
         #   ZERO²-ZERO² = 0·(0²) = 0³. Shift via multiplication.
         _, result_vals = self._backend.to_arrays(result._data)
         if (len(result_vals) > 0
@@ -500,12 +499,30 @@ def _poly_divide(numerator, denominator, max_terms=50):
 # =============================================================================
 
 def R(x):
-    """Create real number |x|₀"""
+    """Create real number |x|₀, or ZERO (|1|₋₁) if x == 0.
+
+    |0|₀ and |1|₋₁ are the same number (zero) at different dimensions.
+    R(0) returns the canonical form |1|₋₁.
+    A raw Python scalar 0 (via Composite(0)) keeps the |0|₀ form.
+    """
+    if x == 0:
+        return Composite.zero()
     return Composite.real(x)
 
 ZERO = Composite.zero()       # |1|₋₁ (infinitesimal)
 INF = Composite.infinity()    # |1|₁ (infinity)
 h = ZERO                      # Alias: h is the infinitesimal
+
+def _seeded(at):
+    """Evaluation point seeded with infinitesimal for derivative extraction.
+
+    R(0) = ZERO already carries the infinitesimal, so R(0) + ZERO
+    would double-seed to |2|₋₁. This helper avoids that.
+    """
+    x = R(at)
+    if at == 0:
+        return x
+    return x + ZERO
 
 def set_max_order(n: int = None):
     """Set global MAX truncation order."""
@@ -747,7 +764,7 @@ def power(x, s, terms=15):
 
 def derivative(f: Callable, at: float, terms: int = 12) -> float:
     """Compute f'(at) automatically."""
-    x = R(at) + ZERO
+    x = _seeded(at)
     result = f(x)
     return result.d(1)
 
@@ -755,14 +772,14 @@ def derivative(f: Callable, at: float, terms: int = 12) -> float:
 def nth_derivative(f: Callable, n: int, at: float, terms: int = 12) -> float:
     """Compute f^(n)(at) - the nth derivative at a point."""
     effective_terms = max(terms, n + 2)
-    x = R(at) + ZERO
+    x = _seeded(at)
     result = f(x)
     return result.d(n)
 
 
 def all_derivatives(f: Callable, at: float, up_to: int = 5, terms: int = 12) -> List[float]:
     """Compute [f(at), f'(at), f''(at), ...] up to nth derivative."""
-    x = R(at) + ZERO
+    x = _seeded(at)
     result = f(x)
     return [result.st()] + [result.d(n) for n in range(1, up_to + 1)]
 
@@ -773,10 +790,8 @@ def limit(f: Callable, as_x_to: float, terms: int = 12) -> float:
         x = INF
     elif as_x_to == float('-inf'):
         x = -INF
-    elif as_x_to == 0:
-        x = ZERO
     else:
-        x = R(as_x_to) + ZERO
+        x = _seeded(as_x_to)
 
     result = f(x)
     return result.st()
@@ -784,10 +799,7 @@ def limit(f: Callable, as_x_to: float, terms: int = 12) -> float:
 
 def limit_right(f: Callable, as_x_to: float, terms: int = 12) -> float:
     """Compute right-hand limit: lim(x→a⁺) f(x)"""
-    if as_x_to == 0:
-        x = ZERO
-    else:
-        x = R(as_x_to) + ZERO
+    x = _seeded(as_x_to)
     result = f(x)
     return result.st()
 
@@ -804,7 +816,7 @@ def limit_left(f: Callable, as_x_to: float, terms: int = 12) -> float:
 
 def taylor_coefficients(f: Callable, at: float, up_to: int = 5, terms: int = 12) -> List[float]:
     """Get Taylor series coefficients of f around 'at'."""
-    x = R(at) + ZERO
+    x = _seeded(at)
     result = f(x)
     return [result.coeff(-n) for n in range(up_to + 1)]
 
@@ -844,7 +856,7 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
 
         t_mid = (a_t + b_t) / 2
         try:
-            probe = curve(R(t_mid) + ZERO)
+            probe = curve(_seeded(t_mid))
             composite_curve = isinstance(probe[0], Composite) if isinstance(probe, (list, tuple)) else isinstance(probe, Composite)
         except (TypeError, AttributeError):
             composite_curve = False
@@ -1028,7 +1040,7 @@ def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms:
     x0 = a
     while x0 < b:
         dx = min(step, b - x0)
-        fx = f(R(x0) + ZERO)
+        fx = f(_seeded(x0))
         Fx = antiderivative(fx)
         neg_terms = {d: c for d, c in Fx.c.items() if d < 0}
         contribution = sum(
@@ -1048,15 +1060,15 @@ def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms:
 
 def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, terms: int = 15):
     """Adaptive stepped integration via composite dimensional shift."""
-    probe = f(R((a + b) / 2) + ZERO)
+    probe = f(_seeded((a + b) / 2))
     if not any(dim < 0 for dim in probe.c):
         f_original = f
         eps = 1e-7
         def f(x):
             a_val = x.st()
-            val = f_original(R(a_val) + ZERO).st()
-            val_plus = f_original(R(a_val + eps) + ZERO).st()
-            val_minus = f_original(R(a_val - eps) + ZERO).st()
+            val = f_original(_seeded(a_val)).st()
+            val_plus = f_original(_seeded(a_val + eps)).st()
+            val_minus = f_original(_seeded(a_val - eps)).st()
             d1 = (val_plus - val_minus) / (2 * eps)
             d2 = (val_plus - 2 * val + val_minus) / (eps ** 2)
             return Composite({0: val, -1: d1, -2: d2 / 2})
@@ -1066,7 +1078,7 @@ def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, term
     x0 = a
 
     while x0 < b:
-        fx = f(R(x0) + ZERO)
+        fx = f(_seeded(x0))
 
         max_coeff = max(
             (abs(c) for d, c in fx.c.items() if d < -1),
@@ -1102,7 +1114,7 @@ def improper_integral(f: Callable, a: float, tol: float = 1e-8, cutoff: float = 
     """Compute ∫_a^∞ f(x) dx. Returns (Composite, float)."""
     M = cutoff
     while M < 1000:
-        fx = f(R(M) + ZERO)
+        fx = f(_seeded(M))
         if abs(fx.st()) < tol * 0.01:
             break
         M *= 2
@@ -1123,12 +1135,12 @@ def improper_integral_to(f: Callable, a: float, b: float, tol: float = 1e-8):
     """Compute ∫_a^b f(x) dx where f has a singularity. Returns (Composite, float)."""
     eps = tol ** 0.25
     try:
-        f(R(a + eps) + ZERO).st()
+        f(_seeded(a + eps)).st()
         a_ok = True
     except:
         a_ok = False
     try:
-        f(R(b - eps) + ZERO).st()
+        f(_seeded(b - eps)).st()
         b_ok = True
     except:
         b_ok = False
@@ -1264,11 +1276,11 @@ def translate(f: Callable, at: float = None, to: float = None) -> Composite:
             x = ZERO
             sub_str = "x = ZERO"
         else:
-            x = R(to) + ZERO
-            sub_str = f"x = R({to}) + ZERO"
+            x = _seeded(to)
+            sub_str = f"x = _seeded({to})"
     elif at is not None:
-        x = R(at) + ZERO
-        sub_str = f"x = R({at}) + ZERO"
+        x = _seeded(at)
+        sub_str = f"x = _seeded({at})"
     else:
         x = ZERO
         sub_str = "x = ZERO"
