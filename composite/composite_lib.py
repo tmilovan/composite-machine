@@ -266,19 +266,23 @@ class Composite:
         #   R(5)-R(5) = 0 at dim[0]. No shift — no multiplication.
         #   R(0)-R(0) = ZERO-ZERO = 0·0 = 0². Multiplication with zero → shift.
         #   ZERO²-ZERO² = 0·(0²) = 0³. Shift via multiplication.
+        #   0²-R(0) = 0²·0 = 0³. Different dimensions but both zero-valued.
         _, result_vals = self._backend.to_arrays(result._data)
-        if (len(result_vals) > 0
-                and np.all(np.abs(result_vals) < 1e-15)):
+        _self_dims = self._backend.active_dims(self._data)
+        _other_dims = self._backend.active_dims(other._data)
+        _exact_cancel = (len(result_vals) > 0
+                         and np.all(np.abs(result_vals) < 1e-15))
+        _both_zero = (len(_self_dims) > 0 and len(_other_dims) > 0
+                      and self.st() == 0.0 and other.st() == 0.0)
+        if _exact_cancel or _both_zero:
             if self.st() != 0.0:
                 # Non-zero real cancellation: zero at dim[0], no shift
                 return result
             # Zero-valued operand: 0·operand = multiplication with zero.
-            #   R(0): dim 0  → 0² (power 2)
-            #   ZERO: dim -1 → 0² (power 2)
-            #   ZERO²: dim -2 → 0³ (power 3)
-            #   ZERO³: dim -3 → 0⁴ (power 4)
-            self_dims = self._backend.active_dims(self._data)
-            min_dim = int(self_dims[0]) if len(self_dims) > 0 else 0
+            # Use the higher zero-power (lower min dim) of the two operands.
+            self_min = int(_self_dims[0]) if len(_self_dims) > 0 else 0
+            other_min = int(_other_dims[0]) if len(_other_dims) > 0 else 0
+            min_dim = min(self_min, other_min)
             power = max(2, 1 - min_dim)
             z = ZERO
             for _ in range(power - 1):
