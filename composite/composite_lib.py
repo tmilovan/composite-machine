@@ -350,17 +350,21 @@ class Composite:
         return int(self.st())
 
     def __pow__(self, n):
-        """Integer power via repeated multiplication"""
-        if not isinstance(n, int):
-            raise TypeError("Power must be integer")
-        if n == 0:
-            return Composite({0: 1})
-        if n < 0:
-            return Composite({0: 1}) / (self ** (-n))
-        result = Composite({0: 1})
-        for _ in range(n):
-            result = result * self
-        return result
+        """Power: integer via repeated multiplication, otherwise exp(n*ln(self))."""
+        if isinstance(n, int):
+            if n == 0:
+                return Composite({0: 1})
+            if n < 0:
+                return Composite({0: 1}) / (self ** (-n))
+            result = Composite({0: 1})
+            for _ in range(n):
+                result = result * self
+            return result
+        if isinstance(n, float):
+            return exp(Composite(n) * ln(self))
+        if isinstance(n, Composite):
+            return exp(n * ln(self))
+        raise TypeError(f"Power exponent must be int, float, or Composite, got {type(n)}")
 
     # -------------------------------------------------------------------------
     # Extraction methods
