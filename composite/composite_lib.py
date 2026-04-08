@@ -62,6 +62,14 @@ import numpy as np
 from composite.backends import get_backend
 
 # =============================================================================
+# EXCEPTIONS
+# =============================================================================
+
+class LimitDoesNotExistError(ValueError):
+    """Raised when a limit cannot be computed (e.g. oscillatory divergence)."""
+    pass
+
+# =============================================================================
 # CORE: COMPOSITE NUMBER CLASS
 # =============================================================================
 
@@ -274,7 +282,7 @@ class Composite:
                          and np.all(np.abs(result_vals) < 1e-15))
         _both_zero = (len(_self_dims) > 0 and len(_other_dims) > 0
                       and self.st() == 0.0 and other.st() == 0.0)
-        if _exact_cancel or _both_zero:
+        if _exact_cancel:
             if self.st() != 0.0:
                 # Non-zero real cancellation: zero at dim[0], no shift
                 return result
@@ -391,6 +399,17 @@ class Composite:
         if fmt:
             return format(self.st(), fmt)
         return repr(self)
+
+    def max_positive_dim(self):
+        """Return the highest positive dimension, or None if none exist."""
+        dims, vals = self._backend.to_arrays(self._data)
+        pos = [int(d) for d, v in zip(dims, vals) if int(d) > 0 and v != 0]
+        return max(pos) if pos else None
+
+    def coeffs_dict(self):
+        """Return {dim: coeff} dict for all non-zero dimensions."""
+        dims, vals = self._backend.to_arrays(self._data)
+        return {int(d): float(v) for d, v in zip(dims, vals)}
 
     # -------------------------------------------------------------------------
     # Simplified integration operators (dimensional shifts)
@@ -793,7 +812,15 @@ def all_derivatives(f: Callable, at: float, up_to: int = 5, terms: int = 12) -> 
 
 
 def limit(f: Callable, as_x_to: float, terms: int = 12) -> float:
-    """Compute lim(x→as_x_to) f(x) automatically."""
+    """Compute lim(x→as_x_to) f(x) automatically.
+
+    Evaluates f at a composite point seeded with an infinitesimal and
+    inspects the dimensional structure of the result:
+      - No positive dimensions → clean limit, return standard part.
+      - All-positive coefficients in positive dims → diverges to +∞.
+      - All-negative coefficients in positive dims → diverges to -∞.
+      - Mixed-sign coefficients in positive dims → oscillatory, no limit.
+    """
     if as_x_to == float('inf'):
         x = INF
     elif as_x_to == float('-inf'):
@@ -802,7 +829,27 @@ def limit(f: Callable, as_x_to: float, terms: int = 12) -> float:
         x = _seeded(as_x_to)
 
     result = f(x)
-    return result.st()
+
+    max_pos = result.max_positive_dim()
+
+    if max_pos is None:
+        # Clean result — no divergent parts
+        return result.st()
+
+    # Positive dimensions present — check what kind of divergence
+    pos_coeffs = {d: c for d, c in result.coeffs_dict().items() if d > 0}
+
+    signs = [c > 0 for c in pos_coeffs.values()]
+
+    if all(signs):
+        return INF
+    elif not any(signs):
+        return -INF
+    else:
+        raise LimitDoesNotExistError(
+            "Result has mixed-sign components in positive dimensions. "
+            "Limit may not exist (oscillatory)."
+        )
 
 
 def limit_right(f: Callable, as_x_to: float, terms: int = 12) -> float:
