@@ -66,7 +66,15 @@ from composite.backends import get_backend
 # =============================================================================
 
 class LimitDoesNotExistError(ValueError):
-    """Raised when a limit cannot be computed (e.g. oscillatory divergence)."""
+    """Raised when a limit provably does not exist."""
+    pass
+
+class LimitUndecidableError(ValueError):
+    """Raised when composite arithmetic cannot determine the limit."""
+    pass
+
+class CompositionError(TypeError):
+    """Raised when a function is not composable with composite arithmetic."""
     pass
 
 # =============================================================================
@@ -811,62 +819,168 @@ def all_derivatives(f: Callable, at: float, up_to: int = 5, terms: int = 12) -> 
     return [result.st()] + [result.d(n) for n in range(1, up_to + 1)]
 
 
-def limit(f: Callable, as_x_to: float, terms: int = 12) -> float:
+def limit(f: Callable, as_x_to: float, terms: int = 12,
+          dir: str = "both", fallback: bool = False) -> float:
     """Compute lim(x→as_x_to) f(x) automatically.
 
-    Evaluates f at a composite point seeded with an infinitesimal and
-    inspects the dimensional structure of the result:
-      - No positive dimensions → clean limit, return standard part.
-      - All-positive coefficients in positive dims → diverges to +∞.
-      - All-negative coefficients in positive dims → diverges to -∞.
-      - Mixed-sign coefficients in positive dims → oscillatory, no limit.
+    Algebraic evaluation at a composite infinitesimal — exact for analytic
+    functions (0/0 forms, removable singularities, general powers).
+
+    When the algebraic path cannot determine the limit (oscillatory or
+    essential singularities), raises LimitUndecidableError.  Pass
+    ``fallback=True`` to instead get a numerical estimate via integral
+    averaging (not machine-precision, but correct).
+
+    Args:
+        f:         Function to evaluate.
+        as_x_to:   Point to approach (float, float('inf'), or Composite INF).
+        terms:     Truncation order for transcendentals.
+        dir:       Direction — "both" (default), "+" (right), "-" (left).
+        fallback:  If True, use integral averaging when algebraic fails.
+                   If False (default), raise LimitUndecidableError.
     """
+    # Normalize: accept Composite INF/-INF as well as float('inf')
+    _is_inf = False
+    if isinstance(as_x_to, Composite):
+        st_val = as_x_to.st()
+        max_d = as_x_to.max_positive_dim()
+        if max_d is not None:
+            coeffs = as_x_to.coeffs_dict()
+            _is_inf = True
+            as_x_to = float('inf') if coeffs.get(max_d, 0) > 0 else float('-inf')
+        else:
+            as_x_to = st_val
+
+    # Build the evaluation point
     if as_x_to == float('inf'):
         x = INF
+        _is_inf = True
     elif as_x_to == float('-inf'):
         x = -INF
+        _is_inf = True
+    elif dir == "-":
+        x = -ZERO if as_x_to == 0 else R(as_x_to) - ZERO
     else:
         x = _seeded(as_x_to)
 
-    result = f(x)
+    try:
+        result = f(x)
+    except TypeError:
+        raise CompositionError(
+            "Function not composable with composite arithmetic")
+    except (ValueError, ZeroDivisionError):
+        # e.g. ln(ZERO), sqrt(negative) — algebraic eval not possible
+        if fallback:
+            if _is_inf:
+                return _limit_at_inf_fallback(f, as_x_to)
+            return _limit_integral_fallback(f, as_x_to, dir)
+        raise LimitUndecidableError(
+            "Algebraic evaluation failed (domain error at limit point).")
+
+    # --- Algebraic path ---
+
+    # Check for NaN contamination (e.g. sin(INF)/INF at infinity)
+    import math as _math
+    st_val = result.st()
+    if _math.isnan(st_val) or _math.isinf(st_val):
+        if fallback:
+            if _is_inf:
+                return _limit_at_inf_fallback(f, as_x_to)
+            return _limit_integral_fallback(f, as_x_to, dir)
+        raise LimitUndecidableError(
+            "Algebraic evaluation produced NaN/Inf.")
 
     max_pos = result.max_positive_dim()
 
     if max_pos is None:
-        # Clean result — no divergent parts
-        return result.st()
+        coeffs = result.coeffs_dict()
+        if coeffs:
+            min_dim = min(coeffs.keys())
+            if min_dim <= -(terms - 2) and st_val == 0.0:
+                raise LimitUndecidableError(
+                    "Result may require higher truncation order.")
+        return st_val
 
-    # Positive dimensions present — check what kind of divergence
+    # Positive dimensions present — divergence analysis
     pos_coeffs = {d: c for d, c in result.coeffs_dict().items() if d > 0}
-
     signs = [c > 0 for c in pos_coeffs.values()]
 
     if all(signs):
         return INF
     elif not any(signs):
         return -INF
+
+    # Mixed signs → oscillatory / transcendental composed with infinity
+    if fallback:
+        if _is_inf:
+            return _limit_at_inf_fallback(f, as_x_to)
+        return _limit_integral_fallback(f, as_x_to, dir)
+    raise LimitUndecidableError(
+        "A transcendental function was applied to a composite infinity. "
+        "This limit cannot be determined by composite arithmetic. "
+        "Use fallback=True for a numerical estimate via integral averaging."
+    )
+
+
+def _limit_integral_fallback(f, as_x_to, dir, a=1e-4, n=1000):
+    """Compute limit via integral average: ∫f(x)dx / a over a small interval.
+
+    Integration smooths oscillation — the average value over [as_x_to, as_x_to+a]
+    converges to the limit even when point evaluation oscillates.
+    """
+    if dir == "-":
+        lo, hi = as_x_to - a, as_x_to
     else:
-        raise LimitDoesNotExistError(
-            "Result has mixed-sign components in positive dimensions. "
-            "Limit may not exist (oscillatory)."
-        )
+        lo, hi = as_x_to, as_x_to + a
+
+    # Avoid evaluating exactly at the singularity
+    eps = a * 1e-10
+    lo = lo + eps
+
+    h = (hi - lo) / n
+    total = 0.0
+    for i in range(n):
+        xi = lo + (i + 0.5) * h
+        fi = f(R(xi) + ZERO)
+        total += fi.st()
+    total *= h
+
+    return total / a
 
 
+def _limit_at_inf_fallback(f, as_x_to, n=1000, width=100.0):
+    """Compute limit at ±∞ via integral average over a large-x window.
+
+    Evaluates ∫_M^{M+w} f(x)dx / w for large M.
+    """
+    sign = 1 if as_x_to == float('inf') else -1
+    M = sign * 1e4
+    lo = M
+    hi = M + sign * width
+
+    if lo > hi:
+        lo, hi = hi, lo
+
+    h = (hi - lo) / n
+    total = 0.0
+    for i in range(n):
+        xi = lo + (i + 0.5) * h
+        fi = f(R(xi) + ZERO)
+        total += fi.st()
+    total *= h
+
+    return total / width
+
+
+# Backward compatibility aliases
 def limit_right(f: Callable, as_x_to: float, terms: int = 12) -> float:
     """Compute right-hand limit: lim(x→a⁺) f(x)"""
-    x = _seeded(as_x_to)
-    result = f(x)
-    return result.st()
+    return limit(f, as_x_to, terms=terms, dir="+")
 
 
 def limit_left(f: Callable, as_x_to: float, terms: int = 12) -> float:
     """Compute left-hand limit: lim(x→a⁻) f(x)"""
-    if as_x_to == 0:
-        x = -ZERO
-    else:
-        x = R(as_x_to) - ZERO
-    result = f(x)
-    return result.st()
+    return limit(f, as_x_to, terms=terms, dir="-")
 
 
 def taylor_coefficients(f: Callable, at: float, up_to: int = 5, terms: int = 12) -> List[float]:
