@@ -579,11 +579,28 @@ def _has_positive_dims(x):
     return x.max_positive_dim() is not None
 
 
+def _bounded_at_inf(func, x):
+    """Evaluate a bounded transcendental at an infinite composite argument.
+
+    For monotonic bounded functions (atan, tanh): math.func(±inf) returns
+    the correct asymptotic value (e.g. atan(inf) = π/2).
+    For oscillatory functions (sin, cos): math.func(±inf) raises ValueError.
+    The oscillation has zero mean, so return R(0) = ZERO.
+    Result is returned via R() for proper composite formatting.
+    """
+    max_d = x.max_positive_dim()
+    sign = 1.0 if x.coeff(max_d) > 0 else -1.0
+    try:
+        return R(func(sign * float('inf')))
+    except (ValueError, OverflowError):
+        return R(0)
+
+
 def sin(x, terms=12):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _has_positive_dims(x):
-        return R(math.sin(x.st()))
+        return _bounded_at_inf(math.sin, x)
     a = x.st()
     h = Composite({d: c for d, c in x.c.items() if d != 0})
     if not h.c:
@@ -607,7 +624,7 @@ def cos(x, terms=12):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _has_positive_dims(x):
-        return R(math.cos(x.st()))
+        return _bounded_at_inf(math.cos, x)
     a = x.st()
     h = Composite({d: c for d, c in x.c.items() if d != 0})
     if not h.c:
@@ -736,7 +753,7 @@ def atan(x, terms=15):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _has_positive_dims(x):
-        return R(math.atan(x.st()))
+        return _bounded_at_inf(math.atan, x)
     a = x.st()
     one_plus_x2 = R(1) + x * x
     deriv = _reciprocal(one_plus_x2, terms)
@@ -752,7 +769,7 @@ def asin(x, terms=15):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _has_positive_dims(x):
-        return R(math.asin(x.st()))
+        return _bounded_at_inf(math.asin, x)
     a = x.st()
     if abs(a) >= 1:
         raise ValueError("asin requires |standard part| < 1")
@@ -792,7 +809,7 @@ def tanh(x, terms=15):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _has_positive_dims(x):
-        return R(math.tanh(x.st()))
+        return _bounded_at_inf(math.tanh, x)
     return sinh(x, terms) / cosh(x, terms)
 
 # =============================================================================
