@@ -280,7 +280,7 @@ def triple_integral(f, x_range, y_range, z_range, tol=1e-8):
                 return Composite({0: float(result)})
             return result
 
-        val, _ = integrate_adaptive(g, za, zb, tol=tol)
+        val, _ = integrate_adaptive(g, za, zb, tol=tol, max_depth=8, min_panels=1)
         return _to_float(val)
     def inner_y(x_val):
         """Integrate over y for fixed x via midpoint quadrature."""

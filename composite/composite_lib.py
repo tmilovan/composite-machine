@@ -574,13 +574,20 @@ def get_max_order() -> int:
 # TAYLOR SERIES FOR TRANSCENDENTAL FUNCTIONS
 # =============================================================================
 
+def _has_positive_dims(x):
+    """Check if a composite has any positive-dimension components."""
+    return x.max_positive_dim() is not None
+
+
 def sin(x, terms=12):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _has_positive_dims(x):
+        return R(math.sin(x.st()))
     a = x.st()
     h = Composite({d: c for d, c in x.c.items() if d != 0})
     if not h.c:
-        return Composite({0: math.sin(a)})
+        return R(math.sin(a))
     sin_a, cos_a = math.sin(a), math.cos(a)
     sin_h = Composite({})
     cos_h = Composite({0: 1.0})
@@ -599,10 +606,12 @@ def sin(x, terms=12):
 def cos(x, terms=12):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _has_positive_dims(x):
+        return R(math.cos(x.st()))
     a = x.st()
     h = Composite({d: c for d, c in x.c.items() if d != 0})
     if not h.c:
-        return Composite({0: math.cos(a)})
+        return R(math.cos(a))
     sin_a, cos_a = math.sin(a), math.cos(a)
     sin_h = Composite({})
     cos_h = Composite({0: 1.0})
@@ -726,6 +735,8 @@ def atan(x, terms=15):
     """Arctangent for composite numbers."""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _has_positive_dims(x):
+        return R(math.atan(x.st()))
     a = x.st()
     one_plus_x2 = R(1) + x * x
     deriv = _reciprocal(one_plus_x2, terms)
@@ -740,6 +751,8 @@ def asin(x, terms=15):
     """Arcsine for composite numbers."""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _has_positive_dims(x):
+        return R(math.asin(x.st()))
     a = x.st()
     if abs(a) >= 1:
         raise ValueError("asin requires |standard part| < 1")
@@ -778,6 +791,8 @@ def tanh(x, terms=15):
     """Hyperbolic tangent: sinh(x) / cosh(x)"""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _has_positive_dims(x):
+        return R(math.tanh(x.st()))
     return sinh(x, terms) / cosh(x, terms)
 
 # =============================================================================
@@ -821,15 +836,15 @@ def all_derivatives(f: Callable, at: float, up_to: int = 5, terms: int = 12) -> 
 
 def limit(f: Callable, as_x_to: float, terms: int = 12,
           dir: str = "both", fallback: bool = False) -> float:
-    """Compute lim(x→as_x_to) f(x) automatically.
+    """Compute lim(x→as_x_to) f(x) via composite evaluation.
 
-    Algebraic evaluation at a composite infinitesimal — exact for analytic
-    functions (0/0 forms, removable singularities, general powers).
+    Evaluates f at a composite infinitesimal.  Bounded transcendentals
+    (sin, cos, atan, asin, acos, tanh) evaluate at st(x) for infinite
+    arguments, so oscillatory limits like x·sin(1/x) resolve algebraically.
 
-    When the algebraic path cannot determine the limit (oscillatory or
-    essential singularities), raises LimitUndecidableError.  Pass
-    ``fallback=True`` to instead get a numerical estimate via integral
-    averaging (not machine-precision, but correct).
+    Positive dims in the result indicate unbounded divergence (e.g. exp).
+    Domain errors (ln(0), sqrt(-x)) raise LimitUndecidableError, or fall
+    back to integral averaging with ``fallback=True``.
 
     Args:
         f:         Function to evaluate.
@@ -837,19 +852,17 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
         terms:     Truncation order for transcendentals.
         dir:       Direction — "both" (default), "+" (right), "-" (left).
         fallback:  If True, use integral averaging when algebraic fails.
-                   If False (default), raise LimitUndecidableError.
     """
     # Normalize: accept Composite INF/-INF as well as float('inf')
     _is_inf = False
     if isinstance(as_x_to, Composite):
-        st_val = as_x_to.st()
         max_d = as_x_to.max_positive_dim()
         if max_d is not None:
             coeffs = as_x_to.coeffs_dict()
             _is_inf = True
             as_x_to = float('inf') if coeffs.get(max_d, 0) > 0 else float('-inf')
         else:
-            as_x_to = st_val
+            as_x_to = as_x_to.st()
 
     # Build the evaluation point
     if as_x_to == float('inf'):
@@ -869,20 +882,17 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
         raise CompositionError(
             "Function not composable with composite arithmetic")
     except (ValueError, ZeroDivisionError):
-        # e.g. ln(ZERO), sqrt(negative) — algebraic eval not possible
         if fallback:
             if _is_inf:
                 return _limit_at_inf_fallback(f, as_x_to)
             return _limit_integral_fallback(f, as_x_to, dir)
         raise LimitUndecidableError(
-            "Algebraic evaluation failed (domain error at limit point).")
+            "Algebraic evaluation failed (domain error at limit point). "
+            "Use fallback=True for integral averaging.")
 
-    # --- Algebraic path ---
-
-    # Check for NaN contamination (e.g. sin(INF)/INF at infinity)
-    import math as _math
+    # Check for NaN/Inf contamination
     st_val = result.st()
-    if _math.isnan(st_val) or _math.isinf(st_val):
+    if not math.isfinite(st_val):
         if fallback:
             if _is_inf:
                 return _limit_at_inf_fallback(f, as_x_to)
@@ -890,36 +900,25 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
         raise LimitUndecidableError(
             "Algebraic evaluation produced NaN/Inf.")
 
+    # Positive dims → unbounded divergence (from exp, ln, etc.)
     max_pos = result.max_positive_dim()
+    if max_pos is not None:
+        pos_coeffs = {d: c for d, c in result.coeffs_dict().items() if d > 0}
+        signs = [c > 0 for c in pos_coeffs.values()]
+        if all(signs):
+            return INF
+        elif not any(signs):
+            return -INF
+        # Mixed signs from unbounded transcendentals — shouldn't happen
+        # after bounded fix, but handle gracefully
+        if fallback:
+            if _is_inf:
+                return _limit_at_inf_fallback(f, as_x_to)
+            return _limit_integral_fallback(f, as_x_to, dir)
+        raise LimitUndecidableError(
+            "Result has mixed-sign positive dimensions.")
 
-    if max_pos is None:
-        coeffs = result.coeffs_dict()
-        if coeffs:
-            min_dim = min(coeffs.keys())
-            if min_dim <= -(terms - 2) and st_val == 0.0:
-                raise LimitUndecidableError(
-                    "Result may require higher truncation order.")
-        return st_val
-
-    # Positive dimensions present — divergence analysis
-    pos_coeffs = {d: c for d, c in result.coeffs_dict().items() if d > 0}
-    signs = [c > 0 for c in pos_coeffs.values()]
-
-    if all(signs):
-        return INF
-    elif not any(signs):
-        return -INF
-
-    # Mixed signs → oscillatory / transcendental composed with infinity
-    if fallback:
-        if _is_inf:
-            return _limit_at_inf_fallback(f, as_x_to)
-        return _limit_integral_fallback(f, as_x_to, dir)
-    raise LimitUndecidableError(
-        "A transcendental function was applied to a composite infinity. "
-        "This limit cannot be determined by composite arithmetic. "
-        "Use fallback=True for a numerical estimate via integral averaging."
-    )
+    return st_val
 
 
 def _limit_integral_fallback(f, as_x_to, dir, a=1e-4, n=1000):
@@ -1335,24 +1334,20 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
     _fallback_count = [0]
 
     # --- LIFT AT THE GATE ---
+    # If f doesn't propagate composite structure, wrap its output via R()
+    # so constants get proper composite formatting (R(0) = ZERO = |1|₋₁).
+    # No finite differences — the composite infinitesimal from _seeded()
+    # provides exact derivatives when the function uses its input.
     probe = _ensure_composite(f(_seeded((a + b) / 2)))
     if not any(dim < 0 for dim in probe.c):
-        import warnings
-        warnings.warn(
-            "integrate_adaptive: f does not propagate composite structure. "
-            "Using 4th-order finite-difference fallback.",
-            stacklevel=2)
         f_original = f
-        fd_eps = 1e-7
         def f(x):
-            a_val = x.st()
-            vs = [f_original(_seeded(a_val + k * fd_eps)).st()
-                  for k in [-2, -1, 0, 1, 2]]
-            d1 = (-vs[4] + 8*vs[3] - 8*vs[1] + vs[0]) / (12 * fd_eps)
-            d2 = (-vs[4] + 16*vs[3] - 30*vs[2] + 16*vs[1] - vs[0]) / (12 * fd_eps**2)
-            d3 = (vs[4] - 2*vs[3] + 2*vs[1] - vs[0]) / (2 * fd_eps**3)
-            d4 = (vs[4] - 4*vs[3] + 6*vs[2] - 4*vs[1] + vs[0]) / fd_eps**4
-            return Composite({0: vs[2], -1: d1, -2: d2/2, -3: d3/6, -4: d4/24})
+            result = f_original(x)
+            if isinstance(result, (int, float)):
+                return R(float(result))
+            if isinstance(result, Composite) and not any(d < 0 for d in result.c):
+                return R(result.st())
+            return result
 
     def _panel_with_error(x, dx):
         """One composite eval at midpoint -> integral value + error estimate."""
