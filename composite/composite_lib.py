@@ -1355,16 +1355,14 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
     # so constants get proper composite formatting (R(0) = ZERO = |1|₋₁).
     # No finite differences — the composite infinitesimal from _seeded()
     # provides exact derivatives when the function uses its input.
+    # --- LIFT AT THE GATE ---
     probe = _ensure_composite(f(_seeded((a + b) / 2)))
     if not any(dim < 0 for dim in probe.c):
-        f_original = f
-        def f(x):
-            result = f_original(x)
-            if isinstance(result, (int, float)):
-                return R(float(result))
-            if isinstance(result, Composite) and not any(d < 0 for d in result.c):
-                return R(result.st())
-            return result
+        import warnings
+        warnings.warn(
+            "integrate_adaptive: f does not propagate composite structure to output. "
+            "Falling back to midpoint rule (no adaptive refinement for this integrand).",
+            stacklevel=2)
 
     def _panel_with_error(x, dx):
         """One composite eval at midpoint -> integral value + error estimate."""
@@ -1478,14 +1476,14 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
 def improper_integral(f, a, tol=1e-8, cutoff=20):
     """Compute integral from a to +infinity. Returns (Composite, float).
 
-    Uses composite tail analysis: ONE eval at large M gives
-    alpha = M * f'(M) / f(M).
-      alpha < -1: power-law tail, integrate analytically
-      otherwise:  find cutoff where f ~ 0, integrate to there
+    Uses composite tail analysis with power-law VERIFICATION:
+    two probes at M and M/2 — true power laws give the same exponent,
+    exponential/Gaussian decay gives wildly different exponents.
     """
-    M = max(max(a * 2, cutoff), 20.0)
+    # Start with a smaller M — grow from here if needed
+    M = max(abs(a) + 1, 5.0)
 
-    # Detect tail behavior from ONE composite evaluation
+    # Detect tail behavior from composite evaluation at M
     fx = _ensure_composite(f(_seeded(M)))
     f_val = fx.st()
     f_d1 = fx.d(1)
@@ -1496,13 +1494,30 @@ def improper_integral(f, a, tol=1e-8, cutoff=20):
         alpha = M * f_d1 / f_val
 
         if alpha < -1.01:
-            # Power-law tail: int_M^inf C*x^alpha dx = -C*M^(a+1)/(a+1)
-            C = f_val / (M ** alpha)
-            ap1 = alpha + 1
-            tail_val = -C * (M ** ap1) / ap1
-            # Integrate [a, M] normally, add analytical tail
-            bulk, bulk_err = integrate_adaptive(f, a, M, tol=tol)
-            return Composite({0: bulk.st() + tail_val}), bulk_err
+            # VERIFY: true power law gives same alpha at M/2
+            # For f = C*x^alpha:  alpha(M) = alpha(M/2) = alpha  (constant)
+            # For f = exp(-x^2):  alpha(M) = -2M^2, alpha(M/2) = -M^2/2  (wildly different)
+            M2 = M * 0.5
+            fx2 = _ensure_composite(f(_seeded(M2)))
+            f_val2 = fx2.st()
+            f_d12 = fx2.d(1)
+
+            is_power_law = False
+            if (abs(f_val2) > 1e-100
+                    and math.isfinite(f_d12)
+                    and abs(f_d12) > 1e-100):
+                alpha2 = M2 * f_d12 / f_val2
+                # True power law: alpha and alpha2 within 30%
+                if abs(alpha - alpha2) < 0.3 * max(abs(alpha), abs(alpha2)):
+                    is_power_law = True
+
+            if is_power_law:
+                # Genuine power-law tail: analytical integration
+                C = f_val / (M ** alpha)
+                ap1 = alpha + 1
+                tail_val = -C * (M ** ap1) / ap1
+                bulk, bulk_err = integrate_adaptive(f, a, M, tol=tol)
+                return Composite({0: bulk.st() + tail_val}), bulk_err
 
     # Not power-law — find cutoff where f decays to ~0
     for _ in range(20):
