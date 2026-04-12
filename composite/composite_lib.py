@@ -990,15 +990,97 @@ def taylor_coefficients(f: Callable, at: float, up_to: int = 5, terms: int = 12)
     return [result.coeff(-n) for n in range(up_to + 1)]
 
 
+# =============================================================================
+# FIXED: antiderivative, _ensure_composite, _detect_singularity
+# =============================================================================
+
 def antiderivative(f_composite: Composite, constant: float = 0) -> Composite:
-    """Compute antiderivative via dimensional shift."""
+    """Compute antiderivative via dimensional shift.
+    Each |c|_{-n} -> |c/(n+1)|_{-(n+1)}
+
+    FIXED: Only processes dim <= 0. The old code let positive dims through:
+      dim=2 -> new_dim=1 -> divisor=1 -> silently created a dim+1 term.
+    Now skips all positive dims (INF components, etc.).
+    """
     result = {0: constant}
     for dim, coeff in f_composite.c.items():
-        new_dim = dim - 1
-        divisor = abs(new_dim)
-        if divisor > 0:
+        if dim <= 0:
+            new_dim = dim - 1
+            divisor = abs(new_dim)
             result[new_dim] = coeff / divisor
     return Composite(result)
+
+
+def _ensure_composite(val):
+    """Wrap plain float/int as Composite. Warns on silent degradation.
+
+    IMPORTANT: Uses Composite(float(val)), NOT R(float(val)).
+    In v3, R(0) = ZERO = |1|_{-1} which carries d(1)=1.
+    A constant return value should be |val|_0 with d(1)=0.
+    """
+    if isinstance(val, Composite):
+        return val
+    import warnings
+    warnings.warn(
+        "integrate: f returned plain float — Taylor convergence disabled "
+        "for this panel. Wrap your function to return Composite.",
+        stacklevel=3)
+    return Composite(float(val))
+
+
+def _detect_singularity(f, x_near, x_away, panel_dx):
+    """Detect power-law singularity at x_near using composite.
+
+    ONE composite eval near x_near. Extracts exponent
+    alpha = dist * f'(x) / f(x) where dist = distance from boundary.
+    If -1 < alpha < 0: integrable singularity, compute analytically.
+
+    Returns (handled, value, C, alpha) — 4-tuple.
+    If not handled, C and alpha are 0.0.
+    """
+    _not_found = (False, 0.0, 0.0, 0.0)
+
+    eps = abs(panel_dx) * 0.01
+    x_test = x_near + eps if x_near < x_away else x_near - eps
+    dist_from_boundary = abs(x_test - x_near)
+
+    if dist_from_boundary < 1e-30:
+        return _not_found
+
+    try:
+        fx = _ensure_composite(f(_seeded(x_test)))
+        f_val = fx.st()
+        f_d1 = fx.d(1)
+
+        if abs(f_val) < 1e-100:
+            return _not_found
+
+        # Exponent: f(x) ~ C * |x - boundary|^alpha
+        #   f'/f = alpha / dist  =>  alpha = dist * f'/f
+        sign = 1.0 if x_near < x_away else -1.0
+        alpha = dist_from_boundary * (sign * f_d1) / f_val
+
+        if not (-1.0 < alpha < -0.01):
+            return _not_found
+
+        # Sanity: derivative ratio must indicate true singularity
+        deriv_ratio = abs(f_d1 / f_val) * abs(x_away - x_near)
+        if deriv_ratio < 10:
+            return _not_found
+
+        # Coefficient: f(x) = C * dist^alpha  =>  C = f(x) / dist^alpha
+        C = f_val / (dist_from_boundary ** alpha)
+        ap1 = alpha + 1
+
+        # Return (True, C, alpha) so the caller can integrate over any sub-range.
+        # Default: integrate over [0, full_dist]
+        full_dist = abs(x_away - x_near)
+        singular_val = C * (full_dist ** ap1) / ap1
+
+        return True, singular_val, C, alpha
+
+    except (ZeroDivisionError, OverflowError, ValueError):
+        return False, 0.0, 0.0, 0.0
 
 
 def definite_integral(f: Callable, a: float, b: float, terms: int = 12) -> float:
@@ -1227,96 +1309,246 @@ def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms:
     return total, total_error
 
 
-def integrate_adaptive(f: Callable, a: float, b: float, tol: float = 1e-10, terms: int = 15):
-    """Adaptive stepped integration via composite dimensional shift."""
-    probe = f(_seeded((a + b) / 2))
+# =============================================================================
+# FIXED: integrate_adaptive — recursive bisection with Taylor error
+# =============================================================================
+
+def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4):
+    """Adaptive integration via composite Taylor convergence.
+
+    Primary path (ONE evaluation per panel):
+      1. Evaluate f at panel midpoint via _seeded(mid)
+      2. Integrate via antiderivative evaluated at +/- dx/2
+      3. Estimate error from Taylor tail
+      4. If converged -> accept. If not -> bisect recursively.
+
+    Singularity handling:
+      If Taylor tail overflows, tries power-law detection at boundaries.
+      If detected, integrates analytically. Otherwise 3-eval fallback.
+
+    Lift-at-the-gate:
+      If f doesn't propagate composite structure, builds 4th-order
+      approximation via 5-point stencil. Emits warning.
+
+    Returns (Composite, float) — integral value, error estimate.
+    """
+    _fallback_count = [0]
+
+    # --- LIFT AT THE GATE ---
+    probe = _ensure_composite(f(_seeded((a + b) / 2)))
     if not any(dim < 0 for dim in probe.c):
+        import warnings
+        warnings.warn(
+            "integrate_adaptive: f does not propagate composite structure. "
+            "Using 4th-order finite-difference fallback.",
+            stacklevel=2)
         f_original = f
-        eps = 1e-7
+        fd_eps = 1e-7
         def f(x):
             a_val = x.st()
-            val = f_original(_seeded(a_val)).st()
-            val_plus = f_original(_seeded(a_val + eps)).st()
-            val_minus = f_original(_seeded(a_val - eps)).st()
-            d1 = (val_plus - val_minus) / (2 * eps)
-            d2 = (val_plus - 2 * val + val_minus) / (eps ** 2)
-            return Composite({0: val, -1: d1, -2: d2 / 2})
+            vs = [f_original(_seeded(a_val + k * fd_eps)).st()
+                  for k in [-2, -1, 0, 1, 2]]
+            d1 = (-vs[4] + 8*vs[3] - 8*vs[1] + vs[0]) / (12 * fd_eps)
+            d2 = (-vs[4] + 16*vs[3] - 30*vs[2] + 16*vs[1] - vs[0]) / (12 * fd_eps**2)
+            d3 = (vs[4] - 2*vs[3] + 2*vs[1] - vs[0]) / (2 * fd_eps**3)
+            d4 = (vs[4] - 4*vs[3] + 6*vs[2] - 4*vs[1] + vs[0]) / fd_eps**4
+            return Composite({0: vs[2], -1: d1, -2: d2/2, -3: d3/6, -4: d4/24})
 
-    total = Composite({})
-    total_error = 0.0
-    x0 = a
+    def _panel_with_error(x, dx):
+        """One composite eval at midpoint -> integral value + error estimate."""
+        mid = x + dx / 2
+        fx = _ensure_composite(f(_seeded(mid)))
 
-    while x0 < b:
-        fx = f(_seeded(x0))
-
-        max_coeff = max(
-            (abs(c) for d, c in fx.c.items() if d < -1),
-            default=1e-10
-        )
-        dx = min((tol / max(max_coeff, 1e-15)) ** 0.1, b - x0)
-        dx = max(dx, (b - a) * 1e-8)
-
+        # Integral via antiderivative
         Fx = antiderivative(fx)
-        neg_terms = {d: c for d, c in Fx.c.items() if d < 0}
-        contribution = sum(
-            coeff * dx ** abs(dim)
-            for dim, coeff in neg_terms.items()
-        )
-        if neg_terms:
-            min_dim = min(neg_terms.keys())
-            step_error = abs(neg_terms[min_dim] * dx ** abs(min_dim))
+        right = Fx.eval_taylor(dx / 2)
+        left = -Fx.eval_taylor(-dx / 2)
+        value = left + right
+
+        # Error from Taylor tail: last few antiderivative terms
+        half_dx = abs(dx) / 2
+        tail_terms = []
+        for dim, coeff in fx.c.items():
+            if dim < -2:
+                k = -dim
+                term = abs(coeff) / (k + 1) * half_dx ** (k + 1)
+                if math.isfinite(term):
+                    tail_terms.append((k, term))
+
+        if not tail_terms:
+            # No tail — f is polynomial. Integration is EXACT.
+            return value, 0.0
+
+        tail_terms.sort(key=lambda x: x[0])
+        n_tail = min(3, len(tail_terms))
+        err_est = sum(t for _, t in tail_terms[-n_tail:])
+
+        if not math.isfinite(err_est):
+            return value, -1.0  # signal: needs fallback
+        return value, err_est
+
+    def _panel_classic(x, dx):
+        """Classic single-panel integral for fallback comparison."""
+        mid = x + dx / 2
+        fx = _ensure_composite(f(_seeded(mid)))
+        Fx = antiderivative(fx)
+        right = Fx.eval_taylor(dx / 2)
+        left = -Fx.eval_taylor(-dx / 2)
+        return left + right
+
+    def _adaptive(a, b, depth):
+        dx = b - a
+        mid = (a + b) / 2
+
+        value, err_est = _panel_with_error(a, dx)
+
+        if err_est >= 0:
+            # Primary path: Taylor convergence check
+            if err_est < tol * (abs(value) + 1e-100) or depth >= max_depth:
+                return value, err_est
+            if abs(value) < tol * 0.01 and err_est < tol:
+                return value, err_est
         else:
-            step_error = 0.0
+            # Taylor tail overflowed — try singularity detection
+            handled_left, val_left, _, _ = _detect_singularity(f, a, b, dx)
+            if handled_left:
+                return val_left, abs(val_left) * 1e-8
 
-        total = total + Composite({0: contribution})
-        total_error += step_error
-        x0 += dx
+            handled_right, val_right, _, _ = _detect_singularity(f, b, a, dx)
+            if handled_right:
+                return val_right, abs(val_right) * 1e-8
 
-    return total, total_error
+            # Classical 3-eval fallback
+            _fallback_count[0] += 1
+            left_p = _panel_classic(a, dx / 2)
+            right_p = _panel_classic(mid, dx / 2)
+            half = left_p + right_p
+            error = abs(half - value)
+            if error < tol * (abs(half) + 1e-100) or depth >= max_depth:
+                return half, error
+            if abs(half) < tol * 0.01:
+                return half, error
+
+        # Bisect
+        left_val, left_err = _adaptive(a, mid, depth + 1)
+        right_val, right_err = _adaptive(mid, b, depth + 1)
+        return left_val + right_val, left_err + right_err
+
+    # Pre-subdivide into min_panels equal panels
+    total_val = 0.0
+    total_err = 0.0
+    panel_dx = (b - a) / min_panels
+    for i in range(min_panels):
+        x0 = a + i * panel_dx
+        x1 = x0 + panel_dx
+        val, err = _adaptive(x0, x1, 0)
+        total_val += val
+        total_err += err
+
+    if _fallback_count[0] > 0:
+        import warnings
+        warnings.warn(
+            f"integrate_adaptive: Taylor convergence inconclusive on "
+            f"{_fallback_count[0]} panel(s), used classical 3-eval fallback.",
+            stacklevel=2)
+
+    return Composite({0: total_val}), total_err
 
 
 # =============================================================================
 # IMPROPER INTEGRALS
 # =============================================================================
 
-def improper_integral(f: Callable, a: float, tol: float = 1e-8, cutoff: float = 20):
-    """Compute ∫_a^∞ f(x) dx. Returns (Composite, float)."""
-    M = cutoff
-    while M < 1000:
-        fx = f(_seeded(M))
-        if abs(fx.st()) < tol * 0.01:
+# =============================================================================
+# FIXED: Improper integrals with composite tail analysis
+# =============================================================================
+
+def improper_integral(f, a, tol=1e-8, cutoff=20):
+    """Compute integral from a to +infinity. Returns (Composite, float).
+
+    Uses composite tail analysis: ONE eval at large M gives
+    alpha = M * f'(M) / f(M).
+      alpha < -1: power-law tail, integrate analytically
+      otherwise:  find cutoff where f ~ 0, integrate to there
+    """
+    M = max(max(a * 2, cutoff), 20.0)
+
+    # Detect tail behavior from ONE composite evaluation
+    fx = _ensure_composite(f(_seeded(M)))
+    f_val = fx.st()
+    f_d1 = fx.d(1)
+
+    if (abs(f_val) > 1e-100
+            and math.isfinite(f_d1)
+            and abs(f_d1) > 1e-100):
+        alpha = M * f_d1 / f_val
+
+        if alpha < -1.01:
+            # Power-law tail: int_M^inf C*x^alpha dx = -C*M^(a+1)/(a+1)
+            C = f_val / (M ** alpha)
+            ap1 = alpha + 1
+            tail_val = -C * (M ** ap1) / ap1
+            # Integrate [a, M] normally, add analytical tail
+            bulk, bulk_err = integrate_adaptive(f, a, M, tol=tol)
+            return Composite({0: bulk.st() + tail_val}), bulk_err
+
+    # Not power-law — find cutoff where f decays to ~0
+    for _ in range(20):
+        fx = _ensure_composite(f(_seeded(M)))
+        if abs(fx.st()) < tol * 0.01 and abs(fx.d(1)) < tol * 0.01:
             break
         M *= 2
-    bulk, bulk_err = integrate_adaptive(f, a, min(M, cutoff), tol=tol)
-    if M > cutoff:
-        tail, tail_err = integrate_adaptive(f, cutoff, M, tol=tol)
-        bulk = bulk + tail
-        bulk_err += tail_err
+        if M > 1e15:
+            break
+
+    bulk, bulk_err = integrate_adaptive(f, a, M, tol=tol)
     return bulk, bulk_err
 
-def improper_integral_both(f: Callable, tol: float = 1e-8):
-    """Compute ∫_{-∞}^{∞} f(x) dx. Returns (Composite, float)."""
+
+def improper_integral_both(f, tol=1e-8):
+    """Compute integral from -inf to +inf. Splits at 0.
+    Returns (Composite, float)."""
     left, left_err = improper_integral(lambda x: f(-x), 0, tol=tol)
     right, right_err = improper_integral(f, 0, tol=tol)
     return left + right, left_err + right_err
 
-def improper_integral_to(f: Callable, a: float, b: float, tol: float = 1e-8):
-    """Compute ∫_a^b f(x) dx where f has a singularity. Returns (Composite, float)."""
-    eps = tol ** 0.25
-    try:
-        f(_seeded(a + eps)).st()
-        a_ok = True
-    except:
-        a_ok = False
-    try:
-        f(_seeded(b - eps)).st()
-        b_ok = True
-    except:
-        b_ok = False
-    start = a + eps if not a_ok else a
-    end = b - eps if not b_ok else b
-    val, err = integrate_adaptive(f, start, end, tol=tol)
-    return val, err
+
+def improper_integral_to(f, a, b, tol=1e-8):
+    """Compute integral from a to b where f may have singularities
+    at boundaries. Uses singularity detection at both endpoints.
+
+    Splits at a fraction of the interval: analytical C*t^alpha integral
+    covers the singular sub-interval, bulk integration covers the rest.
+    No overlap.
+
+    Returns (Composite, float)."""
+    dx = b - a
+    singular_val = 0.0
+    int_a, int_b = a, b
+    split_frac = 0.1
+
+    # Check left boundary
+    handled_left, _, C_left, alpha_left = _detect_singularity(f, a, b, dx)
+    if handled_left:
+        split_dist = abs(dx) * split_frac
+        ap1 = alpha_left + 1
+        # Analytical integral over [0, split_dist] only
+        singular_val += C_left * (split_dist ** ap1) / ap1
+        int_a = a + split_dist
+
+    # Check right boundary
+    handled_right, _, C_right, alpha_right = _detect_singularity(f, b, a, dx)
+    if handled_right:
+        split_dist = abs(dx) * split_frac
+        ap1 = alpha_right + 1
+        singular_val += C_right * (split_dist ** ap1) / ap1
+        int_b = b - split_dist
+
+    if int_a >= int_b:
+        return Composite({0: singular_val}), 0.0
+
+    bulk, bulk_err = integrate_adaptive(f, int_a, int_b, tol=tol)
+    return Composite({0: bulk.st() + singular_val}), bulk_err
 
 # =============================================================================
 # UTILITY FUNCTIONS
