@@ -583,17 +583,20 @@ def _bounded_at_inf(func, x):
     """Evaluate a bounded transcendental at an infinite composite argument.
 
     For monotonic bounded functions (atan, tanh): math.func(±inf) returns
-    the correct asymptotic value (e.g. atan(inf) = π/2).
+    the correct asymptotic value (e.g. atan(inf) = π/2).  Result via R().
+
     For oscillatory functions (sin, cos): math.func(±inf) raises ValueError.
-    The oscillation has zero mean, so return R(0) = ZERO.
-    Result is returned via R() for proper composite formatting.
+    The result is genuinely indeterminate — return ∅ (empty composite,
+    nothing).  ∅ absorbs under multiplication (a × ∅ = ∅) and is
+    transparent under addition (a + ∅ = a), so downstream arithmetic
+    propagates correctly: ZERO × ∅ = ∅ with st=0.
     """
     max_d = x.max_positive_dim()
     sign = 1.0 if x.coeff(max_d) > 0 else -1.0
     try:
         return R(func(sign * float('inf')))
     except (ValueError, OverflowError):
-        return R(0)
+        return Composite({})
 
 
 def sin(x, terms=12):
