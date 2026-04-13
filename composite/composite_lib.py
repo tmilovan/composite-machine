@@ -336,7 +336,9 @@ class Composite:
             other_dims = self._backend.active_dims(other._data)
 
             if len(other_dims) == 0:
-                raise ZeroDivisionError("Cannot divide by empty composite")
+                raise LimitDoesNotExistError(
+                    "Division by nothing (empty composite). "
+                    "Denominator is indeterminate — limit does not exist.")
 
             # Fast path: single-term divisor → dimension shift
             if len(other_dims) == 1:
@@ -599,9 +601,16 @@ def _bounded_at_inf(func, x):
         return Composite({})
 
 
+def _is_nothing(x):
+    """Check if x is the empty composite (nothing)."""
+    return isinstance(x, Composite) and not x.c
+
+
 def sin(x, terms=12):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _is_nothing(x):
+        return Composite({})
     if _has_positive_dims(x):
         return _bounded_at_inf(math.sin, x)
     a = x.st()
@@ -626,6 +635,8 @@ def sin(x, terms=12):
 def cos(x, terms=12):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _is_nothing(x):
+        return Composite({})
     if _has_positive_dims(x):
         return _bounded_at_inf(math.cos, x)
     a = x.st()
@@ -655,6 +666,9 @@ def exp(x, terms=15):
     if not isinstance(x, Composite):
         return Composite({0: math.exp(float(x))})
 
+    if _is_nothing(x):
+        return Composite({})
+
     a = x.st()
     non_zero = {d: c for d, c in x.c.items() if d != 0 and abs(c) > 1e-15}
 
@@ -674,12 +688,33 @@ def exp(x, terms=15):
 
 
 def ln(x, terms=15):
-    """Natural logarithm for composite numbers."""
+    """Natural logarithm for composite numbers.
+
+    For positive infinitesimals (st=0 but positive coefficient at a
+    negative dim), evaluates ln at the coefficient.  This is the
+    composite-native handling: ZERO = |1|_{-1} is a positive
+    infinitesimal with coefficient 1, so ln(ZERO) = R(ln(1)) = R(0)
+    = ZERO.  Then x·ln(x) = ZERO² with st=0, and x^x = exp(ZERO²)
+    = 1.0 exactly.
+    """
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
 
+    if _is_nothing(x):
+        return Composite({})
+
     a = x.st()
+
     if a <= 0:
+        # Check for positive infinitesimal: st=0 but positive coeff
+        # at a negative dimension (e.g. ZERO = |1|_{-1})
+        coeffs = x.c
+        neg_dims = {d: c for d, c in coeffs.items() if d < 0}
+        if neg_dims:
+            min_dim = min(neg_dims.keys())
+            coeff = neg_dims[min_dim]
+            if coeff > 0:
+                return R(math.log(coeff))
         raise ValueError("ln requires positive standard part")
 
     h_part = x - R(a)
@@ -697,13 +732,33 @@ def ln(x, terms=15):
 
 
 def sqrt(x, terms=12):
-    """Square root for composite numbers via binomial series"""
+    """Square root for composite numbers via binomial series.
+
+    For positive infinitesimals (st=0, positive coeff at negative dim),
+    evaluates sqrt at the coefficient.  ZERO = |1|_{-1} has coeff 1,
+    so sqrt(ZERO) = R(sqrt(1)) = R(1).  Then x·sqrt(x) at ZERO gives
+    ZERO × R(1) = ZERO, st=0 exactly.
+    """
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
 
+    if _is_nothing(x):
+        return Composite({})
+
     a = x.st()
     if a <= 0:
-        raise ValueError("sqrt requires positive standard part")
+        # Positive infinitesimal: operate on coefficient, stay at same dim.
+        # sqrt(|1|_{-1}) = |sqrt(1)|_{-1} = |1|_{-1} = ZERO
+        # Just like sqrt(|1|_0) = |1|_0 at dim 0.
+        coeffs = x.c
+        neg_dims = {d: c for d, c in coeffs.items() if d < 0}
+        if neg_dims:
+            min_dim = min(neg_dims.keys())
+            coeff = neg_dims[min_dim]
+            if coeff > 0:
+                return Composite({min_dim: math.sqrt(coeff)})
+    if a < 0:
+        raise ValueError("sqrt requires non-negative standard part")
 
     sqrt_a = math.sqrt(a)
     h_part = x - R(a)
@@ -731,6 +786,8 @@ def tan(x, terms=12):
     """Tangent function via sin/cos"""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _is_nothing(x):
+        return Composite({})
     return sin(x, terms) / cos(x, terms)
 
 # =============================================================================
@@ -755,6 +812,8 @@ def atan(x, terms=15):
     """Arctangent for composite numbers."""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _is_nothing(x):
+        return Composite({})
     if _has_positive_dims(x):
         return _bounded_at_inf(math.atan, x)
     a = x.st()
@@ -771,6 +830,8 @@ def asin(x, terms=15):
     """Arcsine for composite numbers."""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _is_nothing(x):
+        return Composite({})
     if _has_positive_dims(x):
         return _bounded_at_inf(math.asin, x)
     a = x.st()
@@ -789,6 +850,8 @@ def acos(x, terms=15):
     """Arccosine for composite numbers."""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _is_nothing(x):
+        return Composite({})
     return R(math.pi / 2) - asin(x, terms)
 
 # =============================================================================
@@ -799,18 +862,24 @@ def sinh(x, terms=15):
     """Hyperbolic sine: (exp(x) - exp(-x)) / 2"""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _is_nothing(x):
+        return Composite({})
     return (exp(x, terms) - exp(-x, terms)) / 2
 
 def cosh(x, terms=15):
     """Hyperbolic cosine: (exp(x) + exp(-x)) / 2"""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _is_nothing(x):
+        return Composite({})
     return (exp(x, terms) + exp(-x, terms)) / 2
 
 def tanh(x, terms=15):
     """Hyperbolic tangent: sinh(x) / cosh(x)"""
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
+    if _is_nothing(x):
+        return Composite({})
     if _has_positive_dims(x):
         return _bounded_at_inf(math.tanh, x)
     return sinh(x, terms) / cosh(x, terms)
@@ -901,6 +970,10 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
     except TypeError:
         raise CompositionError(
             "Function not composable with composite arithmetic")
+    except LimitDoesNotExistError:
+        # Division by nothing (∅) — denominator is indeterminate.
+        # The limit provably does not exist. Don't try to recover.
+        raise
     except (ValueError, ZeroDivisionError):
         # Domain error (ln(0), sqrt(0), etc.) — try composite extrapolation
         # from a nearby point where the function is well-defined.
@@ -950,6 +1023,28 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
             return _limit_integral_fallback(f, as_x_to, dir)
         raise LimitUndecidableError(
             "Result has mixed-sign positive dimensions.")
+
+    # Nothing (∅) means an indeterminate value was involved. Check if the
+    # overall expression still converges by probing at real points.
+    if _is_nothing(result):
+        if _is_inf:
+            # Evaluate at two large windows to check convergence
+            v1 = _limit_at_inf_fallback(f, as_x_to, n=500, width=50.0)
+            v2 = _limit_at_inf_fallback(f, as_x_to, n=500, width=100.0)
+            if math.isfinite(v1) and math.isfinite(v2):
+                diff = abs(v1 - v2)
+                # Both small → converging to 0
+                if abs(v1) < 1e-4 and abs(v2) < 1e-4:
+                    return 0.0
+                # Close relative to magnitude → converged
+                if diff < 1e-3 * (abs(v1) + abs(v2)):
+                    return v2
+        else:
+            extrap = _limit_extrapolate(f, as_x_to, dir, terms)
+            if extrap is not None:
+                return extrap
+        raise LimitDoesNotExistError(
+            "Result is indeterminate (nothing). Limit does not exist.")
 
     return st_val
 
@@ -1018,10 +1113,9 @@ def _limit_extrapolate(f, as_x_to, dir, terms, n_probes=6):
                 # Tight convergence — last two very close
                 if d1 < 1e-3 * (abs(v[-1]) + 1e-100):
                     return v[-1]
-                # Power-law convergence toward 0 — values shrinking
-                # monotonically and last value is small
-                if abs(v[-1]) < abs(v[-2]) < abs(v[-3]) and abs(v[-1]) < 1e-3:
-                    return 0.0
+            # Converging to 0: last few values all small (even if oscillating)
+            if len(v) >= 4 and all(abs(vi) < 1e-3 for vi in v[-3:]):
+                return 0.0
 
     return None
 
@@ -1438,11 +1532,6 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
     """
     _fallback_count = [0]
 
-    # --- LIFT AT THE GATE ---
-    # If f doesn't propagate composite structure, wrap its output via R()
-    # so constants get proper composite formatting (R(0) = ZERO = |1|₋₁).
-    # No finite differences — the composite infinitesimal from _seeded()
-    # provides exact derivatives when the function uses its input.
     # --- LIFT AT THE GATE ---
     probe = _ensure_composite(f(_seeded((a + b) / 2)))
     if not any(dim < 0 for dim in probe.c):

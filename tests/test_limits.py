@@ -526,20 +526,14 @@ def test_nothing_propagation():
         (ZERO + nothing).coeff(-1), 1.0)
 
     # Nested: sin(nothing) — nothing has no positive dims, treated as sin(0)
-    sin_nothing = sin(nothing)
-    suite.assert_eq(
-        "sin(\u2205) = R(sin(0)) = ZERO (st=0)",
-        sin_nothing.st(), 0.0)
-
-    cos_nothing = cos(nothing)
-    suite.assert_eq(
-        "cos(\u2205) = R(cos(0)) = R(1) (st=1)",
-        cos_nothing.st(), 1.0)
-
-    exp_nothing = exp(nothing)
-    suite.assert_eq(
-        "exp(\u2205) = R(exp(0)) = R(1) (st=1)",
-        exp_nothing.st(), 1.0)
+    # Nothing in, nothing out — all transcendentals propagate ∅
+    suite.assert_nothing("sin(\u2205) = \u2205", sin(nothing))
+    suite.assert_nothing("cos(\u2205) = \u2205", cos(nothing))
+    suite.assert_nothing("exp(\u2205) = \u2205", exp(nothing))
+    suite.assert_nothing("ln(\u2205) = \u2205", ln(nothing))
+    suite.assert_nothing("tan(\u2205) = \u2205", tan(nothing))
+    suite.assert_nothing("atan(\u2205) = \u2205", atan(nothing))
+    suite.assert_nothing("sqrt(\u2205) = \u2205", sqrt(nothing))
 
     return suite.report()
 
@@ -551,15 +545,18 @@ def test_nothing_propagation():
 def test_division_by_nothing():
     suite = TestSuite("Division by Nothing")
 
-    # 1/sin(1/x) at 0: sin(INF)=nothing, 1/nothing -> error
+    # 1/sin(1/x): sin(INF)=∅, 1/∅=∅. Probes at real points see
+    # oscillating values → extrapolation doesn't converge → DNE.
     suite.assert_raises(
-        "1/sin(1/x) at 0 raises error",
-        (LimitUndecidableError, ZeroDivisionError, ValueError),
+        "1/sin(1/x) at 0 → DNE",
+        LimitDoesNotExistError,
         limit, lambda x: R(1)/sin(1/x), 0)
 
+    # x/sin(1/x): ZERO / sin(INF) = ZERO / ∅ → division by nothing
+    # raises LimitDoesNotExistError directly. No extrapolation needed.
     suite.assert_raises(
-        "x/sin(1/x) at 0 raises error",
-        (LimitUndecidableError, ZeroDivisionError, ValueError),
+        "x/sin(1/x) at 0 → DNE (division by nothing)",
+        LimitDoesNotExistError,
         limit, lambda x: x/sin(1/x), 0)
 
     return suite.report()
@@ -653,39 +650,36 @@ def test_edge_cases():
 def test_nested_oscillatory():
     """Tests for nested transcendentals of infinity.
 
-    sin(sin(1/x)) at 0 should be indeterminate (oscillates in [-sin(1), sin(1)]).
-    cos(sin(1/x)) at 0 should be indeterminate (oscillates in [cos(1), 1]).
-    exp(sin(1/x)) at 0 should be indeterminate (oscillates in [1/e, e]).
-
-    For these to work, nothing (empty composite) must propagate through
-    ALL transcendentals, not just bounded ones. Currently it doesn't —
-    sin(nothing) = sin(0) = ZERO, losing the indeterminacy.
+    All these limits do not exist. Nothing propagates through
+    transcendentals, the limit function detects ∅, probes at real
+    points, finds oscillation → LimitDoesNotExistError.
     """
-    suite = TestSuite("Nested Oscillatory — MUST FIX")
+    suite = TestSuite("Nested Oscillatory (DNE)")
 
-    # These should all produce nothing (empty composite), indicating
-    # the limit is indeterminate. Currently they produce specific values.
-    nothing = Composite({})
+    suite.assert_raises(
+        "sin(sin(1/x)) at 0 → DNE",
+        LimitDoesNotExistError,
+        limit, lambda x: sin(sin(1/x)), 0)
 
-    suite.assert_nothing(
-        "sin(sin(1/x)) at 0 should be \u2205 (oscillates)",
-        _safe_eval(lambda: sin(sin(INF))))
+    suite.assert_raises(
+        "cos(sin(1/x)) at 0 → DNE",
+        LimitDoesNotExistError,
+        limit, lambda x: cos(sin(1/x)), 0)
 
-    suite.assert_nothing(
-        "cos(sin(1/x)) at 0 should be \u2205 (oscillates)",
-        _safe_eval(lambda: cos(sin(INF))))
+    suite.assert_raises(
+        "exp(sin(1/x)) at 0 → DNE",
+        LimitDoesNotExistError,
+        limit, lambda x: exp(sin(1/x)), 0)
 
-    suite.assert_nothing(
-        "exp(sin(1/x)) at 0 should be \u2205 (oscillates)",
-        _safe_eval(lambda: exp(sin(INF))))
+    suite.assert_raises(
+        "sin(1/x)\u00b2 at 0 → DNE",
+        LimitDoesNotExistError,
+        limit, lambda x: sin(1/x)**2, 0)
 
-    suite.assert_nothing(
-        "sin(1/x)\u00b2 at 0 should be \u2205 (oscillates)",
-        _safe_eval(lambda: sin(INF) ** 2))
-
-    suite.assert_nothing(
-        "atan(sin(1/x)) at 0 should be \u2205 (oscillates)",
-        _safe_eval(lambda: atan(sin(INF))))
+    suite.assert_raises(
+        "atan(sin(1/x)) at 0 → DNE",
+        LimitDoesNotExistError,
+        limit, lambda x: atan(sin(1/x)), 0)
 
     return suite.report()
 
