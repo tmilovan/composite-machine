@@ -902,6 +902,12 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
         raise CompositionError(
             "Function not composable with composite arithmetic")
     except (ValueError, ZeroDivisionError):
+        # Domain error (ln(0), sqrt(0), etc.) — try composite extrapolation
+        # from a nearby point where the function is well-defined.
+        if not _is_inf:
+            extrap = _limit_extrapolate(f, as_x_to, dir, terms)
+            if extrap is not None:
+                return extrap
         if fallback:
             if _is_inf:
                 return _limit_at_inf_fallback(f, as_x_to)
@@ -913,6 +919,10 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
     # Check for NaN/Inf contamination
     st_val = result.st()
     if not math.isfinite(st_val):
+        if not _is_inf:
+            extrap = _limit_extrapolate(f, as_x_to, dir, terms)
+            if extrap is not None:
+                return extrap
         if fallback:
             if _is_inf:
                 return _limit_at_inf_fallback(f, as_x_to)
@@ -929,8 +939,11 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
             return INF
         elif not any(signs):
             return -INF
-        # Mixed signs from unbounded transcendentals — shouldn't happen
-        # after bounded fix, but handle gracefully
+        # Mixed signs — try composite extrapolation before giving up
+        if not _is_inf:
+            extrap = _limit_extrapolate(f, as_x_to, dir, terms)
+            if extrap is not None:
+                return extrap
         if fallback:
             if _is_inf:
                 return _limit_at_inf_fallback(f, as_x_to)
@@ -939,6 +952,78 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
             "Result has mixed-sign positive dimensions.")
 
     return st_val
+
+
+def _limit_extrapolate(f, as_x_to, dir, terms, n_probes=6):
+    """Extrapolate limit from nearby composite evaluations.
+
+    Two strategies, tried in order:
+      1. Taylor extrapolation: evaluate at probe, use eval_taylor(-eps) to
+         extrapolate back to the limit point. Exact when Taylor converges.
+      2. Value convergence: if Taylor overflows, use the st() values at
+         decreasing probe distances. The values themselves converge.
+
+    Returns the extrapolated value, or None if neither converged.
+    """
+    if dir == "-":
+        signs = [-1]
+    elif dir == "+":
+        signs = [1]
+    else:
+        signs = [1, -1]
+
+    for sign in signs:
+        taylor_candidates = []
+        value_candidates = []
+
+        for k in range(n_probes):
+            eps = 10 ** (-(k + 2))  # 1e-2, 1e-3, ..., 1e-7
+
+            try:
+                x_comp = _seeded(as_x_to + sign * eps)
+                result = f(x_comp)
+            except (ValueError, ZeroDivisionError, OverflowError):
+                continue
+
+            if not isinstance(result, Composite):
+                result = R(float(result))
+
+            st = result.st()
+            if not math.isfinite(st):
+                continue
+
+            value_candidates.append(st)
+
+            # Try Taylor extrapolation
+            try:
+                extrap = st + result.eval_taylor(-sign * eps)
+                if math.isfinite(extrap):
+                    taylor_candidates.append(extrap)
+            except (OverflowError, ValueError):
+                pass
+
+        # Strategy 1: Taylor extrapolation converged
+        if len(taylor_candidates) >= 2:
+            if abs(taylor_candidates[-1] - taylor_candidates[-2]) < 1e-6 * (abs(taylor_candidates[-1]) + 1e-100):
+                return taylor_candidates[-1]
+
+        # Strategy 2: raw values converging (for cases like x^x where
+        # Taylor overflows, or sqrt(x) where Taylor radius is too small)
+        if len(value_candidates) >= 3:
+            v = value_candidates
+            d1 = abs(v[-1] - v[-2])
+            d2 = abs(v[-2] - v[-3])
+            # Values converging: differences shrinking
+            if d1 < d2:
+                # Tight convergence — last two very close
+                if d1 < 1e-3 * (abs(v[-1]) + 1e-100):
+                    return v[-1]
+                # Power-law convergence toward 0 — values shrinking
+                # monotonically and last value is small
+                if abs(v[-1]) < abs(v[-2]) < abs(v[-3]) and abs(v[-1]) < 1e-3:
+                    return 0.0
+
+    return None
 
 
 def _limit_integral_fallback(f, as_x_to, dir, a=1e-4, n=1000):
