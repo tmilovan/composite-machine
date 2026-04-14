@@ -572,6 +572,15 @@ def get_max_order() -> int:
     backend = get_backend()
     return getattr(backend, 'max_order', None)
 
+
+# Global minimum terms for transcendentals. Set by nth_derivative/all_derivatives
+# so that Taylor expansions inside black-box functions use enough terms.
+_min_terms = [0]
+
+def _effective_terms(default):
+    """Return max(default, global minimum) for Taylor series length."""
+    return max(default, _min_terms[0])
+
 # =============================================================================
 # TAYLOR SERIES FOR TRANSCENDENTAL FUNCTIONS
 # =============================================================================
@@ -607,6 +616,7 @@ def _is_nothing(x):
 
 
 def sin(x, terms=12):
+    terms = _effective_terms(terms)
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
@@ -633,6 +643,7 @@ def sin(x, terms=12):
 
 
 def cos(x, terms=12):
+    terms = _effective_terms(terms)
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
@@ -660,6 +671,7 @@ def cos(x, terms=12):
 
 def exp(x, terms=15):
     """Exponential function for Composite numbers."""
+    terms = _effective_terms(terms)
     if isinstance(x, (int, float)):
         return Composite({0: math.exp(float(x))})
 
@@ -697,6 +709,7 @@ def ln(x, terms=15):
     = ZERO.  Then x·ln(x) = ZERO² with st=0, and x^x = exp(ZERO²)
     = 1.0 exactly.
     """
+    terms = _effective_terms(terms)
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
 
@@ -739,6 +752,7 @@ def sqrt(x, terms=12):
     so sqrt(ZERO) = R(sqrt(1)) = R(1).  Then x·sqrt(x) at ZERO gives
     ZERO × R(1) = ZERO, st=0 exactly.
     """
+    terms = _effective_terms(terms)
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
 
@@ -910,17 +924,26 @@ def derivative(f: Callable, at: float, terms: int = 12) -> float:
 
 def nth_derivative(f: Callable, n: int, at: float, terms: int = 12) -> float:
     """Compute f^(n)(at) - the nth derivative at a point."""
-    effective_terms = max(terms, n + 2)
-    x = _seeded(at)
-    result = f(x)
-    return result.d(n)
+    old_min = _min_terms[0]
+    _min_terms[0] = max(terms, n + 2)
+    try:
+        x = _seeded(at)
+        result = f(x)
+        return result.d(n)
+    finally:
+        _min_terms[0] = old_min
 
 
 def all_derivatives(f: Callable, at: float, up_to: int = 5, terms: int = 12) -> List[float]:
     """Compute [f(at), f'(at), f''(at), ...] up to nth derivative."""
-    x = _seeded(at)
-    result = f(x)
-    return [result.st()] + [result.d(n) for n in range(1, up_to + 1)]
+    old_min = _min_terms[0]
+    _min_terms[0] = max(terms, up_to + 2)
+    try:
+        x = _seeded(at)
+        result = f(x)
+        return [result.st()] + [result.d(n) for n in range(1, up_to + 1)]
+    finally:
+        _min_terms[0] = old_min
 
 
 def limit(f: Callable, as_x_to: float, terms: int = 12,
@@ -942,6 +965,14 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
         dir:       Direction — "both" (default), "+" (right), "-" (left).
         fallback:  If True, use integral averaging when algebraic fails.
     """
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return _limit_impl(f, as_x_to, terms, dir, fallback)
+
+
+def _limit_impl(f, as_x_to, terms, dir, fallback):
+    """Internal implementation of limit(), wrapped to suppress numpy warnings."""
     # Normalize: accept Composite INF/-INF as well as float('inf')
     _is_inf = False
     if isinstance(as_x_to, Composite):
