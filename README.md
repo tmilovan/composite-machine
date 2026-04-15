@@ -1,5 +1,12 @@
 # README.md
 
+## Announcements
+
+The first proper pypy library based on this experimental features has been released. A standalone tool to evaluate Python functions at points where they're undefined and get exact limit values if they exists.
+
+- **[https://github.com/FWDhr/composite-resolve](https://github.com/FWDhr/composite-resolve)**
+
+
 
 # Composite Machine
 
