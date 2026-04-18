@@ -172,18 +172,6 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 ---
 
-## Comparison: Old vs New Notation
-
-| Old Notation | New Notation | Meaning |
-| --- | --- | --- |
-| `⟨_; 5 | _⟩` | `|5|` | Plain rational 5 |
-| `⟨0; 5 | 0⟩` | `|5|` | Same — phantom zeros don't exist |
-| `⟨2(0); 5 | 1(0)⟩` | `|2|₁ |5| |1|₋₁` | 2∞ + 5 + 1 zero |
-
-**The key difference:** In new notation, dimensions only exist if written. You can't accidentally have phantom `|0|₁` or `|0|₋₁` — they must be explicitly constructed.
-
----
-
 ## Tests
 
 ### Test Suite 1: Basic Operations
@@ -410,30 +398,30 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 #### Test 4.3: Zero as a Value (REVISED)
 
-**Definition:** `0 = |0| = |1|₋₁` (two equivalent single-term forms)
+**Definition:** `0 = |0| = |1|₋₁` (two equivalent single-term forms via the Ladder of Absences)
 
 **Test A:** `|5| × |0|` (multiply by value-zero)
 
-**Process:** `|5|₀ × |0|₀ = |0|₀ = |0|`
+**Process:** `|0|₀ = |1|₋₁` (Ladder), so `|5|₀ × |0|₀ = |5|₀ × |1|₋₁ = |5|₋₁`
 
-**Result:** `|0|` ✓ (value becomes zero)
+**Result:** `|5|₋₁` ✓ (coefficient preserved, shifted to infinitesimal dimension)
 
 **Test B:** `|5| × |1|₋₁` (multiply by structural-zero)
 
 **Process:** `|5|₀ × |1|₋₁ = |5|₋₁`
 
-**Result:** `|5|₋₁` ✓ (shifts to zero dimension with coefficient preserved)
+**Result:** `|5|₋₁` ✓ (same result — `|0|₀` and `|1|₋₁` are the same value)
 
 **Test C:** `|5| × 0` (using ×0 as shift operator)
 
 **Result:** `|5|₋₁` ✓
 
-**Key insight:** Both `|0|₀` and `|1|₋₁` are the same value (the Ladder of Absences: `|0|ₙ = |1|ₙ₋₁`). Both follow the same rule `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`:
+**Key insight:** There is only ONE rule. Since `|0|₀ = |1|₋₁` (the Ladder), multiplication by zero always shifts the dimension down by 1 and preserves the coefficient:
 
-- `|5|₀ × |0|₀ = |0|₀` — coefficients multiply (5×0=0), dimensions add (0+0=0)
-- `|5|₀ × |1|₋₁ = |5|₋₁` — coefficients multiply (5×1=5), dimensions add (0+(-1)=-1)
+- `|5|₀ × |0|₀ = |5|₀ × |1|₋₁ = |5|₋₁` (Ladder applied first, then standard rule)
+- `|5|₀ × |1|₋₁ = |5|₋₁` (standard rule directly)
 
-The different-looking results `|0|₀` and `|5|₋₁` are themselves equivalent via the Ladder: `|0|₀ = |1|₋₁` and `|5×0|₀ = |5|₋₁`.
+Both paths give `|5|₋₁`. Multiplication by zero does not annihilate — it preserves information at a lower dimension. This is the core principle: `a × 0 = |a|₋₁`.
 
 #### Test 4.4: Commutativity
 

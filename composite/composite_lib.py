@@ -98,10 +98,11 @@ class Composite:
         |3|₀+|2|₋₁ = 3 + 2h (3 plus 2 infinitesimals)
     """
 
-    __slots__ = ['_data', '_backend']
+    __slots__ = ['_data', '_backend', '_expressed_zero']
 
     def __init__(self, coefficients=None, _data=None):
         self._backend = get_backend()
+        self._expressed_zero = False
 
         if _data is not None:
             # Internal fast path: created by arithmetic ops
@@ -143,6 +144,7 @@ class Composite:
         obj = cls.__new__(cls)
         obj._backend = get_backend()
         obj._data = data
+        obj._expressed_zero = False
         return obj
 
     # -------------------------------------------------------------------------
@@ -267,15 +269,30 @@ class Composite:
 
     def __add__(self, other):
         if isinstance(other, (int, float)):
-            other = Composite(other)
+            if other == 0:
+                # Uplift scalar 0 to ZERO if self has no dim-0 component
+                if self._backend.read_dim(self._data, 0) == 0.0:
+                    other = ZERO
+                else:
+                    return self  # same dimension, no uplift, 0 is no-op
+            other = Composite(other) if not isinstance(other, Composite) else other
         return Composite._wrap(self._backend.add(self._data, other._data))
 
     def __radd__(self, other):
+        if isinstance(other, (int, float)) and other == 0:
+            if self._backend.read_dim(self._data, 0) == 0.0:
+                return ZERO.__add__(self)  # uplift: different dim
+            return self  # same dim: 0 + self = self
         return self.__add__(other)
 
     def __sub__(self, other):
         if isinstance(other, (int, float)):
-            other = Composite(other)
+            if other == 0:
+                if self._backend.read_dim(self._data, 0) == 0.0:
+                    other = ZERO
+                else:
+                    return self  # same dimension, no uplift, 0 is no-op
+            other = Composite(other) if not isinstance(other, Composite) else other
         neg_other = self._backend.negate(other._data)
         result = Composite._wrap(self._backend.add(self._data, neg_other))
         # Subtraction rules:
@@ -291,11 +308,20 @@ class Composite:
         _both_zero = (len(_self_dims) > 0 and len(_other_dims) > 0
                       and self.st() == 0.0 and other.st() == 0.0)
         if _exact_cancel:
-            if self.st() != 0.0:
-                # Non-zero real cancellation: zero at dim[0], no shift
+            # Check if operands are non-zero-valued (have nonzero coefficients
+            # at dim 0 or positive dims — values, not infinitesimals)
+            self_dims_arr, self_vals_arr = self._backend.to_arrays(self._data)
+            has_value = False
+            for d, v in zip(self_dims_arr, self_vals_arr):
+                if int(d) >= 0 and abs(float(v)) > 1e-15:
+                    has_value = True
+                    break
+            if has_value:
+                # Non-zero value cancellation: expressed zero, no shift.
+                # Tag so __mul__/__truediv__ can uplift to ZERO.
+                result._expressed_zero = True
                 return result
-            # Zero-valued operand: 0·operand = multiplication with zero.
-            # Use the higher zero-power (lower min dim) of the two operands.
+            # Both operands are zero-valued: shift to higher zero power
             self_min = int(_self_dims[0]) if len(_self_dims) > 0 else 0
             other_min = int(_other_dims[0]) if len(_other_dims) > 0 else 0
             min_dim = min(self_min, other_min)
@@ -307,33 +333,55 @@ class Composite:
         return result
 
     def __rsub__(self, other):
+        if isinstance(other, (int, float)) and other == 0:
+            # Check if self has dim-0 component
+            if self._backend.read_dim(self._data, 0) == 0.0:
+                return ZERO.__sub__(self)  # uplift: different dim
+            return (-self)  # same dim: 0 - self = -self
         return Composite(other).__sub__(self)
 
     def __neg__(self):
         return Composite._wrap(self._backend.negate(self._data))
 
     def __mul__(self, other):
-        """Multiplication: dimensions add, coefficients multiply"""
+        """Multiplication: dimensions add, coefficients multiply.
+
+        Scalar zero uplifts to ZERO. A composite that is entirely
+        zero-valued (has expressed dims but all coefficients ~0)
+        also uplifts to ZERO — it represents composite zero, not nothing.
+        """
         if isinstance(other, (int, float)):
+            if other == 0:
+                return Composite._wrap(
+                    self._backend.convolve(self._data, ZERO._data))
             return Composite._wrap(
                 self._backend.scalar_multiply(self._data, float(other)))
-        return Composite._wrap(
-            self._backend.convolve(self._data, other._data))
+        # Expressed-zero composites (from subtraction cancellation) uplift to ZERO
+        a_data = ZERO._data if getattr(self, '_expressed_zero', False) else self._data
+        b_data = ZERO._data if getattr(other, '_expressed_zero', False) else other._data
+        return Composite._wrap(self._backend.convolve(a_data, b_data))
 
     def __rmul__(self, other):
         return self.__mul__(other)
 
     def __truediv__(self, other):
-        """Division: dimensions subtract, coefficients divide"""
+        """Division: dimensions subtract, coefficients divide.
+
+        Scalar zero uplifts to ZERO — division by zero produces infinity.
+        """
         if isinstance(other, (int, float)):
             if other == 0:
-                raise ZeroDivisionError(
-                    "Cannot divide by Python zero. Use ZERO for structural zero.")
+                # Uplift: divide by ZERO (structural infinitesimal)
+                return self.__truediv__(ZERO)
             return Composite._wrap(
                 self._backend.scalar_multiply(self._data, 1.0 / other))
 
         if isinstance(other, Composite):
-            other_dims = self._backend.active_dims(other._data)
+            # Expressed-zero composites uplift to ZERO
+            other_data = ZERO._data if getattr(other, '_expressed_zero', False) else other._data
+            self_data = ZERO._data if getattr(self, '_expressed_zero', False) else self._data
+
+            other_dims = self._backend.active_dims(other_data)
 
             if len(other_dims) == 0:
                 raise LimitDoesNotExistError(
@@ -343,8 +391,8 @@ class Composite:
             # Fast path: single-term divisor → dimension shift
             if len(other_dims) == 1:
                 div_dim = int(other_dims[0])
-                div_coeff = self._backend.read_dim(other._data, div_dim)
-                my_dims, my_vals = self._backend.to_arrays(self._data)
+                div_coeff = self._backend.read_dim(other_data, div_dim)
+                my_dims, my_vals = self._backend.to_arrays(self_data)
                 new_dims = my_dims - div_dim
                 new_vals = my_vals / div_coeff
                 return Composite._wrap(
@@ -352,7 +400,7 @@ class Composite:
 
             # Multi-term: polynomial long division via backend
             return Composite._wrap(
-                self._backend.deconvolve(self._data, other._data))
+                self._backend.deconvolve(self_data, other_data))
 
         return NotImplemented
 
@@ -550,6 +598,20 @@ ZERO = Composite.zero()       # |1|₋₁ (infinitesimal)
 INF = Composite.infinity()    # |1|₁ (infinity)
 h = ZERO                      # Alias: h is the infinitesimal
 
+
+def _is_all_zero(backend, data):
+    """Check if a composite is a single expressed zero: |0|_d.
+
+    Only single-term composites with coefficient ~0 qualify.
+    Multi-term composites are never all-zero in practice
+    (Taylor series always have nonzero terms).
+    """
+    dims = backend.active_dims(data)
+    if len(dims) != 1:
+        return False
+    val = backend.read_dim(data, int(dims[0]))
+    return abs(val) < 1e-15
+
 def _seeded(at):
     """Evaluation point seeded with infinitesimal for derivative extraction.
 
@@ -639,7 +701,13 @@ def sin(x, terms=12):
         else:
             sign = (-1) ** (n // 2)
             cos_h = cos_h + (sign / math.factorial(n)) * h_power
-    return sin_a * cos_h + cos_a * sin_h
+    # Skip zero-coefficient terms to avoid 0 * Composite uplift
+    result = Composite({})
+    if sin_a != 0:
+        result = result + sin_a * cos_h
+    if cos_a != 0:
+        result = result + cos_a * sin_h
+    return result
 
 
 def cos(x, terms=12):
@@ -666,7 +734,12 @@ def cos(x, terms=12):
         else:
             sign = (-1) ** (n // 2)
             cos_h = cos_h + (sign / math.factorial(n)) * h_power
-    return cos_a * cos_h - sin_a * sin_h
+    result = Composite({})
+    if cos_a != 0:
+        result = result + cos_a * cos_h
+    if sin_a != 0:
+        result = result - sin_a * sin_h
+    return result
 
 
 def exp(x, terms=15):
@@ -1344,6 +1417,8 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
         if composite_curve:
             def _line_integrand(t_comp):
                 pos_comp = curve(t_comp)
+                pos_comp = [p if isinstance(p, Composite) else Composite({0: float(p)})
+                            for p in pos_comp]
                 tangent = [p.d(1) for p in pos_comp]
 
                 if is_vector:

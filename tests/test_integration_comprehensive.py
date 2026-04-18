@@ -320,7 +320,7 @@ def test_line(t: TestRunner):
 
     t.check("L02 ∫ x ds along x-axis = 1/2",
             integrate(lambda x, y: x,
-                      (0, 1), curve=lambda t: [t, 0*t]),
+                      (0, 1), curve=lambda t: [t, Composite({0: 0.0})]),
             0.5, tol=1e-3)
 
     t.check("L03 ∫ (x+y) ds along y=x = √2",
