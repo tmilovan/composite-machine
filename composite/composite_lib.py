@@ -359,7 +359,8 @@ class Composite:
         # Expressed-zero composites (from subtraction cancellation) uplift to ZERO
         a_data = ZERO._data if getattr(self, '_expressed_zero', False) else self._data
         b_data = ZERO._data if getattr(other, '_expressed_zero', False) else other._data
-        return Composite._wrap(self._backend.convolve(a_data, b_data))
+        result = self._backend.convolve(a_data, b_data)
+        return Composite._wrap(_truncate_dims(self._backend, result))
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -399,8 +400,8 @@ class Composite:
                     self._backend.create_from_terms(new_dims, new_vals))
 
             # Multi-term: polynomial long division via backend
-            return Composite._wrap(
-                self._backend.deconvolve(self_data, other_data))
+            result = self._backend.deconvolve(self_data, other_data)
+            return Composite._wrap(_truncate_dims(self._backend, result))
 
         return NotImplemented
 
@@ -597,6 +598,25 @@ def R(x):
 ZERO = Composite.zero()       # |1|₋₁ (infinitesimal)
 INF = Composite.infinity()    # |1|₁ (infinity)
 h = ZERO                      # Alias: h is the infinitesimal
+
+MAX_ACTIVE_DIMS = 60
+
+
+def _truncate_dims(backend, data):
+    """Keep the MAX_ACTIVE_DIMS dimensions closest to dim 0.
+
+    Prevents dimension explosion in deep composition chains.
+    Without this, sin(atan(sin(atan(x)))) produces 100k+ dims
+    with overflow that corrupts the derivative tower.
+    """
+    dims, vals = backend.to_arrays(data)
+    if len(dims) <= MAX_ACTIVE_DIMS:
+        return data
+    # Sort by distance from dim 0, keep closest
+    order = np.argsort(np.abs(dims))
+    keep = order[:MAX_ACTIVE_DIMS]
+    keep.sort()  # restore dimension order
+    return backend.create_from_terms(dims[keep], vals[keep])
 
 
 def _is_all_zero(backend, data):
@@ -804,6 +824,7 @@ def ln(x, terms=15):
         raise ValueError("ln requires positive standard part")
 
     h_part = x - R(a)
+    h_part._expressed_zero = False  # internal arithmetic, not value-zero
     ratio = h_part / R(a)
 
     result = Composite({0: math.log(a)})
@@ -849,6 +870,7 @@ def sqrt(x, terms=12):
 
     sqrt_a = math.sqrt(a)
     h_part = x - R(a)
+    h_part._expressed_zero = False  # internal arithmetic, not value-zero
     ratio = h_part / R(a)
 
     def binom(n):
@@ -887,6 +909,7 @@ def _reciprocal(x, terms=15):
     if abs(a) < 1e-14:
         raise ZeroDivisionError("Cannot compute 1/x at x=0")
     h_part = x - R(a)
+    h_part._expressed_zero = False  # internal arithmetic, not value-zero
     ratio = h_part / R(-a)
     result = Composite({0: 1/a})
     power = Composite({0: 1})

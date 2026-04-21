@@ -7,6 +7,18 @@ import numpy as np
 from typing import Tuple, List
 from .base_backend import CompositeBackend
 
+# Segment size threshold for FFT convolution.
+# Below this: np.convolve (direct, exact).
+# Above this: FFT (O(N log N), tiny rounding artifacts ~1e-16).
+# Set at 128 to avoid rounding near the zero_tol pruning boundary.
+_FFT_THRESHOLD = 128
+
+
+def _fft_convolve(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """FFT-based convolution. O(N log N) vs O(N^2) direct."""
+    n = len(a) + len(b) - 1
+    return np.fft.irfft(np.fft.rfft(a, n) * np.fft.rfft(b, n), n)
+
 
 class SparseData:
     """Internal storage: parallel sorted arrays of dims and vals.
@@ -214,7 +226,10 @@ class SparseDenseBackend(CompositeBackend):
         results = []
         for offset_a, dense_a in clusters_a:
             for offset_b, dense_b in clusters_b:
-                conv = np.convolve(dense_a, dense_b)
+                if len(dense_a) + len(dense_b) > _FFT_THRESHOLD:
+                    conv = _fft_convolve(dense_a, dense_b)
+                else:
+                    conv = np.convolve(dense_a, dense_b)
                 out_offset = offset_a + offset_b
                 results.append((out_offset, conv))
 
