@@ -31,6 +31,8 @@ FIXES applied:
   2. Transcendentals always return MC (never plain float)
   3. __abs__, __float__, __int__ added to MC
   4. divergence_of is @staticmethod; curl_at is standalone function
+  5. Division: reciprocal via geometric series (fixes derivative loss)
+  6. Truncation: per-variable MAX_ORDER_PER_VAR after multiply (fixes term explosion)
 
 Usage:
     from composite_multivar import *
@@ -51,6 +53,29 @@ Author: Toni Milovan
 """
 import math
 from typing import Callable, List, Tuple, Dict, Optional
+
+# Per-variable dimension truncation threshold.
+# After each multiplication, terms where any variable's absolute
+# dimension exceeds this are dropped. Prevents combinatorial
+# explosion of cross-terms without affecting derivative accuracy.
+# Taylor series use 12-15 terms, so useful information lives
+# within this range. Terms beyond are numerical artifacts from
+# cross-products that don't improve accuracy.
+MAX_ORDER_PER_VAR = 15
+
+
+def _mc_truncate(r):
+    """Drop terms where any variable's dimension exceeds MAX_ORDER_PER_VAR."""
+    new_c = {k: v for k, v in r.c.items()
+             if all(abs(di) <= MAX_ORDER_PER_VAR for di in k)}
+    if len(new_c) == len(r.c):
+        return r
+    result = MC.__new__(MC)
+    result.c = new_c
+    result.nvars = r.nvars
+    return result
+
+
 class MC:
     """
     MultiComposite: composite number with tuple dimensions.
@@ -219,13 +244,18 @@ class MC:
             for d2, c2 in b.c.items():
                 dim = tuple(d1[i] + d2[i] for i in range(nv))
                 result[dim] = result.get(dim, 0) + c1 * c2
-        return MC(result, nv)
+        return _mc_truncate(MC(result, nv))
 
     def __rmul__(self, other):
         return self.__mul__(other)
 
     def __truediv__(self, other):
-        """Divide: coefficients divide, dimensions subtract component-wise."""
+        """Divide: A / B = A * (1/B) via geometric series for reciprocal.
+
+        Single-term divisor: direct dimension subtraction (fast path).
+        Multi-term divisor: reciprocal via geometric series, same approach
+        as single-variable _reciprocal in composite_lib.py.
+        """
         if isinstance(other, (int, float)):
             if other == 0:
                 raise ZeroDivisionError("Use MC.zero_var() for structural zero.")
@@ -247,8 +277,8 @@ class MC:
                 result[new_dim] = coeff / div_coeff
             return MC(result, nv)
 
-        # Multi-term: polynomial long division
-        return _mc_poly_divide(a, b, nv)[0]
+        # Multi-term: reciprocal via geometric series
+        return a * _mc_reciprocal(b)
 
     def __rtruediv__(self, other):
         return MC(other, self.nvars).__truediv__(self)
@@ -388,37 +418,29 @@ def curl_at(F: List[Callable], at: List[float]):
     return [curl_x, curl_y, curl_z]
 
 
-def _mc_poly_divide(num, den, nvars, max_terms=20):
-    """Polynomial long division for multi-term tuple-dimension divisors."""
-    if not den.c:
-        raise ZeroDivisionError("Cannot divide by zero polynomial")
+def _mc_reciprocal(b, terms=15):
+    """Compute 1/B via geometric series.
 
-    # Find leading term of denominator (highest total dimension)
-    denom_sorted = sorted(den.c.items(), key=lambda x: (-sum(x[0]), x[0]))
-    lead_dim, lead_coeff = denom_sorted[0]
+    B = b₀ + h  where b₀ is the real part, h is the infinitesimal part.
+    1/B = (1/b₀) · Σₙ (-h/b₀)ⁿ
 
-    quotient = MC({}, nvars)
-    remainder = MC(dict(num.c), nvars)
-
-    for _ in range(max_terms):
-        if not remainder.c:
-            break
-        rem_sorted = sorted(remainder.c.items(), key=lambda x: (-sum(x[0]), x[0]))
-        rem_dim, rem_coeff = rem_sorted[0]
-
-        # Check if remainder leading dim >= denominator leading dim
-        if sum(rem_dim) < sum(lead_dim):
-            break
-
-        q_dim = tuple(rem_dim[i] - lead_dim[i] for i in range(nvars))
-        q_coeff = rem_coeff / lead_coeff
-
-        quotient = quotient + MC({q_dim: q_coeff}, nvars)
-        subtract = MC({q_dim: q_coeff}, nvars) * den
-        remainder = remainder - subtract
-        remainder.c = {k: v for k, v in remainder.c.items() if abs(v) > 1e-14}
-
-    return quotient, remainder
+    Same approach as single-variable _reciprocal in composite_lib.py.
+    Converges because h contains only infinitesimal terms (no dim-0).
+    Truncation in __mul__ keeps term count bounded at each step.
+    """
+    nv = b.nvars
+    zero_key = tuple([0] * nv)
+    b0 = b.c.get(zero_key, 0.0)
+    if abs(b0) < 1e-14:
+        raise ZeroDivisionError("Cannot divide: divisor has zero real part")
+    h = b - MC.real(b0, nv)
+    neg_ratio = h * (-1.0 / b0)
+    result = MC.real(1.0 / b0, nv)
+    power = MC.real(1.0, nv)
+    for n in range(1, terms):
+        power = power * neg_ratio
+        result = result + power * (1.0 / b0)
+    return result
 
 
 # =============================================================================
