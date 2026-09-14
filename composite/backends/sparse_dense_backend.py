@@ -112,6 +112,23 @@ def _merge_cluster_outputs(
     return SparseData(unique_dims[nonzero], summed_vals[nonzero])
 
 
+def _mask_to_minkowski(a_dims: np.ndarray, b_dims: np.ndarray,
+                       result: SparseData) -> SparseData:
+    """Restrict a convolution result to the dimensions the product built.
+
+    Zero-valued coefficients at constructed dimensions are kept: the dimension
+    exists because the computation built it, whatever it holds.  Dimensions the
+    clustering invented while filling gaps are dropped.
+    """
+    mink = np.unique((a_dims[:, None] + b_dims[None, :]).ravel())
+    vals = np.zeros(len(mink), dtype=np.float64)
+    if len(result.dims):
+        idx = np.searchsorted(mink, result.dims)
+        hit = (idx < len(mink)) & (mink[np.minimum(idx, len(mink) - 1)] == result.dims)
+        vals[idx[hit]] = result.vals[hit]
+    return SparseData(mink, vals)
+
+
 # ── Backend ───────────────────────────────────────────────────
 
 class SparseDenseBackend(CompositeBackend):
@@ -228,12 +245,28 @@ class SparseDenseBackend(CompositeBackend):
             for offset_b, dense_b in clusters_b:
                 if len(dense_a) + len(dense_b) > _FFT_THRESHOLD:
                     conv = _fft_convolve(dense_a, dense_b)
+                    if not np.all(np.isfinite(conv)):
+                        # FFT convolution mixes every input coefficient into
+                        # every output bin, so one overflow destroys all of
+                        # them -- including bins whose direct product is
+                        # perfectly finite.  Deep Taylor towers reach 1e165
+                        # routinely, and squaring one silently zeroed the
+                        # standard part.  Redo the product exactly: direct
+                        # convolution overflows only where the value really
+                        # does, leaving every other coefficient intact.
+                        conv = np.convolve(dense_a, dense_b)
                 else:
                     conv = np.convolve(dense_a, dense_b)
                 out_offset = offset_a + offset_b
                 results.append((out_offset, conv))
 
         result = _merge_cluster_outputs(results, self.zero_tol)
+
+        # A product constructs exactly the dimensions of the Minkowski sum
+        # {da + db}.  Those dimensions exist and are retained even where the
+        # coefficient came out zero; dimensions outside the set are artifacts
+        # of _cluster_terms densifying gaps and must not appear.
+        result = _mask_to_minkowski(a.dims, b.dims, result)
         return self._truncate(result)
 
     # FIXED: deconvolve — use highest dim with non-zero coeff as leading term.
@@ -250,14 +283,17 @@ class SparseDenseBackend(CompositeBackend):
             raise ZeroDivisionError("Cannot deconvolve by empty Composite")
 
         # FIXED: Leading term — highest dim with non-zero coeff
-        nonzero_mask = np.abs(b.vals) > 1e-15
+        # 7.1: the leading term is the highest dimension whose coefficient is
+        # exactly nonzero.  A tolerance would pick the wrong leading term when
+        # a genuine coefficient happens to be tiny.
+        nonzero_mask = b.vals != 0.0
         if not np.any(nonzero_mask):
             raise ZeroDivisionError("Cannot deconvolve by zero Composite")
         lead_dim = b.dims[nonzero_mask][-1]
         lead_val = b.vals[nonzero_mask][-1]
 
         # Strip near-zero terms from dividend for clean division
-        a_mask = np.abs(a.vals) > 1e-15
+        a_mask = a.vals != 0.0
         remainder_dims = a.dims[a_mask].copy()
         remainder_vals = a.vals[a_mask].copy()
 
@@ -286,7 +322,14 @@ class SparseDenseBackend(CompositeBackend):
             )
             # FIXED: Clean near-zero remainder terms (division artifacts,
             # not user-expressed zeros — safe to strip here).
-            mask = np.abs(remainder.vals) > 1e-15
+            #
+            # r_dim is dropped as well: q_val was chosen so that term cancels
+            # exactly, so the remainder there is zero by construction.  In
+            # floating point the subtraction can leave dust instead, which
+            # would keep r_dim as the highest remaining dimension and make the
+            # loop emit the same q_dim again — appending a duplicate quotient
+            # entry built from the residue.
+            mask = (remainder.vals != 0.0) & (remainder.dims != r_dim)
             remainder_dims = remainder.dims[mask]
             remainder_vals = remainder.vals[mask]
 
