@@ -599,7 +599,12 @@ def _compare(a, b):
     Operands are read through R1 first, so the two spellings of a zero compare
     equal: |0|_d and |1|_(d-1) are one number, and <0|_-1> == ZERO**2.
     """
-    a, b = _r1(a), _r1(b)
+    # _operands, not _r1 alone: comparing across representations needs the
+    # same promotion arithmetic gets.  Without it np.union1d below sorts a
+    # float dim array against a tuple one and raises -- so log(1/r) could not
+    # be ordered against 1/sqrt(r), which is exactly the asymptotic question
+    # the ordering exists to answer.
+    a, b = _operands(a, b)
     a_dims, a_vals = a._backend.to_arrays(a._data)
     b_dims, b_vals = b._backend.to_arrays(b._data)
 
@@ -755,6 +760,53 @@ def _derivative_scope(order, terms):
 def _has_positive_dims(x):
     """Check if a composite has any positive-dimension components."""
     return x.max_positive_dim() is not None
+
+
+def _dim_order(d):
+    """Taylor order carried by a dimension: -power, scalar or vector dim alike.
+
+    int(d) is wrong here -- dimensions are float64 and int(-0.5) == 0, which is
+    how a fractional dimension once read as 'no infinitesimal part' and sent ln
+    down the wrong branch.
+    """
+    p = d[0] if isinstance(d, tuple) else d
+    return -p
+
+
+def _complete_order(h_terms, terms):
+    """Highest Taylor order the h-power loop actually finishes.
+
+    h**n starts at order n*m, where m is the LOWEST order present in h.  After
+    forming powers 1..terms-1, every order at or below m*(terms-1) has received
+    all of its contributions; every order above it is missing the contributions
+    of the powers never formed.
+
+    A term counter cannot see this distinction -- only the dimension can.  When
+    h spans a single order (h = e, the common case: exp(_seeded(t))) the bound
+    is terms-1 and nothing is discarded.  When h spans several -- which is what
+    any composed argument gives you, exp(-(x*x)) having h = -2*mid*e - e**2 --
+    the loop reaches orders it cannot complete, and returning them handed back
+    partial sums wearing the shape of finished coefficients: measured against
+    exact Hermite values, wrong by a factor of ~1e3.  They were invisible
+    because taylor_coefficients raises the depth through _derivative_scope and
+    so never reads past the boundary; the consumers that sweep the whole
+    coefficient dict -- antiderivative, and integrate through it -- did.
+    """
+    m = min(_dim_order(d) for d in h_terms)
+    if m <= 0:
+        return None
+    return m * (terms - 1)
+
+
+def _truncate_order(result, order):
+    """Drop the orders above `order`, keeping every dimension at or below it."""
+    if order is None:
+        return result
+    extra = [d for d in result.c if _dim_order(d) > order]
+    if not extra:
+        return result
+    return _like(result, {d: v for d, v in result.c.items()
+                          if _dim_order(d) <= order})
 
 
 def _bounded_at_inf(func, x):
@@ -931,6 +983,7 @@ def sin(x, terms=12):
     a = x.st()
     if not _has_infinitesimal_part(x):
         return Composite({0: math.sin(a)})
+    _nz = {d: c for d, c in x.c.items() if d != 0 and c != 0.0}
     h = Composite({d: c for d, c in x.c.items() if d != 0})
     sin_a, cos_a = math.sin(a), math.cos(a)
     sin_h = Composite({})
@@ -950,7 +1003,7 @@ def sin(x, terms=12):
         result = result + sin_a * cos_h
     if cos_a != 0:
         result = result + cos_a * sin_h
-    return result
+    return _truncate_order(result, _complete_order(_nz, terms))
 
 
 def cos(x, terms=12):
@@ -964,6 +1017,7 @@ def cos(x, terms=12):
     a = x.st()
     if not _has_infinitesimal_part(x):
         return Composite({0: math.cos(a)})
+    _nz = {d: c for d, c in x.c.items() if d != 0 and c != 0.0}
     h = Composite({d: c for d, c in x.c.items() if d != 0})
     sin_a, cos_a = math.sin(a), math.cos(a)
     sin_h = Composite({})
@@ -982,7 +1036,7 @@ def cos(x, terms=12):
         result = result + cos_a * cos_h
     if sin_a != 0:
         result = result - sin_a * sin_h
-    return result
+    return _truncate_order(result, _complete_order(_nz, terms))
 
 
 def exp(x, terms=15):
@@ -1038,7 +1092,7 @@ def exp(x, terms=15):
         h_power = h_power * h
         exp_h = exp_h + (1.0 / math.factorial(n)) * h_power
 
-    return base * exp_h
+    return _truncate_order(base * exp_h, _complete_order(non_zero, terms))
 
 
 def ln(x, terms=15):
@@ -1325,6 +1379,84 @@ def tanh(x, terms=15):
     if _has_positive_dims(x):
         return _bounded_at_inf(math.tanh, x)
     return sinh(x, terms) / cosh(x, terms)
+
+
+# =============================================================================
+# ERROR FUNCTION AND THE NORMAL CDF
+# =============================================================================
+#
+# Each of these is an integral of a Gaussian, and both pieces already exist:
+# exp() works on a composite, and integrating in the infinitesimal is a
+# DIMENSION SHIFT that antiderivative() performs.  So
+#
+#     f(a + h) = f(a) + integral_0^h f'(a + s) ds
+#              = antiderivative( f'(x), f(a) )
+#
+# is the whole implementation -- no series coefficients to derive, no table.
+# The standard part comes from math so it keeps full precision; the
+# infinitesimal part comes from the algebra so derivatives and limits work.
+# erfc and Phi use math.erfc rather than 1 - erf, which loses its significant
+# digits once erf(a) approaches 1.
+
+_TWO_OVER_SQRT_PI = 2.0 / math.sqrt(math.pi)
+_ONE_OVER_SQRT_2PI = 1.0 / math.sqrt(2.0 * math.pi)
+
+
+def erf(x, terms=15):
+    """Error function.  d/dx erf = (2/sqrt(pi)) exp(-x^2)."""
+    if isinstance(x, (int, float)):
+        return Composite({0: math.erf(float(x))})
+    if _is_nothing(x):
+        return Composite({})
+    if _has_positive_dims(x):
+        return _bounded_at_inf(math.erf, x)
+    a = x.st()
+    if not _has_infinitesimal_part(x):
+        return Composite({0: math.erf(a)})
+    return antiderivative(_TWO_OVER_SQRT_PI * exp(-(x * x), terms), math.erf(a))
+
+
+def erfc(x, terms=15):
+    """Complementary error function.  d/dx erfc = -(2/sqrt(pi)) exp(-x^2).
+
+    Not 1 - erf(x): that cancels away the answer for x beyond about 2, where
+    erf is 0.995 and the difference is the part that matters.
+    """
+    if isinstance(x, (int, float)):
+        return Composite({0: math.erfc(float(x))})
+    if _is_nothing(x):
+        return Composite({})
+    if _has_positive_dims(x):
+        return _bounded_at_inf(math.erfc, x)
+    a = x.st()
+    if not _has_infinitesimal_part(x):
+        return Composite({0: math.erfc(a)})
+    return antiderivative(-_TWO_OVER_SQRT_PI * exp(-(x * x), terms), math.erfc(a))
+
+
+def normal_cdf(x, terms=15):
+    """Standard normal CDF.  Phi'(x) = exp(-x^2/2)/sqrt(2 pi).
+
+    Evaluated as 0.5*erfc(-x/sqrt(2)) at the standard part, which stays
+    accurate in the left tail where 0.5*(1 + erf) does not.
+    """
+    if isinstance(x, (int, float)):
+        return Composite({0: 0.5 * math.erfc(-float(x) / math.sqrt(2.0))})
+    if _is_nothing(x):
+        return Composite({})
+    if _has_positive_dims(x):
+        return _bounded_at_inf(
+            lambda v: 0.5 * math.erfc(-v / math.sqrt(2.0)), x)
+    a = x.st()
+    base = 0.5 * math.erfc(-a / math.sqrt(2.0))
+    if not _has_infinitesimal_part(x):
+        return Composite({0: base})
+    return antiderivative(
+        _ONE_OVER_SQRT_2PI * exp(-(x * x) * 0.5, terms), base)
+
+
+Phi = normal_cdf          # the name the finance literature uses
+
 
 # =============================================================================
 # REAL-VALUED POWERS
@@ -2106,23 +2238,35 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
         left = -Fx.eval_taylor(-dx / 2)
         value = left + right
 
-        # Error from Taylor tail: last few antiderivative terms
+        # The remainder is not something to model -- the top two orders of the
+        # expansion ARE it.  Reading it off the last few terms instead assumed
+        # the coefficients decay monotonically, and they do not: exp(-t^2) about
+        # a panel midpoint climbs two orders of magnitude before it falls, so the
+        # trailing terms sit far below the hump that dominates the remainder.
+        # The estimate came back ~1e-8 of the true error, panels were accepted
+        # unrefined, and integral_0^8 exp(-t^2) dt was wrong by 1.7e-05 while
+        # claiming 5.9e-11 -- returning erf > 1.  Every order is now complete
+        # (see _complete_order), so the top two ARE the leading remainder and
+        # there is nothing left to estimate.
         half_dx = abs(dx) / 2
-        tail_terms = []
-        for dim, coeff in fx.c.items():
-            if dim < -2:
-                k = -dim
-                term = abs(coeff) / (k + 1) * half_dx ** (k + 1)
-                if math.isfinite(term):
-                    tail_terms.append((k, term))
-
-        if not tail_terms:
-            # No tail — f is polynomial. Integration is EXACT.
+        orders = [_dim_order(d) for d in fx.c if _dim_order(d) >= 0]
+        if not orders or max(orders) <= 2:
+            # Nothing above a quadratic -- the antiderivative is EXACT.
             return value, 0.0
 
-        tail_terms.sort(key=lambda x: x[0])
-        n_tail = min(3, len(tail_terms))
-        err_est = sum(t for _, t in tail_terms[-n_tail:])
+        cut = max(max(orders) - 2, 2)
+        err_est = 0.0
+        for dim, coeff in fx.c.items():
+            k = _dim_order(dim)
+            if k <= cut:
+                continue
+            # |h**(k+1) - (-h)**(k+1)| <= 2*h**(k+1), so the orders that cancel
+            # on a symmetric panel cost at most a factor 2.  Erring high here
+            # spends evaluations; erring low returns wrong answers.
+            term = 2.0 * abs(coeff) / (k + 1) * half_dx ** (k + 1)
+            if not math.isfinite(term):
+                return value, -1.0  # signal: needs fallback
+            err_est += term
 
         if not math.isfinite(err_est):
             return value, -1.0  # signal: needs fallback
