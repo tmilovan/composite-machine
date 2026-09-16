@@ -277,7 +277,15 @@ class MC:
                 result[new_dim] = coeff / div_coeff
             return MC(result, nv)
 
-        # Multi-term: reciprocal via geometric series
+        # Multi-term divisor.  The geometric series expands around the real
+        # part, so it needs one; with no real part every term is infinitesimal
+        # and long division is the right tool (as in the scalar library).
+        zero_key = tuple([0] * nv)
+        if b.c.get(zero_key, 0.0) == 0.0:
+            # 7.1: exactly no real part -> the geometric series has nothing to
+            # expand around, so use long division.
+            return _mc_deconvolve(a, b)
+
         return a * _mc_reciprocal(b)
 
     def __rtruediv__(self, other):
@@ -418,6 +426,59 @@ def curl_at(F: List[Callable], at: List[float]):
     return [curl_x, curl_y, curl_z]
 
 
+def _mc_order_key(dim):
+    """A monomial order on tuple dimensions.
+
+    Tuple dimensions carry no natural total order, so one is imposed: total
+    degree first (a dimension sum closer to 0 is less infinitesimal, so it
+    leads), then the tuple itself to break ties.  Any monomial order makes the
+    long division below terminate; this one is chosen to match the scalar
+    behaviour, where the leading term is simply the highest dimension.
+    """
+    return (sum(dim), dim)
+
+
+def _mc_deconvolve(a, b):
+    """Long division A / B for a divisor with NO real part.
+
+    _mc_reciprocal expands 1/B as a geometric series around B's real part, so
+    it cannot run when that part is zero -- which is exactly the case for a
+    limit like (x^2+y^2)/(x^2+y^2) at the origin, where every term of B is
+    infinitesimal.
+
+    This mirrors SparseDenseBackend.deconvolve from the scalar library: cancel
+    the leading term of the remainder against the leading term of the divisor,
+    repeat.  It terminates because every term introduced is strictly smaller
+    than the one removed under _mc_order_key.
+    """
+    nv = a.nvars
+    b_terms = {k: v for k, v in b.c.items() if v != 0.0}
+    if not b_terms:
+        raise ZeroDivisionError("Cannot divide by zero composite")
+
+    lead_dim = max(b_terms, key=_mc_order_key)
+    lead_val = b_terms[lead_dim]
+
+    rem = {k: v for k, v in a.c.items() if v != 0.0}
+    quo = {}
+    max_iter = max(len(a.c) + len(b.c), 50)
+
+    for _ in range(max_iter):
+        if not rem:
+            break
+        r_dim = max(rem, key=_mc_order_key)
+        q_dim = tuple(r_dim[i] - lead_dim[i] for i in range(nv))
+        q_val = rem[r_dim] / lead_val
+        quo[q_dim] = quo.get(q_dim, 0.0) + q_val
+        for d, v in b_terms.items():
+            nd = tuple(d[i] + q_dim[i] for i in range(nv))
+            rem[nd] = rem.get(nd, 0.0) - v * q_val
+            if rem[nd] == 0.0:
+                rem.pop(nd, None)
+
+    return MC(quo, nv)
+
+
 def _mc_reciprocal(b, terms=15):
     """Compute 1/B via geometric series.
 
@@ -431,7 +492,9 @@ def _mc_reciprocal(b, terms=15):
     nv = b.nvars
     zero_key = tuple([0] * nv)
     b0 = b.c.get(zero_key, 0.0)
-    if abs(b0) < 1e-14:
+    if b0 == 0.0:
+        # 7.1: exactly zero.  MC.__truediv__ routes this case to long division
+        # before reaching here, so this is a guard rather than a live path.
         raise ZeroDivisionError("Cannot divide: divisor has zero real part")
     h = b - MC.real(b0, nv)
     neg_ratio = h * (-1.0 / b0)
@@ -482,7 +545,7 @@ def mc_sin(x, terms=12):
     a = x.st()  # scalar part
     zero_key = tuple([0] * x.nvars)
     non_zero = {d: c for d, c in x.c.items()
-                if d != zero_key and abs(c) > 1e-15}
+                if d != zero_key and c != 0.0}
 
     if not non_zero:
         return MC({zero_key: math.sin(a)}, x.nvars)
@@ -517,7 +580,7 @@ def mc_cos(x, terms=12):
     a = x.st()  # scalar part
     zero_key = tuple([0] * x.nvars)
     non_zero = {d: c for d, c in x.c.items()
-                if d != zero_key and abs(c) > 1e-15}
+                if d != zero_key and c != 0.0}
 
     if not non_zero:
         return MC({zero_key: math.cos(a)}, x.nvars)
@@ -552,7 +615,7 @@ def mc_exp(x, terms=15):
     a = x.st()
     zero_key = tuple([0] * x.nvars)
     non_zero = {d: c for d, c in x.c.items()
-                if d != zero_key and abs(c) > 1e-15}
+                if d != zero_key and c != 0.0}
 
     if not non_zero:
         return MC({zero_key: math.exp(a)}, x.nvars)

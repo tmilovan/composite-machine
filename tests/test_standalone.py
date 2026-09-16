@@ -895,21 +895,28 @@ def test_subtraction_rules():
     suite.assert_eq("R(1)-R(1) is zero", r11.st(), 0)
     suite.assert_eq("R(1)-R(1) stays at dim[0]", r11.coeff(0), 0)
 
+    # Rules 3-6: 0**a - 0**a = 0**(a+1).
+    # Compared as NUMBERS, not as coefficient dicts.  Subtraction leaves the
+    # zero at the dimension where it happened -- ZERO-ZERO is |0|_-1 -- and
+    # that converts to |1|_-2 = ZERO**2 when used as an operand (R1).  The two
+    # are one number with two spellings, so `==` is the right test and
+    # `.c == .c` is not.
+
     # Rule 3: R(0)-R(0) = ZERO-ZERO = 0² = ZERO² (R(0) is ZERO)
     r00 = R(0) - R(0)
-    suite.assert_eq("R(0)-R(0) = ZERO²", r00.c == z2.c, True)
+    suite.assert_eq("R(0)-R(0) = ZERO²", r00 == z2, True)
 
     # Rule 4: ZERO-ZERO = 0² = ZERO² (same as rule 3)
     zz = ZERO - ZERO
-    suite.assert_eq("ZERO-ZERO = ZERO²", zz.c == z2.c, True)
+    suite.assert_eq("ZERO-ZERO = ZERO²", zz == z2, True)
 
     # Rule 5: ZERO²-ZERO² = 0³ = ZERO³
     z2z2 = z2 - z2
-    suite.assert_eq("ZERO²-ZERO² = ZERO³", z2z2.c == z3.c, True)
+    suite.assert_eq("ZERO²-ZERO² = ZERO³", z2z2 == z3, True)
 
     # Rule 6: ZERO³-ZERO³ = 0⁴ = ZERO⁴
     z3z3 = z3 - z3
-    suite.assert_eq("ZERO³-ZERO³ = ZERO⁴", z3z3.c == z4.c, True)
+    suite.assert_eq("ZERO³-ZERO³ = ZERO⁴", z3z3 == z4, True)
 
     # Rule 7: normal subtraction still works
     suite.assert_eq("R(5)-R(3) = 2", (R(5) - R(3)).st(), 2)

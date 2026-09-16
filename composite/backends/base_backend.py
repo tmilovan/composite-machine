@@ -43,18 +43,56 @@ class CompositeBackend(ABC):
     def active_dims(self, data: object) -> np.ndarray:
         """Return sorted array of all active dimension indices."""
 
+    # --- structural predicates (concrete: backends may override) ---
+    def term_count(self, data: object) -> int:
+        """Number of active terms.  Override to avoid materialising flat form."""
+        return len(self.active_dims(data))
+
+    def is_wholly_zero(self, data: object) -> bool:
+        """True when every expressed coefficient is zero.
+
+        Default scans the flat form.  Backends that retain structure should
+        override: this is called on EVERY multiply and division (Zero Rule R1
+        converts a wholly-zero operand), so materialising flat arrays here was
+        ~25% of multiply time once the backend itself got fast.
+        """
+        dims, vals = self.to_arrays(data)
+        return len(dims) > 0 and not np.any(vals != 0.0)
+
+    def is_unit(self, data: object) -> bool:
+        """True for |1|_0, the multiplicative identity.  See is_wholly_zero."""
+        dims, vals = self.to_arrays(data)
+        return len(dims) == 1 and int(dims[0]) == 0 and vals[0] == 1.0
+
     # --- arithmetic ---
     @abstractmethod
     def add(self, a: object, b: object) -> object:
-        """Composite addition: merge terms, sum where dims match."""
+        """Composite addition: merge terms, sum where dims match.
+
+        The result carries the union of both dimension sets.  A dimension whose
+        coefficients sum to zero is RETAINED with coefficient 0 -- it was
+        constructed by the operands, so it exists.  Addition never shifts a
+        dimension.
+        """
 
     @abstractmethod
     def convolve(self, a: object, b: object) -> object:
-        """Composite multiplication via convolution."""
+        """Composite multiplication via convolution.
+
+        The dimensions of the result are exactly the Minkowski sum of the two
+        input dimension sets, {da + db}.  Zero-valued coefficients at those
+        dimensions are RETAINED; dimensions outside the set must not appear,
+        even if an implementation densifies gaps internally.
+        """
 
     @abstractmethod
     def deconvolve(self, a: object, b: object) -> object:
-        """Composite division via deconvolution."""
+        """Composite division via deconvolution.
+
+        The leading term of the divisor is its highest dimension with a
+        NONZERO coefficient: retained zeros may sit above it.  Zero-valued
+        quotient terms are retained.
+        """
 
     @abstractmethod
     def scalar_multiply(self, data: object, scalar: float) -> object:

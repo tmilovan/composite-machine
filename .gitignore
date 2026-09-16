@@ -109,3 +109,6 @@ htmlcov/
 .claude/
 .obsidian/
 CLAUDE.md
+
+# solver setup cache
+.cache/

@@ -48,6 +48,29 @@ class DictBackend(CompositeBackend):
         new_terms[dim] = value
         return DictData(new_terms)
 
+    # --- structural predicates ---
+    # The base class serves these from to_arrays(), which builds two numpy
+    # arrays.  They are called on EVERY multiply and division (Zero Rule R1
+    # inspects both operands), so the dict was being flattened purely to answer
+    # "are you zero?".  Read it directly instead.  Semantics are the base
+    # class's, unchanged: is_wholly_zero requires at least one expressed term,
+    # and is_unit requires EXACTLY one term -- an expressed zero alongside it
+    # still means not-unit.
+
+    def term_count(self, data: DictData) -> int:
+        return len(data.terms)
+
+    def is_wholly_zero(self, data: DictData) -> bool:
+        t = data.terms
+        return len(t) > 0 and all(v == 0.0 for v in t.values())
+
+    def is_unit(self, data: DictData) -> bool:
+        t = data.terms
+        if len(t) != 1:
+            return False
+        (dim, val), = t.items()
+        return dim == 0 and val == 1.0
+
     def to_arrays(self, data: DictData) -> Tuple[np.ndarray, np.ndarray]:
         if not data.terms:
             return (np.array([], dtype=np.int64),
@@ -69,12 +92,19 @@ class DictBackend(CompositeBackend):
         return DictData(result)
 
     def convolve(self, a: DictData, b: DictData) -> DictData:
+        """Composite multiplication.
+
+        The dimensions a product constructs are exactly the Minkowski sum
+        {da + db}, which the double loop below produces directly.  Every one of
+        them is retained, including those whose coefficient came out zero: a
+        dimension exists because the computation built it, whatever it holds.
+        """
         result = {}
         for d_a, v_a in a.terms.items():
             for d_b, v_b in b.terms.items():
                 d_out = d_a + d_b
                 result[d_out] = result.get(d_out, 0.0) + v_a * v_b
-        return DictData({d: v for d, v in result.items() if v != 0.0})
+        return DictData(result)
 
     # FIXED: deconvolve — use highest dim with non-zero coeff as leading term.
     # With expressed zero preservation, the highest dim may have coeff 0.0,
@@ -85,10 +115,10 @@ class DictBackend(CompositeBackend):
             raise ZeroDivisionError("Cannot deconvolve by empty Composite")
 
         # FIXED: clean near-zero terms from dividend
-        remainder = {d: v for d, v in a.terms.items() if abs(v) > 1e-15}
+        remainder = {d: v for d, v in a.terms.items() if v != 0.0}
 
         # FIXED: Leading term — highest dim with non-zero coeff
-        b_nonzero = {d: v for d, v in b.terms.items() if abs(v) > 1e-15}
+        b_nonzero = {d: v for d, v in b.terms.items() if v != 0.0}
         if not b_nonzero:
             raise ZeroDivisionError("Cannot deconvolve by zero Composite")
         b_sorted = sorted(b_nonzero.items())
@@ -109,10 +139,19 @@ class DictBackend(CompositeBackend):
             for d_b, v_b in b_nonzero.items():
                 out_d = q_dim + d_b
                 remainder[out_d] = remainder.get(out_d, 0.0) - q_val * v_b
-                if abs(remainder[out_d]) < 1e-15:
+                if remainder[out_d] == 0.0:
                     del remainder[out_d]
 
-        return DictData({d: v for d, v in quotient.items() if v != 0.0})
+            # q_val was chosen so that this term cancels exactly, so the
+            # remainder at r_dim is zero by construction.  In floating point
+            # the subtraction above can leave dust there instead; dropping it
+            # keeps max(remainder) strictly decreasing.  Without this the loop
+            # can re-select r_dim, recompute the same q_dim, and overwrite a
+            # correct quotient coefficient with the shrinking residue.
+            remainder.pop(r_dim, None)
+
+        # zero-valued quotient terms are retained, as in convolve
+        return DictData(quotient)
 
     def scalar_multiply(self, data: DictData, scalar: float) -> DictData:
         if scalar == 0.0:

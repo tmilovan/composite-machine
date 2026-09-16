@@ -55,6 +55,7 @@ Author: Toni Milovan
 """
 
 import math
+import contextlib as _contextlib
 from typing import Callable, List, Optional, Union
 import struct
 import numpy as np
@@ -81,6 +82,48 @@ class CompositionError(TypeError):
 # CORE: COMPOSITE NUMBER CLASS
 # =============================================================================
 
+def _is_wholly_zero(c):
+    """True when every expressed coefficient is zero — the composite is a zero."""
+    return c._backend.is_wholly_zero(c._data)
+
+
+def _is_unit(c):
+    """True for |1|_0, the multiplicative identity."""
+    return c._backend.is_unit(c._data)
+
+
+def _operands(a, b):
+    """Prepare two composites for an operation.
+
+    Brings them onto a single backend first -- set_backend() may have been
+    called after one of them was built, and the module constants ZERO / INF
+    are rebuilt on switch but references captured by `from ... import ZERO`
+    are not -- then applies R1 to each.
+    """
+    if type(a._data) is not type(b._data):
+        dims, vals = b._backend.to_arrays(b._data)
+        b = Composite._wrap(a._backend.create_from_terms(dims, vals))
+    return _r1(a), _r1(b)
+
+
+def _r1(c):
+    """R1 — a zero used as an OPERAND converts: |0|_d becomes |1|_(d-1).
+
+    Only a composite that is wholly zero is a zero.  A zero sitting among
+    nonzero terms is a term of the number, not an operand, so nothing happens
+    to it (R2).  When several dimensions are zero, only the lowest converts;
+    the composite then holds a nonzero and the rest are terms.
+    """
+    if not _is_wholly_zero(c):
+        return c
+    dims, vals = c._backend.to_arrays(c._data)
+    dims = dims.copy()
+    vals = vals.copy()
+    dims[0] = dims[0] - 1          # to_arrays is sorted ascending: [0] is lowest
+    vals[0] = 1.0
+    return Composite._wrap(c._backend.create_from_terms(dims, vals))
+
+
 class Composite:
     """
     Composite number: |coefficient|_dimension
@@ -98,11 +141,10 @@ class Composite:
         |3|₀+|2|₋₁ = 3 + 2h (3 plus 2 infinitesimals)
     """
 
-    __slots__ = ['_data', '_backend', '_expressed_zero']
+    __slots__ = ['_data', '_backend']
 
     def __init__(self, coefficients=None, _data=None):
         self._backend = get_backend()
-        self._expressed_zero = False
 
         if _data is not None:
             # Internal fast path: created by arithmetic ops
@@ -144,7 +186,6 @@ class Composite:
         obj = cls.__new__(cls)
         obj._backend = get_backend()
         obj._data = data
-        obj._expressed_zero = False
         return obj
 
     # -------------------------------------------------------------------------
@@ -250,7 +291,9 @@ class Composite:
     @classmethod
     def from_array(cls, values, dims):
         """Reconstruct from flat list + dimension map."""
-        return cls({d: v for d, v in zip(dims, values) if v != 0})
+        # zero coefficients are retained: a dimension exists because it
+        # was constructed, whatever it holds
+        return cls({d: v for d, v in zip(dims, values)})
 
     def to_json(self):
         """Serialize to JSON string."""
@@ -268,77 +311,35 @@ class Composite:
     # -------------------------------------------------------------------------
 
     def __add__(self, other):
+        """Addition never shifts dimensions (R4).  A zero OPERAND converts (R1);
+        a zero TERM does not (R2)."""
         if isinstance(other, (int, float)):
-            if other == 0:
-                # Uplift scalar 0 to ZERO if self has no dim-0 component
-                if self._backend.read_dim(self._data, 0) == 0.0:
-                    other = ZERO
-                else:
-                    return self  # same dimension, no uplift, 0 is no-op
-            other = Composite(other) if not isinstance(other, Composite) else other
-        return Composite._wrap(self._backend.add(self._data, other._data))
+            other = Composite({0: 0.0}) if other == 0 else Composite(float(other))
+        if not isinstance(other, Composite):
+            return NotImplemented
+        a, b = _operands(self, other)
+        return Composite._wrap(a._backend.add(a._data, b._data))
 
     def __radd__(self, other):
-        if isinstance(other, (int, float)) and other == 0:
-            if self._backend.read_dim(self._data, 0) == 0.0:
-                return ZERO.__add__(self)  # uplift: different dim
-            return self  # same dim: 0 + self = self
         return self.__add__(other)
 
     def __sub__(self, other):
+        """Subtraction never shifts dimensions (R4).
+
+        a - a leaves |0|_d: the dimension was constructed by both operands, so
+        it exists and holds zero.  No special case is needed -- |0|_a - |0|_a
+        giving 0**(a+1) follows from R1 plus this rule, not from a branch here.
+        """
         if isinstance(other, (int, float)):
-            if other == 0:
-                if self._backend.read_dim(self._data, 0) == 0.0:
-                    other = ZERO
-                else:
-                    return self  # same dimension, no uplift, 0 is no-op
-            other = Composite(other) if not isinstance(other, Composite) else other
-        neg_other = self._backend.negate(other._data)
-        result = Composite._wrap(self._backend.add(self._data, neg_other))
-        # Subtraction rules:
-        #   R(5)-R(5) = 0 at dim[0]. No shift — no multiplication.
-        #   R(0)-R(0) = ZERO-ZERO = 0·0 = 0². Multiplication with zero → shift.
-        #   ZERO²-ZERO² = 0·(0²) = 0³. Shift via multiplication.
-        #   0²-R(0) = 0²·0 = 0³. Different dimensions but both zero-valued.
-        _, result_vals = self._backend.to_arrays(result._data)
-        _self_dims = self._backend.active_dims(self._data)
-        _other_dims = self._backend.active_dims(other._data)
-        _exact_cancel = (len(result_vals) > 0
-                         and np.all(np.abs(result_vals) < 1e-15))
-        _both_zero = (len(_self_dims) > 0 and len(_other_dims) > 0
-                      and self.st() == 0.0 and other.st() == 0.0)
-        if _exact_cancel:
-            # Check if operands are non-zero-valued (have nonzero coefficients
-            # at dim 0 or positive dims — values, not infinitesimals)
-            self_dims_arr, self_vals_arr = self._backend.to_arrays(self._data)
-            has_value = False
-            for d, v in zip(self_dims_arr, self_vals_arr):
-                if int(d) >= 0 and abs(float(v)) > 1e-15:
-                    has_value = True
-                    break
-            if has_value:
-                # Non-zero value cancellation: expressed zero, no shift.
-                # Tag so __mul__/__truediv__ can uplift to ZERO.
-                result._expressed_zero = True
-                return result
-            # Both operands are zero-valued: shift to higher zero power
-            self_min = int(_self_dims[0]) if len(_self_dims) > 0 else 0
-            other_min = int(_other_dims[0]) if len(_other_dims) > 0 else 0
-            min_dim = min(self_min, other_min)
-            power = max(2, 1 - min_dim)
-            z = ZERO
-            for _ in range(power - 1):
-                z = z * ZERO
-            return z
-        return result
+            other = Composite({0: 0.0}) if other == 0 else Composite(float(other))
+        if not isinstance(other, Composite):
+            return NotImplemented
+        a, b = _operands(self, other)
+        return Composite._wrap(a._backend.add(a._data, a._backend.negate(b._data)))
 
     def __rsub__(self, other):
-        if isinstance(other, (int, float)) and other == 0:
-            # Check if self has dim-0 component
-            if self._backend.read_dim(self._data, 0) == 0.0:
-                return ZERO.__sub__(self)  # uplift: different dim
-            return (-self)  # same dim: 0 - self = -self
-        return Composite(other).__sub__(self)
+        left = Composite({0: 0.0}) if other == 0 else Composite(float(other))
+        return left.__sub__(self)
 
     def __neg__(self):
         return Composite._wrap(self._backend.negate(self._data))
@@ -346,21 +347,25 @@ class Composite:
     def __mul__(self, other):
         """Multiplication: dimensions add, coefficients multiply.
 
-        Scalar zero uplifts to ZERO. A composite that is entirely
-        zero-valued (has expressed dims but all coefficients ~0)
-        also uplifts to ZERO — it represents composite zero, not nothing.
+        A zero OPERAND converts first (R1), so |0|_0 x |5|_0 = |1|_-1 x |5|_0
+        = |5|_-1 -- the value is translated, not annihilated.  Multiplying by
+        |1|_0 is the identity (R3).
         """
         if isinstance(other, (int, float)):
             if other == 0:
+                other = Composite({0: 0.0})
+            else:
                 return Composite._wrap(
-                    self._backend.convolve(self._data, ZERO._data))
-            return Composite._wrap(
-                self._backend.scalar_multiply(self._data, float(other)))
-        # Expressed-zero composites (from subtraction cancellation) uplift to ZERO
-        a_data = ZERO._data if getattr(self, '_expressed_zero', False) else self._data
-        b_data = ZERO._data if getattr(other, '_expressed_zero', False) else other._data
-        result = self._backend.convolve(a_data, b_data)
-        return Composite._wrap(_truncate_dims(self._backend, result))
+                    self._backend.scalar_multiply(self._data, float(other)))
+        if not isinstance(other, Composite):
+            return NotImplemented
+        if _is_unit(other):
+            return self
+        if _is_unit(self):
+            return other
+        a, b = _operands(self, other)
+        return Composite._wrap(
+            _truncate_dims(a._backend, a._backend.convolve(a._data, b._data)))
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -368,45 +373,45 @@ class Composite:
     def __truediv__(self, other):
         """Division: dimensions subtract, coefficients divide.
 
-        Scalar zero uplifts to ZERO — division by zero produces infinity.
+        A zero OPERAND converts first (R1), on either side.  Dividing by
+        |1|_0 is the identity (R3).
         """
         if isinstance(other, (int, float)):
             if other == 0:
-                # Uplift: divide by ZERO (structural infinitesimal)
-                return self.__truediv__(ZERO)
-            return Composite._wrap(
-                self._backend.scalar_multiply(self._data, 1.0 / other))
-
-        if isinstance(other, Composite):
-            # Expressed-zero composites uplift to ZERO
-            other_data = ZERO._data if getattr(other, '_expressed_zero', False) else other._data
-            self_data = ZERO._data if getattr(self, '_expressed_zero', False) else self._data
-
-            other_dims = self._backend.active_dims(other_data)
-
-            if len(other_dims) == 0:
-                raise LimitDoesNotExistError(
-                    "Division by nothing (empty composite). "
-                    "Denominator is indeterminate — limit does not exist.")
-
-            # Fast path: single-term divisor → dimension shift
-            if len(other_dims) == 1:
-                div_dim = int(other_dims[0])
-                div_coeff = self._backend.read_dim(other_data, div_dim)
-                my_dims, my_vals = self._backend.to_arrays(self_data)
-                new_dims = my_dims - div_dim
-                new_vals = my_vals / div_coeff
+                other = Composite({0: 0.0})
+            else:
                 return Composite._wrap(
-                    self._backend.create_from_terms(new_dims, new_vals))
+                    self._backend.scalar_multiply(self._data, 1.0 / other))
+        if not isinstance(other, Composite):
+            return NotImplemented
+        if _is_unit(other):
+            return self
 
-            # Multi-term: polynomial long division via backend
-            result = self._backend.deconvolve(self_data, other_data)
-            return Composite._wrap(_truncate_dims(self._backend, result))
+        a, b = _operands(self, other)
+        b_dims = b._backend.active_dims(b._data)
 
-        return NotImplemented
+        if len(b_dims) == 0:
+            raise LimitDoesNotExistError(
+                "Division by nothing (empty composite). "
+                "Denominator is indeterminate — limit does not exist.")
+
+        # Single-term divisor -> a pure dimension shift.  Every term of the
+        # dividend moves together, zeros included: they shift and stay zero.
+        if len(b_dims) == 1:
+            div_dim = int(b_dims[0])
+            div_coeff = b._backend.read_dim(b._data, div_dim)
+            my_dims, my_vals = a._backend.to_arrays(a._data)
+            return Composite._wrap(
+                a._backend.create_from_terms(my_dims - div_dim, my_vals / div_coeff))
+
+        result = a._backend.deconvolve(a._data, b._data)
+        return Composite._wrap(_truncate_dims(a._backend, result))
 
     def __rtruediv__(self, other):
-        return Composite(other).__truediv__(self)
+        # other / self -- the operands are reversed, so no unit-divisor
+        # short-circuit applies here.
+        left = Composite({0: 0.0}) if other == 0 else Composite(float(other))
+        return left.__truediv__(self)
 
     def __abs__(self):
         """Absolute value of the standard part."""
@@ -529,7 +534,12 @@ class Composite:
         return result != 0
 
 def _compare(a, b):
-    """Lexicographic comparison by dimension (highest first)."""
+    """Lexicographic comparison by dimension (highest first).
+
+    Operands are read through R1 first, so the two spellings of a zero compare
+    equal: |0|_d and |1|_(d-1) are one number, and <0|_-1> == ZERO**2.
+    """
+    a, b = _r1(a), _r1(b)
     a_dims, a_vals = a._backend.to_arrays(a._data)
     b_dims, b_vals = b._backend.to_arrays(b._data)
 
@@ -547,37 +557,6 @@ def _compare(a, b):
         elif ca > cb:
             return 1
     return 0
-
-
-def _poly_divide(numerator, denominator, max_terms=50):
-    """Polynomial long division for multi-term divisors"""
-    if not denominator.c:
-        raise ZeroDivisionError("Cannot divide by zero polynomial")
-
-    denom_dims = sorted(denominator.c.keys(), reverse=True)
-    lead_dim = denom_dims[0]
-    lead_coeff = denominator.c[lead_dim]
-
-    quotient = Composite({})
-    remainder = Composite(dict(numerator.c))
-
-    for _ in range(max_terms):
-        if not remainder.c:
-            break
-
-        rem_dims = sorted(remainder.c.keys(), reverse=True)
-        rem_lead_dim = rem_dims[0]
-        rem_lead_coeff = remainder.c[rem_lead_dim]
-
-        q_dim = rem_lead_dim - lead_dim
-        q_coeff = rem_lead_coeff / lead_coeff
-
-        quotient = quotient + Composite({q_dim: q_coeff})
-        subtract_term = Composite({q_dim: q_coeff}) * denominator
-        remainder = remainder - subtract_term
-        remainder.c = {k: v for k, v in remainder.c.items() if abs(v) > 1e-14}
-
-    return quotient, remainder
 
 
 # =============================================================================
@@ -599,6 +578,19 @@ ZERO = Composite.zero()       # |1|₋₁ (infinitesimal)
 INF = Composite.infinity()    # |1|₁ (infinity)
 h = ZERO                      # Alias: h is the infinitesimal
 
+def _refresh_constants():
+    """Rebuild the module constants under the active backend.
+
+    Called by backends.config.set_backend().  ZERO / INF / h are built at
+    import time, so without this a later set_backend() would leave them on the
+    old backend and every expression touching them would mix representations.
+    """
+    global ZERO, INF, h
+    ZERO = Composite.zero()
+    INF = Composite.infinity()
+    h = ZERO
+
+
 MAX_ACTIVE_DIMS = 60
 
 
@@ -609,28 +601,18 @@ def _truncate_dims(backend, data):
     Without this, sin(atan(sin(atan(x)))) produces 100k+ dims
     with overflow that corrupts the derivative tower.
     """
-    dims, vals = backend.to_arrays(data)
-    if len(dims) <= MAX_ACTIVE_DIMS:
+    # Check the count BEFORE materialising: this runs on every multiply, and
+    # the overwhelming majority of products are under the cap, so flattening
+    # first meant paying for the flat form purely to discover it was not needed.
+    if backend.term_count(data) <= MAX_ACTIVE_DIMS:
         return data
+    dims, vals = backend.to_arrays(data)
     # Sort by distance from dim 0, keep closest
     order = np.argsort(np.abs(dims))
     keep = order[:MAX_ACTIVE_DIMS]
     keep.sort()  # restore dimension order
     return backend.create_from_terms(dims[keep], vals[keep])
 
-
-def _is_all_zero(backend, data):
-    """Check if a composite is a single expressed zero: |0|_d.
-
-    Only single-term composites with coefficient ~0 qualify.
-    Multi-term composites are never all-zero in practice
-    (Taylor series always have nonzero terms).
-    """
-    dims = backend.active_dims(data)
-    if len(dims) != 1:
-        return False
-    val = backend.read_dim(data, int(dims[0]))
-    return abs(val) < 1e-15
 
 def _seeded(at):
     """Evaluation point seeded with infinitesimal for derivative extraction.
@@ -663,6 +645,31 @@ def _effective_terms(default):
     """Return max(default, global minimum) for Taylor series length."""
     return max(default, _min_terms[0])
 
+
+@_contextlib.contextmanager
+def _derivative_scope(order, terms):
+    """Raise expansion depth AND the dimension cap for one extraction.
+
+    _truncate_dims keeps the MAX_ACTIVE_DIMS dimensions CLOSEST TO ZERO, which
+    is the right policy for a derivative jet -- but it also caps the reachable
+    order at MAX_ACTIVE_DIMS - 1, and above that the extraction returned 0.0
+    with no error at all.  Measured: order 59 correct, order 60 silently wrong.
+
+    So raise the cap to cover what was actually asked for and restore it after.
+    The guard stays in force for everything outside a derivative call, which is
+    what it was written for (deep composition chains like sin(atan(sin(atan(x))))
+    that otherwise reach 100k+ dims).
+    """
+    global MAX_ACTIVE_DIMS
+    old_min, old_cap = _min_terms[0], MAX_ACTIVE_DIMS
+    _min_terms[0] = max(terms, order + 2)
+    MAX_ACTIVE_DIMS = max(MAX_ACTIVE_DIMS, order + 8)
+    try:
+        yield
+    finally:
+        _min_terms[0] = old_min
+        MAX_ACTIVE_DIMS = old_cap
+
 # =============================================================================
 # TAYLOR SERIES FOR TRANSCENDENTAL FUNCTIONS
 # =============================================================================
@@ -692,6 +699,18 @@ def _bounded_at_inf(func, x):
         return Composite({})
 
 
+def _has_infinitesimal_part(x):
+    """True when x carries any NONZERO coefficient away from dimension 0.
+
+    A composite whose only content is at dimension 0 -- or whose other
+    dimensions are all zero -- is just its standard part, and a Taylor series
+    around it must not be built: x - R(a) would be a zero, and R1 would turn
+    that zero into |1|_-1, manufacturing an infinitesimal that is not there.
+    """
+    dims, vals = x._backend.to_arrays(x._data)
+    return any(int(d) != 0 and v != 0.0 for d, v in zip(dims, vals))
+
+
 def _is_nothing(x):
     """Check if x is the empty composite (nothing)."""
     return isinstance(x, Composite) and not x.c
@@ -706,9 +725,9 @@ def sin(x, terms=12):
     if _has_positive_dims(x):
         return _bounded_at_inf(math.sin, x)
     a = x.st()
+    if not _has_infinitesimal_part(x):
+        return Composite({0: math.sin(a)})
     h = Composite({d: c for d, c in x.c.items() if d != 0})
-    if not h.c:
-        return R(math.sin(a))
     sin_a, cos_a = math.sin(a), math.cos(a)
     sin_h = Composite({})
     cos_h = Composite({0: 1.0})
@@ -739,9 +758,9 @@ def cos(x, terms=12):
     if _has_positive_dims(x):
         return _bounded_at_inf(math.cos, x)
     a = x.st()
+    if not _has_infinitesimal_part(x):
+        return Composite({0: math.cos(a)})
     h = Composite({d: c for d, c in x.c.items() if d != 0})
-    if not h.c:
-        return R(math.cos(a))
     sin_a, cos_a = math.sin(a), math.cos(a)
     sin_h = Composite({})
     cos_h = Composite({0: 1.0})
@@ -775,7 +794,9 @@ def exp(x, terms=15):
         return Composite({})
 
     a = x.st()
-    non_zero = {d: c for d, c in x.c.items() if d != 0 and abs(c) > 1e-15}
+    # 7.1: a term exists iff its coefficient is nonzero -- exactly zero,
+    # not 'small'.  A tolerance here silently discards real content.
+    non_zero = {d: c for d, c in x.c.items() if d != 0 and c != 0.0}
 
     if not non_zero:
         return Composite({0: math.exp(a)})
@@ -823,11 +844,17 @@ def ln(x, terms=15):
                 return R(math.log(coeff))
         raise ValueError("ln requires positive standard part")
 
+    if not _has_infinitesimal_part(x):
+        return Composite({0: math.log(a)})
+
     h_part = x - R(a)
-    h_part._expressed_zero = False  # internal arithmetic, not value-zero
     ratio = h_part / R(a)
 
-    result = Composite({0: math.log(a)})
+    # R6: there is no additive identity.  A summation that has not yet added a
+    # term holds NOTHING, not zero -- seeding with Composite({0: 0.0}) would
+    # assert a zero, which R1 converts to |1|_-1 and adds to the series.
+    lead = math.log(a)
+    result = Composite({}) if lead == 0.0 else Composite({0: lead})
     power = Composite({0: 1})
 
     for n in range(1, terms):
@@ -853,24 +880,44 @@ def sqrt(x, terms=12):
     if _is_nothing(x):
         return Composite({})
 
+    # Dimensions HALVE under a square root:  sqrt(|c|_d) = |sqrt(c)|_(d/2).
+    # The dimension index is an int, so this exists only when d is even; an odd
+    # d needs a half-integer dimension the representation cannot name.
+    #
+    # This used to keep the dimension instead of halving it, returning ZERO for
+    # sqrt(ZERO) and silently giving wrong LIMITS, not just wrong intermediates:
+    #   lim(x->0+) sqrt(x)/x   gave 1.0   (is infinity)
+    #   lim(x->0+) x/sqrt(x)   gave 1.0   (is 0)
+    #   lim(x->0+) sqrt(x*x)/x gave 0.0   (is 1 -- |x|/x for x > 0)
+    # Halving fixes every even case; odd ones now raise and name the fix.
+    _nz = {d: c for d, c in x.coeffs_dict().items() if c != 0.0}
+    if _nz:
+        _lead = max(_nz)
+        if _lead != 0:
+            _c = _nz[_lead]
+            if _c < 0:
+                raise ValueError(
+                    f"sqrt of a negative leading coefficient |{_c}|_{_lead}")
+            if _lead % 2 != 0:
+                raise ValueError(
+                    f"sqrt(|{_c}|_{_lead}) needs dimension {_lead}/2, which is not "
+                    f"an integer and cannot be represented. Substitute to make the "
+                    f"exponent whole -- for a half power, set x = s*s and work in s "
+                    f"(this is the standard Williams substitution at a crack tip). "
+                    f"Even dimensions are fine: sqrt(|c|_-2) = |sqrt(c)|_-1.")
+            _root = Composite({_lead // 2: math.sqrt(_c)})
+            _rest = x / Composite({_lead: _c})        # leading dim 0, st() == 1
+            return _root * sqrt(_rest, terms)
+
     a = x.st()
-    if a <= 0:
-        # Positive infinitesimal: operate on coefficient, stay at same dim.
-        # sqrt(|1|_{-1}) = |sqrt(1)|_{-1} = |1|_{-1} = ZERO
-        # Just like sqrt(|1|_0) = |1|_0 at dim 0.
-        coeffs = x.c
-        neg_dims = {d: c for d, c in coeffs.items() if d < 0}
-        if neg_dims:
-            min_dim = min(neg_dims.keys())
-            coeff = neg_dims[min_dim]
-            if coeff > 0:
-                return Composite({min_dim: math.sqrt(coeff)})
     if a < 0:
         raise ValueError("sqrt requires non-negative standard part")
 
+    if not _has_infinitesimal_part(x):
+        return Composite({0: math.sqrt(a)})
+
     sqrt_a = math.sqrt(a)
     h_part = x - R(a)
-    h_part._expressed_zero = False  # internal arithmetic, not value-zero
     ratio = h_part / R(a)
 
     def binom(n):
@@ -906,10 +953,11 @@ def tan(x, terms=12):
 def _reciprocal(x, terms=15):
     """Compute 1/x via geometric series. Internal helper."""
     a = x.st()
-    if abs(a) < 1e-14:
+    if a == 0.0:
+        # 7.1: exactly zero, not "small".  A tolerance here refused to invert
+        # perfectly good composites whose standard part happened to be tiny.
         raise ZeroDivisionError("Cannot compute 1/x at x=0")
     h_part = x - R(a)
-    h_part._expressed_zero = False  # internal arithmetic, not value-zero
     ratio = h_part / R(-a)
     result = Composite({0: 1/a})
     power = Composite({0: 1})
@@ -929,7 +977,10 @@ def atan(x, terms=15):
     a = x.st()
     one_plus_x2 = R(1) + x * x
     deriv = _reciprocal(one_plus_x2, terms)
-    result = {0: math.atan(a)}
+    if not _has_infinitesimal_part(x):
+        return Composite({0: math.atan(a)})
+    _lead = math.atan(a)
+    result = {} if _lead == 0.0 else {0: _lead}   # R6, see ln
     for dim, coeff in deriv.c.items():
         new_dim = dim - 1
         if new_dim != 0:
@@ -949,7 +1000,10 @@ def asin(x, terms=15):
         raise ValueError("asin requires |standard part| < 1")
     inner = R(1) - x * x
     deriv = _reciprocal(sqrt(inner, terms), terms)
-    result = {0: math.asin(a)}
+    if not _has_infinitesimal_part(x):
+        return Composite({0: math.asin(a)})
+    _lead = math.asin(a)
+    result = {} if _lead == 0.0 else {0: _lead}   # R6, see ln
     for dim, coeff in deriv.c.items():
         new_dim = dim - 1
         if new_dim != 0:
@@ -1011,35 +1065,58 @@ def power(x, s, terms=15):
 # HIGH-LEVEL API: AUTOMATIC TRANSLATION
 # =============================================================================
 
+def _reject_pole(result, what: str, at: float):
+    """Raise if the seeded result carries a POLE, instead of quietly dropping it.
+
+    A seeded evaluation puts the regular part on dimensions <= 0 and any
+    singular part on dimensions > 0.  Every extractor here reads dimensions
+    <= 0 only, so f(x) = 1/(1-cos x) at 0 -- whose composite is correctly
+    |2|_+2 + |1/6|_0 + |1/120|_-2, the Laurent series 2/x^2 + 1/6 + x^2/120 --
+    came back as a clean-looking [1/6, 0, 1/120] with the double pole silently
+    discarded.  There is no Taylor series at a pole; returning the regular part
+    as if there were is the wrong answer, not a partial one.
+
+    Only NONZERO positive coefficients count.  An expressed zero up there is
+    legitimate and must not trip this: INF - INF = |0|_+1 by the canon rule that
+    a constructed dimension is retained.
+    """
+    poles = {d: c for d, c in result.coeffs_dict().items() if d > 0 and c != 0.0}
+    if poles:
+        order = max(poles)
+        raise ValueError(
+            f"{what} at {at}: f has a pole of order {order} here, so no Taylor "
+            f"series exists.  The singular part IS present in the composite, on "
+            f"dimensions {sorted(poles)} (coefficients "
+            f"{[poles[d] for d in sorted(poles)]}); these extractors read "
+            f"dimensions <= 0 only.  Read the full Laurent series off the "
+            f"seeded result directly, or expand about a regular point."
+        )
+
+
 def derivative(f: Callable, at: float, terms: int = 12) -> float:
     """Compute f'(at) automatically."""
     x = _seeded(at)
     result = f(x)
+    _reject_pole(result, "derivative", at)
     return result.d(1)
 
 
 def nth_derivative(f: Callable, n: int, at: float, terms: int = 12) -> float:
     """Compute f^(n)(at) - the nth derivative at a point."""
-    old_min = _min_terms[0]
-    _min_terms[0] = max(terms, n + 2)
-    try:
+    with _derivative_scope(n, terms):
         x = _seeded(at)
         result = f(x)
+        _reject_pole(result, "nth_derivative", at)
         return result.d(n)
-    finally:
-        _min_terms[0] = old_min
 
 
 def all_derivatives(f: Callable, at: float, up_to: int = 5, terms: int = 12) -> List[float]:
     """Compute [f(at), f'(at), f''(at), ...] up to nth derivative."""
-    old_min = _min_terms[0]
-    _min_terms[0] = max(terms, up_to + 2)
-    try:
+    with _derivative_scope(up_to, terms):
         x = _seeded(at)
         result = f(x)
+        _reject_pole(result, "all_derivatives", at)
         return [result.st()] + [result.d(n) for n in range(1, up_to + 1)]
-    finally:
-        _min_terms[0] = old_min
 
 
 def limit(f: Callable, as_x_to: float, terms: int = 12,
@@ -1230,7 +1307,7 @@ def _limit_extrapolate(f, as_x_to, dir, terms, n_probes=6):
                 return taylor_candidates[-1]
 
         # Strategy 2: raw values converging (for cases like x^x where
-        # Taylor overflows, or sqrt(x) where Taylor radius is too small)
+        # Taylor overflows, or sqrt(x) where Taylor radius is too small).
         if len(value_candidates) >= 3:
             v = value_candidates
             d1 = abs(v[-1] - v[-2])
@@ -1309,10 +1386,16 @@ def limit_left(f: Callable, as_x_to: float, terms: int = 12) -> float:
 
 
 def taylor_coefficients(f: Callable, at: float, up_to: int = 5, terms: int = 12) -> List[float]:
-    """Get Taylor series coefficients of f around 'at'."""
-    x = _seeded(at)
-    result = f(x)
-    return [result.coeff(-n) for n in range(up_to + 1)]
+    """Get Taylor series coefficients c_n = f^(n)(at)/n! of f around 'at'.
+
+    Was missing the depth scope the other extractors have, so a high `up_to`
+    quietly read zeros off dimensions the transcendentals never expanded to.
+    """
+    with _derivative_scope(up_to, terms):
+        x = _seeded(at)
+        result = f(x)
+        _reject_pole(result, "taylor_coefficients", at)
+        return [result.coeff(-n) for n in range(up_to + 1)]
 
 
 # =============================================================================

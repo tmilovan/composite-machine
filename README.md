@@ -194,15 +194,35 @@ Python 3.7+. NumPy is optional (used for FFT-accelerated multiplication).
 ## Testing
 
 ```bash
-python test_composite.py                # ~105 tests — core + calculus + algebra
-python composite_stress_test.py         # 20 hard problems (limits, derivatives, integrals)
-python composite_hard_edges.py          # 20 hard edge cases (3rd/4th order, deep chains)
-python any_test_file.py                 # evergrowing test suite
+pip install -e .          # so `import composite` resolves to this checkout
+python -m pytest tests/   # everything
 ```
 
-168 tests, all passing.
+Or run a single suite directly:
 
-Covers: paper theorems, algebraic properties, derivatives (orders 1–6, chain rule, Leibniz), limits (indeterminate forms, infinity), integration (definite, improper, adaptive), zero/infinity handling, transcendentals, polynomial division, multivariable ops, and cross-checks against numerical differentiation and Python's math module.
+```bash
+PYTHONPATH=. python tests/test_standalone.py               # core + paper theorems
+PYTHONPATH=. python tests/test_limits.py                   # limits, all classes
+PYTHONPATH=. python tests/test_integration_comprehensive.py # every integral form
+```
+
+`PYTHONPATH=.` matters: running a test as a bare script puts `tests/` on the
+import path rather than the repo root, so `composite` resolves to whatever is
+installed instead of the working copy.
+
+**509 tests across nine suites, all passing.**
+
+| suite | tests | covers |
+|---|---|---|
+| `test_standalone.py` | 167 | paper theorems T1–T8, algebra, derivatives, limits, zero division |
+| `test_limits.py` | 105 | indeterminate forms, oscillatory, at infinity, directional, domain errors |
+| `test_multivar_disprove.py` | 68 | multivariable vs single-variable, Black-Scholes Greeks |
+| `test_integration_comprehensive.py` | 54 | definite, improper, triple, line, surface |
+| `test_multivar_extended.py` | 50 | gradients, Hessians, Jacobians, complex analysis, ODEs |
+| `test_composite_vector.py` | 25 | vector calculus |
+| `test_stress.py` | 20 | hard limits, derivatives, integrals |
+| `test_stress_hard_edge.py` | 20 | 3rd/4th order, deep composition chains |
+| `turing_completeness/` | 3 files | Turing-completeness experiments |
 
 ---
 
@@ -221,6 +241,8 @@ Milovan, T. (2026). *Provenance-Preserving Arithmetic: A Unified Framework for A
 - [**Implementation Guide**](docs/Implementation%20Guide.md) - How it works internally
 - [**Examples**](docs/Examples.md) - Code snippets for common tasks
 - [**Roadmap (DRAFT)**](docs/Roadmap%20(DRAFT).md) - What's next
+- [**Zero Rules v2**](docs/Zero%20Rules%20v2%20%E2%80%94%20Formal%20Specification%20(DRAFT).md) - What a zero coefficient means, and how it behaves
+- [**Changelog**](CHANGELOG.md) - What changed and why
 
 ---
 

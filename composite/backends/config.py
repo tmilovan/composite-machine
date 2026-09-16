@@ -3,6 +3,8 @@
 # Author: Toni Milovan <tmilovan@fwd.hr>
 # License: AGPL-3.0
 
+import sys as _sys
+
 from .sparse_dense_backend import SparseDenseBackend
 from .dict_backend import DictBackend
 
@@ -15,10 +17,17 @@ def get_backend():
 def set_backend(backend):
     global _active_backend
     _active_backend = backend
+    # ZERO / INF / h are module constants built at import time; rebuild them so
+    # they follow the active backend.  Imported lazily to avoid a cycle, and
+    # skipped if composite_lib has not been imported yet.
+    _cl = _sys.modules.get("composite.composite_lib")
+    if _cl is not None:
+        _cl._refresh_constants()
 
-def use_sparse_dense(gap_threshold=64, zero_tol=0.0):
+def use_sparse_dense(gap_threshold=64, zero_tol=0.0, allow_fft=False):
+    """allow_fft=True trades exactness (~1e-13) for speed on large operands."""
     set_backend(SparseDenseBackend(gap_threshold=gap_threshold,
-                                    zero_tol=zero_tol))
+                                    zero_tol=zero_tol, allow_fft=allow_fft))
 
 def use_dict():
     set_backend(DictBackend())

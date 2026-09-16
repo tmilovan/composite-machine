@@ -26,6 +26,7 @@ Author: Toni Milovan
 """
 
 import math
+import sys
 from composite.composite_vector import (
     triple_integral,
     line_integral_scalar,
@@ -429,3 +430,5 @@ if __name__ == "__main__":
         print("\n🎉 All tests passed!")
     else:
         print(f"\n⚠️  {total_tests - total_passed} test(s) failed")
+
+    sys.exit(0 if total_passed == total_tests else 1)
