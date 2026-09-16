@@ -22,6 +22,7 @@ SUITES = [
     "tests/test_stress_hard_edge.py",
     "tests/test_integration_comprehensive.py",
     "tests/test_composite_vector.py",
+    "tests/test_dimension_scales.py",
     "tests/test_multivar_extended.py",
     "tests/turing_completeness/test_turing_completeness.py",
     "tests/turing_completeness/test_indicator_polinomial_step_test.py",

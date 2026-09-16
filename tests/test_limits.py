@@ -461,23 +461,16 @@ def test_domain_errors():
         "lim(x\u21920+) x\u00b7sqrt(x) = 0",
         _safe_limit(lambda x: x*sqrt(x), 0, dir='+'), 0.0, tol=1e-6)
 
-    # The true limit is 0, but it is not reachable and must not be faked.
-    # ln of an infinitesimal is ln(c) + d*ln(h), and ln(h) needs a dimension
-    # between 0 and every positive power -- log x outgrows any constant and is
-    # outgrown by x^e for every e>0 -- which no float can represent.  ln used to
-    # drop that term and return ln(c), which made ln(h), ln(h^2) and ln(sqrt(h))
-    # the same object and gave WRONG answers wherever two logs met:
-    #     lim(x->0+) ln(x)/ln(x*x)      returned 1.0   (is 0.5)
-    #     lim(x->0+) ln(x)/ln(sqrt(x))  returned 1.0   (is 2.0)
-    #     lim(x->0+) 1/ln(x)            returned |1|_1 (is 0.0, inverted)
-    # This case came out right only because sqrt(x) vanishes and kills the
-    # error -- the same accident that keeps x*ln(x) and x^x working.  It now
-    # raises instead.  fallback=True does not recover it either: integral
-    # averaging gives -0.066 against a 1e-6 tolerance.
-    # Restore the assert_eq above once the log scale is representable.
-    suite.assert_raises(
-        "lim(x\u21920+) sqrt(x)\u00b7ln(x) raises (log scale not representable)",
-        LimitUndecidableError, limit, lambda x: sqrt(x)*ln(x), 0, dir='+')
+    # Answerable again.  ln of an infinitesimal is ln(c) + d*ln(h), and ln(h)
+    # needs a dimension between 0 and every positive power -- no float sits
+    # there.  With scalar dimensions ln dropped that term, which made ln(h),
+    # ln(h^2) and ln(sqrt(h)) the same object and gave wrong ratios; this case
+    # only looked right because sqrt(x) vanishes and killed the error.  The
+    # log scale (composite_lib.LOG_SCALE, on by default) represents it
+    # properly, so the value is now computed rather than compensated for.
+    suite.assert_eq(
+        "lim(x\u21920+) sqrt(x)\u00b7ln(x) = 0",
+        _safe_limit(lambda x: sqrt(x)*ln(x), 0, dir='+'), 0.0, tol=1e-6)
 
     suite.assert_eq(
         "lim(x\u21920+) x\u00b2\u00b7ln(x) = 0",

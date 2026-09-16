@@ -102,8 +102,19 @@ def _operands(a, b):
     are not -- then applies R1 to each.
     """
     if type(a._data) is not type(b._data):
-        dims, vals = b._backend.to_arrays(b._data)
-        b = Composite._wrap(a._backend.create_from_terms(dims, vals))
+        # Convert toward the RICHER representation.  A vector-dimension backend
+        # can hold a scalar dimension d as (d, 0, ...); the reverse loses the
+        # scale components, and numpy cannot even hold the tuples.  So when the
+        # two differ, the vector side wins regardless of which operand it is.
+        if getattr(b._backend, "VECTOR_DIMS", False) and not getattr(
+                a._backend, "VECTOR_DIMS", False):
+            dims, vals = a._backend.to_arrays(a._data)
+            a = Composite._wrap(b._backend.create_from_terms(dims, vals),
+                                b._backend, demote=False)
+        else:
+            dims, vals = b._backend.to_arrays(b._data)
+            b = Composite._wrap(a._backend.create_from_terms(dims, vals),
+                                a._backend, demote=False)
     return _r1(a), _r1(b)
 
 
@@ -122,7 +133,8 @@ def _r1(c):
     vals = vals.copy()
     dims[0] = dims[0] - 1          # to_arrays is sorted ascending: [0] is lowest
     vals[0] = 1.0
-    return Composite._wrap(c._backend.create_from_terms(dims, vals))
+    return Composite._wrap(c._backend.create_from_terms(dims, vals),
+                           c._backend, demote=False)
 
 
 class Composite:
@@ -167,7 +179,15 @@ class Composite:
             # Previously: {k: v for k, v in ... if v != 0} stripped them
             if coefficients:
                 sorted_dims = sorted(coefficients.keys())
-                dims = np.array(sorted_dims, dtype=DIM_DTYPE)
+                if sorted_dims and isinstance(sorted_dims[0], tuple):
+                    # VECTOR dimensions (power, log, ...).  np.array would turn
+                    # these into a 2-D float grid and the rows are unhashable;
+                    # an object array keeps them 1-D and keeps the tuples whole.
+                    dims = np.empty(len(sorted_dims), dtype=object)
+                    for _i, _d in enumerate(sorted_dims):
+                        dims[_i] = _d
+                else:
+                    dims = np.array(sorted_dims, dtype=DIM_DTYPE)
                 vals = np.array([coefficients[d] for d in sorted_dims], dtype=np.float64)
                 self._data = self._backend.create_from_terms(dims, vals)
             else:
@@ -182,10 +202,19 @@ class Composite:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _wrap(cls, data):
-        """Create a Composite directly from backend data. No dict parsing."""
+    def _wrap(cls, data, backend=None, demote=True):
+        """Create a Composite directly from backend data. No dict parsing.
+
+        `backend` must be given whenever the data was built by a backend that
+        is not the active one -- otherwise the object carries that backend's
+        data under the global backend's methods, and the next call reaches for
+        an attribute the data does not have.
+        """
+        be = backend if backend is not None else get_backend()
+        if demote and be.VECTOR_DIMS:
+            data, be = _demote(data, be)
         obj = cls.__new__(cls)
-        obj._backend = get_backend()
+        obj._backend = be
         obj._data = data
         return obj
 
@@ -246,6 +275,10 @@ class Composite:
 
         sub = "₀₁₂₃₄₅₆₇₈₉"
         def fmt_dim(n):
+            if isinstance(n, tuple):
+                # Vector dimension over the declared basis: no subscript glyphs,
+                # so render it plainly rather than trying to coerce it to a float.
+                return "_(" + ",".join(f"{c:g}" for c in n) + ")"
             f = float(n)
             if not f.is_integer():
                 # A fractional dimension -- sqrt of an odd dimension produces
@@ -334,7 +367,7 @@ class Composite:
         if not isinstance(other, Composite):
             return NotImplemented
         a, b = _operands(self, other)
-        return Composite._wrap(a._backend.add(a._data, b._data))
+        return Composite._wrap(a._backend.add(a._data, b._data), a._backend)
 
     def __radd__(self, other):
         return self.__add__(other)
@@ -351,14 +384,15 @@ class Composite:
         if not isinstance(other, Composite):
             return NotImplemented
         a, b = _operands(self, other)
-        return Composite._wrap(a._backend.add(a._data, a._backend.negate(b._data)))
+        return Composite._wrap(a._backend.add(a._data, a._backend.negate(b._data)),
+                               a._backend)
 
     def __rsub__(self, other):
         left = Composite({0: 0.0}) if other == 0 else Composite(float(other))
         return left.__sub__(self)
 
     def __neg__(self):
-        return Composite._wrap(self._backend.negate(self._data))
+        return Composite._wrap(self._backend.negate(self._data), self._backend)
 
     def __mul__(self, other):
         """Multiplication: dimensions add, coefficients multiply.
@@ -372,7 +406,8 @@ class Composite:
                 other = Composite({0: 0.0})
             else:
                 return Composite._wrap(
-                    self._backend.scalar_multiply(self._data, float(other)))
+                    self._backend.scalar_multiply(self._data, float(other)),
+                    self._backend)
         if not isinstance(other, Composite):
             return NotImplemented
         if _is_unit(other):
@@ -381,7 +416,8 @@ class Composite:
             return other
         a, b = _operands(self, other)
         return Composite._wrap(
-            _truncate_dims(a._backend, a._backend.convolve(a._data, b._data)))
+            _truncate_dims(a._backend, a._backend.convolve(a._data, b._data)),
+            a._backend)
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -414,14 +450,22 @@ class Composite:
         # Single-term divisor -> a pure dimension shift.  Every term of the
         # dividend moves together, zeros included: they shift and stay zero.
         if len(b_dims) == 1:
-            div_dim = float(b_dims[0])
+            _bd = b_dims[0]
+            div_dim = _bd if isinstance(_bd, tuple) else float(_bd)
             div_coeff = b._backend.read_dim(b._data, div_dim)
             my_dims, my_vals = a._backend.to_arrays(a._data)
+            if isinstance(div_dim, tuple):
+                # Vector dimensions subtract componentwise; object arrays do not
+                # broadcast `-`, so shift each one explicitly.
+                shifted = [tuple(x - y for x, y in zip(d, div_dim)) for d in my_dims]
+            else:
+                shifted = my_dims - div_dim
             return Composite._wrap(
-                a._backend.create_from_terms(my_dims - div_dim, my_vals / div_coeff))
+                a._backend.create_from_terms(shifted, my_vals / div_coeff),
+                a._backend)
 
         result = a._backend.deconvolve(a._data, b._data)
-        return Composite._wrap(_truncate_dims(a._backend, result))
+        return Composite._wrap(_truncate_dims(a._backend, result), a._backend)
 
     def __rtruediv__(self, other):
         # other / self -- the operands are reversed, so no unit-divisor
@@ -483,7 +527,9 @@ class Composite:
     def max_positive_dim(self):
         """Return the highest positive dimension, or None if none exist."""
         dims, vals = self._backend.to_arrays(self._data)
-        pos = [dim_cast(d) for d, v in zip(dims, vals) if d > 0 and v != 0]
+        # A vector dimension is positive when its POWER component is.
+        _p = lambda d: d[0] if isinstance(d, tuple) else d
+        pos = [dim_cast(d) for d, v in zip(dims, vals) if _p(d) > 0 and v != 0]
         return max(pos) if pos else None
 
     def coeffs_dict(self):
@@ -498,11 +544,9 @@ class Composite:
     def eval_taylor(self, h_value):
         """Evaluate Taylor polynomial by substituting h → h_value."""
         dims, vals = self._backend.to_arrays(self._data)
-        mask = dims < 0
-        neg_dims = dims[mask]
-        neg_vals = vals[mask]
-        return sum(float(v) * h_value ** (-float(d))
-                   for d, v in zip(neg_dims, neg_vals))
+        _p = lambda d: d[0] if isinstance(d, tuple) else d
+        return sum(float(v) * h_value ** (-float(_p(d)))
+                   for d, v in zip(dims, vals) if _p(d) < 0)
 
     def integrate_step(self, dx):
         """Integrate over interval [x, x+dx]."""
@@ -564,8 +608,9 @@ def _compare(a, b):
         return 0
 
     for dim in reversed(all_dims):
-        ca = a._backend.read_dim(a._data, float(dim))
-        cb = b._backend.read_dim(b._data, float(dim))
+        _d = dim if isinstance(dim, tuple) else float(dim)
+        ca = a._backend.read_dim(a._data, _d)
+        cb = b._backend.read_dim(b._data, _d)
         if math.isnan(ca) or math.isnan(cb):
             return float('nan')
         if ca < cb:
@@ -629,8 +674,19 @@ def _truncate_dims(backend, data):
     if backend.term_count(data) <= MAX_ACTIVE_DIMS:
         return data
     dims, vals = backend.to_arrays(data)
-    # Sort by distance from dim 0, keep closest
-    order = np.argsort(np.abs(dims))
+    # Sort by distance from dim 0, keep closest.
+    if dims.dtype == object:
+        # VECTOR dimensions: np.abs cannot take a tuple.  Rank by magnitude in
+        # dominance order -- the power component first, then the log -- so the
+        # terms kept are the ones nearest dimension zero in the same sense the
+        # comparison uses.  Without this the whole truncation path raised
+        # TypeError the moment a log-scale composite grew past the cap, which
+        # is only reachable at the DEFAULT cap and so went unseen while every
+        # standalone check ran with MAX_ACTIVE_DIMS raised.
+        order = np.array(sorted(range(len(dims)),
+                                key=lambda i: tuple(abs(c) for c in dims[i])))
+    else:
+        order = np.argsort(np.abs(dims))
     keep = order[:MAX_ACTIVE_DIMS]
     keep.sort()  # restore dimension order
     return backend.create_from_terms(dims[keep], vals[keep])
@@ -719,6 +775,129 @@ def _bounded_at_inf(func, x):
         return R(func(sign * float('inf')))
     except (ValueError, OverflowError):
         return Composite({})
+
+
+# =============================================================================
+# LOG SCALE  (opt-in)
+# =============================================================================
+#
+# ln of an infinitesimal is  ln(c) + d*ln(h), and ln(h) needs a dimension that
+# is positive but smaller than EVERY power -- log x outgrows any constant and is
+# outgrown by x^e for every e > 0.  No float sits there, so with scalar
+# dimensions the d*ln(h) term has nowhere to go and ln() raises.
+#
+# A VECTOR dimension (power, log) does have room: the log component is the minor
+# one, so lexicographic comparison puts any log term below any power term, which
+# is exactly the dominance order.  Then
+#
+#     ln(|c|_d)      =  |ln c|_(0,0) + |d|_(0,1)
+#     exp(|k|_(0,1)) =  |1|_(k,0)
+#
+# It is ON by default.  ln of an infinitesimal is a question with an answer,
+# and refusing it -- or worse, approximating it through the numeric fallback,
+# which left lim(x->0+) x^x at 1.6e-6 short of 1 -- is the wrong default when
+# the exact answer is available.  Escalation costs nothing until it happens:
+# vector dimensions live on their own dict backend, a composite only moves
+# there when a log term actually appears, and it demotes back the moment the
+# log components cancel.  The scalar fast path is never touched.
+#
+# Set LOG_SCALE = False to disable it, in which case ln of an infinitesimal
+# raises rather than silently dropping the scale (which is what it used to do,
+# and which produced wrong answers: ln(h), ln(h^2) and ln(sqrt(h)) all returned
+# the same object).
+#
+# Known bound: ONE level of log.  ln(ln(x)) needs a third basis component,
+# because ln(d*ln(h)) = ln(d) + ln(ln(h)) is a new scale.
+LOG_SCALE = True
+
+_VEC_BACKEND = [None]
+
+
+def _vector_backend():
+    if _VEC_BACKEND[0] is None:
+        from composite.backends.vector_dim_backend import VectorDimBackend
+        _VEC_BACKEND[0] = VectorDimBackend()
+    return _VEC_BACKEND[0]
+
+
+def _unit_dim(x):
+    """The dimension meaning 1 on x's backend: 0, or (0, 0, ...) for vectors."""
+    if getattr(x._backend, "VECTOR_DIMS", False):
+        from composite.backends.vector_dim_backend import WIDTH
+        return (0,) * WIDTH
+    return 0
+
+
+def _like(x, terms):
+    """Build a composite on the SAME backend as `x`, not the active one.
+
+    The transcendental series construct intermediates with Composite({...}),
+    which binds whatever backend is globally active.  When the argument carries
+    vector dimensions that backend cannot hold the tuples, and numpy raises
+    "setting an array element with a sequence".
+    """
+    be = x._backend
+    return Composite._wrap(
+        be.create_from_terms(list(terms.keys()), list(terms.values())),
+        be, demote=False)
+
+
+def _vec_composite(terms):
+    """Build a vector-dimension composite whatever the active backend is.
+
+    Goes through _wrap so the result demotes when it turns out to carry nothing
+    but powers -- exp(ln(h)) is |1|_(-1,0), which is just h and belongs back on
+    the scalar path.  A term with a real log component will not demote.
+    """
+    be = _vector_backend()
+    return Composite._wrap(
+        be.create_from_terms(list(terms.keys()), list(terms.values())), be)
+
+
+def _demote(data, be):
+    """Return a vector-dimension composite to the scalar path when it can.
+
+    A composite keeps vector dimensions only while something other than the
+    power component is non-zero.  Without this, a single ln() anywhere would
+    leave every value downstream of it on the dict backend for good, and the
+    whole point of the vector representation is that you pay for it only while
+    you are using it.  Returns (data, backend), unchanged when it cannot demote.
+    """
+    dims, vals = be.to_arrays(data)
+    for d in dims:
+        if isinstance(d, tuple) and any(c != 0 for c in d[1:]):
+            return data, be
+    active = get_backend()
+    if active.VECTOR_DIMS:
+        return data, be                      # nowhere scalar to go
+    flat = [d[0] if isinstance(d, tuple) else d for d in dims]
+    return active.create_from_terms(flat, vals), active
+
+
+def _log_part(x):
+    """Split the INFINITE log terms off an exponent.  Returns (logs, rest).
+
+    exp needs the split because an infinite argument changes scale while a
+    vanishing one is just a Taylor series.  A vector dimension (p, l) is
+    infinite exactly when it is lexicographically above zero -- p > 0, or
+    p == 0 and l > 0 -- which is the same dominance order the comparison uses.
+
+    So a MIXED term like (-1, 1) -- that is h*log(h) -- is infinitesimal, not
+    infinite: the power dominates the log.  It belongs in `rest` and expands
+    ordinarily.  Treating it as unrepresentable is what left x^x falling back
+    to numeric sampling and landing 1.6e-6 short of 1.
+    """
+    dims, vals = x._backend.to_arrays(x._data)
+    logs, rest = {}, {}
+    for d, v in zip(dims, vals):
+        if isinstance(d, tuple) and len(d) > 1:
+            p, l = d[0], d[1]
+            infinite = p > 0 or (p == 0 and l > 0)
+            if infinite and p == 0:
+                logs[d] = v                     # k * ln(1/h): changes scale
+                continue
+        rest[d] = v
+    return logs, rest
 
 
 def _has_infinitesimal_part(x):
@@ -818,6 +997,29 @@ def exp(x, terms=15):
     if _is_nothing(x):
         return Composite({})
 
+    if LOG_SCALE and getattr(x._backend, "VECTOR_DIMS", False):
+        _logs, _rest = _log_part(x)
+        if _logs:
+            # exp(k * ln(1/h)) = (1/h)^k = h^(-k), which sits at power +k.
+            out = None
+            for (_, k), v in _logs.items():
+                t = _vec_composite({(v, 0): 1.0}) if k == 1 else None
+                if t is None:
+                    raise ValueError(
+                        f"exp of a log term at level {k} needs a deeper basis "
+                        f"than {('power', 'log')}.")
+                out = t if out is None else out * t
+            if _rest:
+                # A remainder that is only the standard part needs no series --
+                # and recursing would rebuild it through the ACTIVE backend,
+                # which cannot hold vector dimensions.
+                if set(_rest) <= {(0, 0)}:
+                    out = out * _vec_composite(
+                        {(0, 0): math.exp(_rest.get((0, 0), 0.0))})
+                else:
+                    out = out * exp(_vec_composite(_rest), terms)
+            return out
+
     a = x.st()
     # 7.1: a term exists iff its coefficient is nonzero -- exactly zero,
     # not 'small'.  A tolerance here silently discards real content.
@@ -827,10 +1029,11 @@ def exp(x, terms=15):
         return Composite({0: math.exp(a)})
 
     base = math.exp(a)
-    h = Composite(non_zero)
+    h = _like(x, non_zero)
+    one = _like(x, {_unit_dim(x): 1.0})
 
-    exp_h = Composite({0: 1.0})
-    h_power = Composite({0: 1.0})
+    exp_h = one
+    h_power = one
     for n in range(1, terms):
         h_power = h_power * h
         exp_h = exp_h + (1.0 / math.factorial(n)) * h_power
@@ -861,6 +1064,25 @@ def ln(x, terms=15):
         # Check for positive infinitesimal: st=0 but positive coeff
         # at a negative dimension (e.g. ZERO = |1|_{-1})
         coeffs = x.c
+        if LOG_SCALE:
+            # ln(|c|_d) = ln(c) + d*ln(h) holds for ANY non-zero d, so an
+            # INFINITY is the same rule with the sign the other way round:
+            # ln(1/h) = -ln(h) = +L.  Handled here because the branch below
+            # only looks at negative dimensions.
+            _pos = {d: c for d, c in coeffs.items() if d > 0 and c != 0.0}
+            if _pos:
+                _pd = max(_pos)
+                _pc = _pos[_pd]
+                if _pc > 0:
+                    _t = {(0, 1): float(_pd)}
+                    _lc = math.log(_pc)
+                    if _lc != 0.0:
+                        _t[(0, 0)] = _lc
+                    _lead = _vec_composite(_t)
+                    _rest = x / Composite({_pd: _pc})
+                    if _is_unit(_rest):
+                        return _lead
+                    return _lead + ln(_rest, terms)
         neg_dims = {d: c for d, c in coeffs.items() if d < 0}
         if neg_dims:
             min_dim = min(neg_dims.keys())
@@ -879,6 +1101,18 @@ def ln(x, terms=15):
                 #   lim(x->0+) 1/ln(x)            gave |1|_1 (is 0.0, inverted)
                 # It is right only when the log is multiplied by something that
                 # vanishes, which is why x*ln(x) and x^x survived it.
+                if LOG_SCALE:
+                    # ln(x) = ln(lead) + ln(x/lead), and x/lead has standard
+                    # part 1 so the second term takes the ordinary Taylor path.
+                    _lead_terms = {(0, 1): float(min_dim)}
+                    _lc = math.log(coeff)
+                    if _lc != 0.0:
+                        _lead_terms[(0, 0)] = _lc
+                    _lead = _vec_composite(_lead_terms)
+                    _rest = x / Composite({min_dim: coeff})
+                    if _is_unit(_rest):
+                        return _lead
+                    return _lead + ln(_rest, terms)
                 raise ValueError(
                     f"ln(|{coeff}|_{min_dim}): the log SCALE cannot be "
                     f"represented. ln of an infinitesimal is ln({coeff}) + "
@@ -1586,7 +1820,28 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
         t_mid = (a_t + b_t) / 2
         try:
             probe = curve(_seeded(t_mid))
-            composite_curve = isinstance(probe[0], Composite) if isinstance(probe, (list, tuple)) else isinstance(probe, Composite)
+            if isinstance(probe, (list, tuple)):
+                # A non-composite component is safe to freeze as a constant
+                # ONLY if it is genuinely constant.  One probe cannot tell
+                # "0" from "math.cos(t)" -- both come back as plain floats --
+                # so probe a second t and see which ones move.
+                #
+                # Judging by probe[0] alone sent [0, t] down the 2000-step
+                # finite-difference fallback because its FIRST component was
+                # constant.  Accepting ANY composite component instead froze
+                # math.cos(t)/math.sin(t) at their midpoint values and made the
+                # helix arc length come out 2*pi instead of 2*pi*sqrt(2): the
+                # z-component was the only one left with a tangent.
+                other = curve(_seeded(t_mid + 0.25 * (b_t - a_t) + 1e-3))
+                composite_curve = True
+                for pa, pb in zip(probe, other):
+                    if isinstance(pa, Composite):
+                        continue
+                    if float(pa) != float(pb):
+                        composite_curve = False      # varies, but opaque
+                        break
+            else:
+                composite_curve = isinstance(probe, Composite)
         except (TypeError, AttributeError):
             composite_curve = False
 
@@ -1601,7 +1856,24 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
                     F_comp = [comp(*pos_comp) for comp in f]
                     F_comp = [Composite({0: float(fc)}) if isinstance(fc, (int, float)) else fc
                               for fc in F_comp]
-                    return sum(fc * tv for fc, tv in zip(F_comp, tangent))
+                    # A component of the curve that does not move contributes
+                    # nothing to F.dr, so skip it rather than multiply by its
+                    # zero tangent.  Both operands are then zeros, R1 converts
+                    # each, and |0|_0 * 0.0 comes back as |1|_-2 -- an
+                    # infinitesimal injected into the integrand.  The standard
+                    # part survives that, but integrate_adaptive builds its
+                    # antiderivative from the Taylor coefficients, so it
+                    # integrates a series whose derivatives are fabricated:
+                    # work of F=[1,0] along [t,0] returned 3.140625, not 3.
+                    # Python's sum() is avoided for the same reason -- it
+                    # starts from the int 0, which is another zero operand.
+                    acc = None
+                    for fc, tv in zip(F_comp, tangent):
+                        if tv == 0.0:
+                            continue
+                        term = fc * tv
+                        acc = term if acc is None else acc + term
+                    return acc if acc is not None else Composite({0: 0.0})
                 else:
                     f_comp = f(*pos_comp)
                     if isinstance(f_comp, (int, float)):

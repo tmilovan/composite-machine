@@ -116,23 +116,23 @@ def test_basic_definite(t: TestRunner):
     print("="*65)
 
     t.check("I01 ∫₀¹ x² dx = 1/3",
-            integrate(lambda x: x**2, 0, 1), 1/3)
+            integrate(lambda x: x**2, 0, 1), 1/3, tol=1e-12)
 
     t.check("I02 ∫₀¹ eˣ dx = e−1",
-            integrate(lambda x: exp(x), 0, 1), e - 1)
+            integrate(lambda x: exp(x), 0, 1), e - 1, tol=1e-12)
 
     t.check("I03 ∫₀π sin x dx = 2",
-            integrate(lambda x: sin(x), 0, pi), 2.0)
+            integrate(lambda x: sin(x), 0, pi), 2.0, tol=1e-12)
 
     t.check("I04 ∫₁² e^(−x²) dx ≈ 0.13526",
-            integrate(lambda x: exp(-(x*x)), 1, 2), 0.13525725794)
+            integrate(lambda x: exp(-(x*x)), 1, 2), 0.13525725794, tol=1e-9)
 
     t.check("I05 ∫₀¹ x·sin x dx = sin1−cos1",
             integrate(lambda x: x*sin(x), 0, 1),
-            math.sin(1) - math.cos(1))
+            math.sin(1) - math.cos(1), tol=1e-12)
 
     t.check("I06 ∫₀¹ cosh x dx = sinh 1",
-            integrate(lambda x: cosh(x), 0, 1), math.sinh(1))
+            integrate(lambda x: cosh(x), 0, 1), math.sinh(1), tol=1e-12)
 
 
 # =============================================================================
@@ -145,29 +145,29 @@ def test_hard_definite(t: TestRunner):
     print("="*65)
 
     t.check("I07 ∫₀¹ x²·eˣ dx = e−2",
-            integrate(lambda x: x**2 * exp(x), 0, 1), e - 2)
+            integrate(lambda x: x**2 * exp(x), 0, 1), e - 2, tol=1e-12)
 
     t.check("I08 ∫₀^(π/2) sin²x dx = π/4",
-            integrate(lambda x: sin(x) * sin(x), 0, pi/2), pi/4)
+            integrate(lambda x: sin(x) * sin(x), 0, pi/2), pi/4, tol=1e-12)
 
     t.check("I09 ∫₀^(π/2) sin³x dx = 2/3",
-            integrate(lambda x: sin(x)**3, 0, pi/2), 2/3)
+            integrate(lambda x: sin(x)**3, 0, pi/2), 2/3, tol=1e-12)
 
     t.check("I10 ∫₀¹ e^(−x)·cos(x) dx",
             integrate(lambda x: exp(-x) * cos(x), 0, 1),
-            (1.0 + math.exp(-1)*(math.sin(1) - math.cos(1))) / 2)
+            (1.0 + math.exp(-1)*(math.sin(1) - math.cos(1))) / 2, tol=1e-12)
 
     t.check("I11 ∫₀¹ x·e^(−x²) dx = (1−e⁻¹)/2",
             integrate(lambda x: x * exp(-(x*x)), 0, 1),
-            (1 - math.exp(-1)) / 2)
+            (1 - math.exp(-1)) / 2, tol=1e-12)
 
     t.check("I12 ∫₀¹ x²·cos(x) dx",
             integrate(lambda x: x**2 * cos(x), 0, 1),
-            -math.sin(1) + 2*math.cos(1))
+            -math.sin(1) + 2*math.cos(1), tol=1e-12)
 
     t.check("I13 ∫₀² 1/(1+x²) dx = atan(2)",
             integrate(lambda x: R(1) / (R(1) + x*x), 0, 2),
-            math.atan(2))
+            math.atan(2), tol=1e-12)
 
 
 # =============================================================================
@@ -183,23 +183,23 @@ def test_additional_definite(t: TestRunner):
             integrate(lambda x: sqrt(x), 0.001, 1), 2/3, tol=1e-3)
 
     t.check("I15 ∫₀¹ x³ dx = 1/4",
-            integrate(lambda x: x**3, 0, 1), 0.25)
+            integrate(lambda x: x**3, 0, 1), 0.25, tol=1e-12)
 
     t.check("I16 ∫₀π cos²x dx = π/2",
-            integrate(lambda x: cos(x) * cos(x), 0, pi), pi/2)
+            integrate(lambda x: cos(x) * cos(x), 0, pi), pi/2, tol=1e-12)
 
     t.check("I17 ∫₀¹ 1/(1+x) dx = ln 2",
             integrate(lambda x: R(1) / (R(1) + x), 0, 1),
-            math.log(2))
+            math.log(2), tol=1e-12)
 
     t.check("I18 ∫₁ᵉ ln(x)/x dx = 1/2",
-            integrate(lambda x: ln(x) / x, 1, e), 0.5)
+            integrate(lambda x: ln(x) / x, 1, e), 0.5, tol=1e-12)
 
     t.check("I19 ∫₀¹ x·eˣ dx = 1",
-            integrate(lambda x: x * exp(x), 0, 1), 1.0)
+            integrate(lambda x: x * exp(x), 0, 1), 1.0, tol=1e-12)
 
     t.check("I20 ∫₀^(π/2) sin(x)·cos(x) dx = 1/2",
-            integrate(lambda x: sin(x) * cos(x), 0, pi/2), 0.5)
+            integrate(lambda x: sin(x) * cos(x), 0, pi/2), 0.5, tol=1e-12)
 
 
 # =============================================================================
@@ -226,20 +226,20 @@ def test_antiderivative_roundtrip(t: TestRunner):
     f1 = R(3) + h
     F1 = antiderivative(f1)
     f1_back = _derivative_of(F1)
-    t.check("A01 ∫x dx round-trip at x=3", f1_back.st(), f1.st())
+    t.check("A01 ∫x dx round-trip at x=3", f1_back.st(), f1.st(), tol=1e-12)
 
     x = R(2) + h
     f2 = x ** 2
     F2 = antiderivative(f2)
     f2_back = _derivative_of(F2)
-    t.check("A02 ∫x² dx round-trip at x=2", f2_back.st(), f2.st())
+    t.check("A02 ∫x² dx round-trip at x=2", f2_back.st(), f2.st(), tol=1e-12)
 
     f3 = x ** 3
     F3 = antiderivative(f3)
     f3_back = _derivative_of(F3)
-    t.check("A03 ∫x³ dx round-trip at x=2", f3_back.st(), f3.st())
+    t.check("A03 ∫x³ dx round-trip at x=2", f3_back.st(), f3.st(), tol=1e-12)
 
-    t.check("A04 ∞ × 0 = 1 (Riemann sum foundation)", (INF * ZERO).st(), 1.0)
+    t.check("A04 ∞ × 0 = 1 (Riemann sum foundation)", (INF * ZERO).st(), 1.0, tol=1e-12)
 
 
 # =============================================================================
@@ -253,23 +253,23 @@ def test_improper(t: TestRunner):
 
     t.check("IP01 ∫₀^∞ e⁻ˣ dx = 1",
             integrate(lambda x: exp(-x), 0, float('inf')),
-            1.0, tol=1e-3)
+            1.0, tol=1e-12)
 
     t.check("IP02 ∫₀^∞ e⁻ˣ² dx = √π/2",
             integrate(lambda x: exp(-(x * x)), 0, float('inf')),
-            math.sqrt(pi)/2, tol=1e-3)
+            math.sqrt(pi)/2, tol=1e-6)
 
     t.check("IP03 ∫₀^∞ x·e⁻ˣ dx = 1 (Γ(2))",
             integrate(lambda x: x * exp(-x), 0, float('inf')),
-            1.0, tol=1e-3)
+            1.0, tol=1e-12)
 
     t.check("IP04 ∫₀^∞ x²·e⁻ˣ dx = 2 (Γ(3))",
             integrate(lambda x: x**2 * exp(-x), 0, float('inf')),
-            2.0, tol=1e-2)
+            2.0, tol=1e-10)
 
     t.check("IP05 ∫₋∞^∞ e⁻ˣ² dx = √π (Gaussian)",
             integrate(lambda x: exp(-(x * x)), float('-inf'), float('inf')),
-            math.sqrt(pi), tol=1e-2)
+            math.sqrt(pi), tol=1e-6)
 
 
 # =============================================================================
@@ -283,19 +283,19 @@ def test_triple(t: TestRunner):
 
     t.check("T01 Unit cube volume = 1",
             integrate(lambda x, y, z: x*0 + 1, (0,1), (0,1), (0,1)),
-            1.0, tol=1e-3)
+            1.0, tol=1e-10)
 
     t.check("T02 ∭ x dV over [0,1]³ = 1/2",
             integrate(lambda x, y, z: x, (0,1), (0,1), (0,1)),
-            0.5, tol=1e-3)
+            0.5, tol=1e-12)
 
     t.check("T03 ∭ xyz dV = 1/8",
             integrate(lambda x, y, z: x * y * z, (0,1), (0,1), (0,1)),
-            0.125, tol=1e-3)
+            0.125, tol=1e-12)
 
     t.check("T04 Volume of 2×3×4 box = 24",
             integrate(lambda x, y, z: x*0 + 1, (0,2), (0,3), (0,4)),
-            24.0, tol=0.1)
+            24.0, tol=1e-8)
 
     t.check("T05 ∭ (x²+y²) dV = 2/3",
             integrate(lambda x, y, z: x**2 + y**2, (0,1), (0,1), (0,1)),
@@ -316,58 +316,58 @@ def test_line(t: TestRunner):
     t.check("L01 Arc length (0,0)→(3,4) = 5",
             integrate(lambda x, y: 1,
                       (0, 1), curve=lambda t: [3*t, 4*t]),
-            5.0, tol=1e-3)
+            5.0, tol=1e-12)
 
     t.check("L02 ∫ x ds along x-axis = 1/2",
             integrate(lambda x, y: x,
                       (0, 1), curve=lambda t: [t, Composite({0: 0.0})]),
-            0.5, tol=1e-3)
+            0.5, tol=1e-12)
 
     t.check("L03 ∫ (x+y) ds along y=x = √2",
             integrate(lambda x, y: x + y,
                       (0, 1), curve=lambda t: [t, t]),
-            math.sqrt(2), tol=1e-3)
+            math.sqrt(2), tol=1e-12)
 
     t.check("L04 Circumference of unit circle = 2π",
             integrate(lambda x, y: 1,
                       (0, 2*pi),
                       curve=lambda t: [math.cos(t), math.sin(t)]),
-            2*pi, tol=1e-2)
+            2*pi, tol=1e-6)
 
     t.check("L05 Helix arc length = 2π√2",
             integrate(lambda x, y, z: 1,
                       (0, 2*pi),
                       curve=lambda t: [math.cos(t), math.sin(t), t]),
-            2*pi*math.sqrt(2), tol=0.1)
+            2*pi*math.sqrt(2), tol=1e-6)
 
     # --- Vector line integrals: f is a list of component callables ---
 
     t.check("L06 Constant force work = 3",
             integrate([lambda x, y: 3, lambda x, y: 0],
                       (0, 1), curve=lambda t: [t, 0*t]),
-            3.0, tol=1e-3)
+            3.0, tol=1e-12)
 
     t.check("L07 Conservative field work = 1",
             integrate([lambda x, y: y, lambda x, y: x],
                       (0, 1), curve=lambda t: [t, t]),
-            1.0, tol=1e-3)
+            1.0, tol=1e-12)
 
     t.check("L08 Rotation field circulation = 2π",
             integrate([lambda x, y: -y, lambda x, y: x],
                       (0, 2*pi),
                       curve=lambda t: [math.cos(t), math.sin(t)]),
-            2*pi, tol=0.1)
+            2*pi, tol=1e-6)
 
     t.check("L09 Conservative field (closed loop) = 0",
             integrate([lambda x, y: 2*x, lambda x, y: 2*y],
                       (0, 2*pi),
                       curve=lambda t: [math.cos(t), math.sin(t)]),
-            0.0, tol=0.1)
+            0.0, tol=0.0001)
 
     t.check("L10 3D constant field work = 6",
             integrate([lambda x, y, z: 1, lambda x, y, z: 2, lambda x, y, z: 3],
                       (0, 1), curve=lambda t: [t, t, t]),
-            6.0, tol=1e-3)
+            6.0, tol=1e-12)
 
 
 # =============================================================================
@@ -385,13 +385,13 @@ def test_surface(t: TestRunner):
             integrate(lambda x, y, z: 1,
                       ((0,1), (0,1)),
                       surface=lambda u, v: [u, v, 0]),
-            1.0, tol=1e-2)
+            1.0, tol=1e-7)
 
     t.check("S02 3×4 rectangle area = 12",
             integrate(lambda x, y, z: 1,
                       ((0,3), (0,4)),
                       surface=lambda u, v: [u, v, 0]),
-            12.0, tol=0.1)
+            12.0, tol=1e-6)
 
     t.check("S03 Unit sphere area = 4π",
             integrate(lambda x, y, z: 1,
@@ -399,13 +399,13 @@ def test_surface(t: TestRunner):
                       surface=lambda u, v: [math.sin(u)*math.cos(v),
                                             math.sin(u)*math.sin(v),
                                             math.cos(u)]),
-            4*pi, tol=0.5)
+            4*pi, tol=0.01)
 
     t.check("S04 Cylinder lateral area = 4π",
             integrate(lambda x, y, z: 1,
                       ((0, 2*pi), (0, 2)),
                       surface=lambda u, v: [math.cos(u), math.sin(u), v]),
-            4*pi, tol=0.5)
+            4*pi, tol=1e-6)
 
     t.check("S05 ∬ z dS over hemisphere = π",
             integrate(lambda x, y, z: z,
@@ -413,7 +413,7 @@ def test_surface(t: TestRunner):
                       surface=lambda u, v: [math.sin(u)*math.cos(v),
                                             math.sin(u)*math.sin(v),
                                             math.cos(u)]),
-            pi, tol=0.5)
+            pi, tol=0.001)
 
     # --- Vector surface integrals (flux): f is a list of component callables ---
 
@@ -421,7 +421,7 @@ def test_surface(t: TestRunner):
             integrate([lambda x, y, z: 0, lambda x, y, z: 0, lambda x, y, z: 1],
                       ((0,1), (0,1)),
                       surface=lambda u, v: [u, v, 0]),
-            1.0, tol=1e-2)
+            1.0, tol=1e-7)
 
     t.check("S07 Radial flux through sphere = 4π",
             integrate([lambda x, y, z: x, lambda x, y, z: y, lambda x, y, z: z],
@@ -429,7 +429,7 @@ def test_surface(t: TestRunner):
                       surface=lambda u, v: [math.sin(u)*math.cos(v),
                                             math.sin(u)*math.sin(v),
                                             math.cos(u)]),
-            4*pi, tol=0.5)
+            4*pi, tol=0.01)
 
     t.check("S08 Tangent field (zero flux) ≈ 0",
             integrate([lambda x, y, z: -y, lambda x, y, z: x, lambda x, y, z: 0],
@@ -437,19 +437,19 @@ def test_surface(t: TestRunner):
                       surface=lambda u, v: [math.sin(u)*math.cos(v),
                                             math.sin(u)*math.sin(v),
                                             math.cos(u)]),
-            0.0, tol=0.5)
+            0.0, tol=0.0001)
 
     t.check("S09 Flux through cylinder = 4π",
             integrate([lambda x, y, z: x, lambda x, y, z: y, lambda x, y, z: 0],
                       ((0, 2*pi), (0, 2)),
                       surface=lambda u, v: [math.cos(u), math.sin(u), v]),
-            4*pi, tol=0.5)
+            4*pi, tol=1e-6)
 
     t.check("S10 Flux through tilted plane = 1",
             integrate([lambda x, y, z: 0, lambda x, y, z: 0, lambda x, y, z: 1],
                       ((0,1), (0,1)),
                       surface=lambda u, v: [u, v, u + v]),
-            1.0, tol=0.1)
+            1.0, tol=1e-7)
 
 
 # =============================================================================

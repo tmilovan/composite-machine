@@ -19,7 +19,13 @@ DIM_DTYPE = np.float64
 
 
 def dim_cast(d):
-    """A single dimension at Python level: int when integral, else float."""
+    """A single dimension at Python level: int when integral, else float.
+
+    A VECTOR dimension (a tuple over a declared basis) passes through whole --
+    float() on a tuple raises, and there is nothing to normalise.
+    """
+    if isinstance(d, tuple):
+        return d
     f = float(d)
     return int(f) if f.is_integer() else f
 
@@ -31,6 +37,11 @@ class CompositeBackend(ABC):
     (dimension, value) pairs. Only dimensions explicitly created
     by computation exist. No gaps are ever filled.
     """
+    # A backend whose dimensions are VECTORS over a declared basis can
+    # represent a scalar dimension d as (d, 0, ...), but not the reverse.
+    # _operands() uses this to convert toward the richer representation.
+    VECTOR_DIMS = False
+
 
     # --- lifecycle ---
     @abstractmethod
