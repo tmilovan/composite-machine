@@ -6,7 +6,7 @@
 import math
 import numpy as np
 from typing import Tuple
-from .base_backend import CompositeBackend
+from .base_backend import CompositeBackend, DIM_DTYPE, dim_cast
 
 # Direct convolution costs len(a)*len(b) multiply-adds; FFT costs O(M log M) on
 # the padded transform length.  So the choice must be made on the PRODUCT of the
@@ -119,7 +119,7 @@ class SparseData:
             self._vals = None
         else:
             self._runs = None
-            self._dims = np.asarray(dims, dtype=np.int64)
+            self._dims = np.asarray(dims, dtype=DIM_DTYPE)
             self._vals = np.asarray(vals, dtype=np.float64)
 
     @property
@@ -130,15 +130,15 @@ class SparseData:
 
     def _materialise(self):
         if not self._runs:
-            self._dims = np.array([], dtype=np.int64)
+            self._dims = np.array([], dtype=DIM_DTYPE)
             self._vals = np.array([], dtype=np.float64)
             return
         if len(self.runs) == 1:
             off, v = self.runs[0]
-            self._dims = np.arange(off, off + len(v), dtype=np.int64)
+            self._dims = np.arange(off, off + len(v), dtype=DIM_DTYPE)
             self._vals = v
             return
-        self._dims = np.concatenate([np.arange(o, o + len(v), dtype=np.int64)
+        self._dims = np.concatenate([np.arange(o, o + len(v), dtype=DIM_DTYPE)
                                      for o, v in self.runs])
         self._vals = np.concatenate([v for _, v in self.runs])
 
@@ -164,7 +164,7 @@ def _runs_from_flat(dims: np.ndarray, vals: np.ndarray):
     if len(dims) == 0:
         return []
     if len(dims) == 1:
-        return [(int(dims[0]), vals)]
+        return [(dim_cast(dims[0]), vals)]
     gaps = np.diff(dims)
     if gaps.min() <= 0:                      # unsorted and/or duplicated
         order = np.argsort(dims, kind='mergesort')
@@ -179,11 +179,11 @@ def _runs_from_flat(dims: np.ndarray, vals: np.ndarray):
             np.add.at(acc, inv, vals)
             dims, vals = uniq, acc
             if len(dims) == 1:
-                return [(int(dims[0]), vals)]
+                return [(dim_cast(dims[0]), vals)]
             gaps = np.diff(dims)
-    cuts = np.nonzero(gaps > 1)[0]
+    cuts = np.nonzero(gaps != 1)[0]
     if len(cuts) == 0:
-        return [(int(dims[0]), vals)]
+        return [(dim_cast(dims[0]), vals)]
     # Direct slicing, not np.split: slices are views and cost nothing, while
     # np.split routes through array_split and its validation -- which showed up
     # as 3.7% of a whole TSP run purely in dispatch.
@@ -191,22 +191,40 @@ def _runs_from_flat(dims: np.ndarray, vals: np.ndarray):
     prev = 0
     for c in cuts:
         c = int(c) + 1
-        out.append((int(dims[prev]), vals[prev:c]))
+        out.append((dim_cast(dims[prev]), vals[prev:c]))
         prev = c
-    out.append((int(dims[prev]), vals[prev:]))
+    out.append((dim_cast(dims[prev]), vals[prev:]))
     return out
 
 
 def _merge_runs(parts):
     """Combine (offset, vals) pieces into canonical runs, summing overlaps.
 
-    Pieces that overlap OR touch are contiguous once unioned, so a group of them
-    densifies safely.  Pieces separated by a real gap stay separate -- the span
-    between two far-apart runs is never allocated, which is what lets dim
-    -10,000,000 and dim 0 coexist without materialising the distance.
+    A run is UNIT-SPACED, so two runs can only be combined when they sit on the
+    same unit lattice -- that is, when their offsets differ by a whole number.
+    A run at 0,1,2 and a run at 0.5,1.5 overlap in span but interleave; merging
+    them into one dense array would put every member at the wrong dimension and
+    ask for an array of length 1.5.  Half-integer offsets arise from sqrt of an
+    odd dimension, so partition by the fractional part of the offset first and
+    merge only within each lattice.
     """
     if not parts:
         return []
+    if len(parts) == 1:
+        return parts
+    lattices = {}
+    for off, v in parts:
+        lattices.setdefault(float(off) % 1.0, []).append((off, v))
+    if len(lattices) > 1:
+        out = []
+        for key in sorted(lattices):
+            out.extend(_merge_one_lattice(lattices[key]))
+        return sorted(out, key=lambda p: p[0])
+    return _merge_one_lattice(parts)
+
+
+def _merge_one_lattice(parts):
+    """Merge runs known to share a unit lattice; spans here are whole numbers."""
     if len(parts) == 1:
         return parts
     parts = sorted(parts, key=lambda p: p[0])
@@ -226,9 +244,10 @@ def _merge_runs(parts):
         if len(members) == 1:
             out.append(members[0])
         else:
-            acc = np.zeros(ghi - glo, dtype=np.float64)
+            acc = np.zeros(int(round(ghi - glo)), dtype=np.float64)
             for off, v in members:
-                acc[off - glo: off - glo + len(v)] += v
+                i = int(round(off - glo))
+                acc[i: i + len(v)] += v
             out.append((glo, acc))
     return out
 
@@ -277,7 +296,7 @@ class SparseDenseBackend(CompositeBackend):
     # --- lifecycle ---
 
     def create(self, dim: int, value: float) -> SparseData:
-        return SparseData(runs=[(int(dim),
+        return SparseData(runs=[(dim_cast(dim),
                                  np.array([value], dtype=np.float64))])
 
     def _truncate(self, data: SparseData) -> SparseData:
@@ -307,7 +326,7 @@ class SparseDenseBackend(CompositeBackend):
         on the hottest path in the library for a condition that essentially never
         fails.  _runs_from_flat asserts the ordering when it eventually runs.
         """
-        return SparseData(np.asarray(dims, dtype=np.int64),
+        return SparseData(np.asarray(dims, dtype=DIM_DTYPE),
                           np.asarray(vals, dtype=np.float64))
 
     # --- access ---
@@ -333,21 +352,28 @@ class SparseDenseBackend(CompositeBackend):
                 return 0.0
             j = dim - off
             if j < len(v):
-                return float(v[j])
+                # A run is unit-spaced, so the position within it is an integer.
+                # A fractional j means dim is not on THIS run's lattice -- but
+                # runs on different lattices overlap in span (a run at -0.5 and
+                # one at 0 both cover dimension 0's neighbourhood), so keep
+                # scanning instead of concluding the dimension is absent.
+                ji = int(j)
+                if ji == j:
+                    return float(v[ji])
         return 0.0
 
     # FIXED: write_dim — always write the value, even if zero.
     # Previously: deleted existing dim if value==0, skipped insert if value==0.
     # Now: expressed zeros are preserved (canon rule: if zero is expressed, retain it).
     def write_dim(self, data: SparseData, dim: int, value: float) -> SparseData:
-        dim = int(dim)
+        dim = float(dim)
         out = []
         placed = False
         for off, v in data.runs:
             end = off + len(v)
-            if not placed and off <= dim < end:          # inside an existing run
-                nv = v.copy()
-                nv[dim - off] = value
+            if not placed and off <= dim < end and float(dim - off).is_integer():
+                nv = v.copy()                                # on this run's lattice
+                nv[int(dim - off)] = value
                 out.append((off, nv))
                 placed = True
             else:
@@ -520,10 +546,10 @@ class SparseDenseBackend(CompositeBackend):
             remainder_vals = remainder.vals[mask]
 
         if len(q_dims) == 0:
-            return SparseData(np.array([], dtype=np.int64),
+            return SparseData(np.array([], dtype=DIM_DTYPE),
                               np.array([], dtype=np.float64))
 
-        q_dims = np.array(q_dims, dtype=np.int64)
+        q_dims = np.array(q_dims, dtype=DIM_DTYPE)
         q_vals = np.array(q_vals, dtype=np.float64)
         order = np.argsort(q_dims)
         return SparseData(q_dims[order], q_vals[order])

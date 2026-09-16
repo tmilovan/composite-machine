@@ -5,7 +5,7 @@
 
 import numpy as np
 from typing import Tuple
-from .base_backend import CompositeBackend
+from .base_backend import CompositeBackend, DIM_DTYPE, dim_cast
 
 
 class DictData:
@@ -35,7 +35,7 @@ class DictBackend(CompositeBackend):
         return DictData({dim: value})
 
     def create_from_terms(self, dims: np.ndarray, vals: np.ndarray) -> DictData:
-        return DictData({int(d): float(v) for d, v in zip(dims, vals)})
+        return DictData({dim_cast(d): float(v) for d, v in zip(dims, vals)})
 
     def read_dim(self, data: DictData, dim: int) -> float:
         return data.terms.get(dim, 0.0)
@@ -73,15 +73,15 @@ class DictBackend(CompositeBackend):
 
     def to_arrays(self, data: DictData) -> Tuple[np.ndarray, np.ndarray]:
         if not data.terms:
-            return (np.array([], dtype=np.int64),
+            return (np.array([], dtype=DIM_DTYPE),
                     np.array([], dtype=np.float64))
         sorted_items = sorted(data.terms.items())
-        dims = np.array([d for d, _ in sorted_items], dtype=np.int64)
+        dims = np.array([d for d, _ in sorted_items], dtype=DIM_DTYPE)
         vals = np.array([v for _, v in sorted_items], dtype=np.float64)
         return dims, vals
 
     def active_dims(self, data: DictData) -> np.ndarray:
-        return np.array(sorted(data.terms.keys()), dtype=np.int64)
+        return np.array(sorted(data.terms.keys()), dtype=DIM_DTYPE)
 
     # FIXED: add — do NOT delete zero-sum dimensions.
     # Canon rule: 1-1 = |0|₀ (zero at dimension 0, dimension retained).

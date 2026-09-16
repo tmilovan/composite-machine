@@ -8,6 +8,22 @@ from typing import Tuple
 import numpy as np
 
 
+# --- dimension index type -------------------------------------------------
+# Dimensions are stored as float64 so that fractional indices (e.g. -1/2, which
+# sqrt of an odd dimension produces) are representable.  Integer-valued
+# dimensions are UNCHANGED by this: they are exactly representable in float64,
+# they keep unit gaps so the run representation is untouched, and dim_cast()
+# hands them back as Python ints so every existing caller sees what it saw
+# before.  Only a genuinely fractional dimension surfaces as a float.
+DIM_DTYPE = np.float64
+
+
+def dim_cast(d):
+    """A single dimension at Python level: int when integral, else float."""
+    f = float(d)
+    return int(f) if f.is_integer() else f
+
+
 class CompositeBackend(ABC):
     """Abstract base class for Composite arithmetic backends.
 
@@ -62,7 +78,7 @@ class CompositeBackend(ABC):
     def is_unit(self, data: object) -> bool:
         """True for |1|_0, the multiplicative identity.  See is_wholly_zero."""
         dims, vals = self.to_arrays(data)
-        return len(dims) == 1 and int(dims[0]) == 0 and vals[0] == 1.0
+        return len(dims) == 1 and dims[0] == 0 and vals[0] == 1.0
 
     # --- arithmetic ---
     @abstractmethod

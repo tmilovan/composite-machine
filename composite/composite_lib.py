@@ -61,6 +61,7 @@ import struct
 import numpy as np
 
 from composite.backends import get_backend
+from composite.backends.base_backend import DIM_DTYPE, dim_cast
 
 # =============================================================================
 # EXCEPTIONS
@@ -153,7 +154,7 @@ class Composite:
 
         if coefficients is None:
             self._data = self._backend.create_from_terms(
-                np.array([], dtype=np.int64),
+                np.array([], dtype=DIM_DTYPE),
                 np.array([], dtype=np.float64))
         elif isinstance(coefficients, (int, float)):
             # FIXED: Composite(0) → |0|₀ (expressed zero at dim 0)
@@ -166,12 +167,12 @@ class Composite:
             # Previously: {k: v for k, v in ... if v != 0} stripped them
             if coefficients:
                 sorted_dims = sorted(coefficients.keys())
-                dims = np.array(sorted_dims, dtype=np.int64)
+                dims = np.array(sorted_dims, dtype=DIM_DTYPE)
                 vals = np.array([coefficients[d] for d in sorted_dims], dtype=np.float64)
                 self._data = self._backend.create_from_terms(dims, vals)
             else:
                 self._data = self._backend.create_from_terms(
-                    np.array([], dtype=np.int64),
+                    np.array([], dtype=DIM_DTYPE),
                     np.array([], dtype=np.float64))
         else:
             raise TypeError(f"Cannot create Composite from {type(coefficients)}")
@@ -202,7 +203,7 @@ class Composite:
         TracedComposite keep working without changes.
         """
         dims, vals = self._backend.to_arrays(self._data)
-        return {int(d): float(v) for d, v in zip(dims, vals)}
+        return {dim_cast(d): float(v) for d, v in zip(dims, vals)}
 
     # -------------------------------------------------------------------------
     # Constructors (UNCHANGED)
@@ -236,7 +237,13 @@ class Composite:
 
         sub = "₀₁₂₃₄₅₆₇₈₉"
         def fmt_dim(n):
-            n = int(n)
+            f = float(n)
+            if not f.is_integer():
+                # A fractional dimension -- sqrt of an odd dimension produces
+                # these.  There are no subscript glyphs for them, so render
+                # plainly rather than silently truncating to an integer.
+                return "_" + f"{f:g}"
+            n = int(f)
             if n >= 0:
                 return ''.join(sub[int(d)] for d in str(n))
             else:
@@ -263,8 +270,8 @@ class Composite:
 
     @classmethod
     def from_dict(cls, d):
-        """Deserialize from dict. Accepts string or int keys."""
-        return cls({int(k): v for k, v in d.items()})
+        """Deserialize from dict. Accepts string, int or float keys."""
+        return cls({dim_cast(float(k)): v for k, v in d.items()})
 
     def to_bytes(self):
         """Serialize to compact binary format."""
@@ -398,7 +405,7 @@ class Composite:
         # Single-term divisor -> a pure dimension shift.  Every term of the
         # dividend moves together, zeros included: they shift and stay zero.
         if len(b_dims) == 1:
-            div_dim = int(b_dims[0])
+            div_dim = float(b_dims[0])
             div_coeff = b._backend.read_dim(b._data, div_dim)
             my_dims, my_vals = a._backend.to_arrays(a._data)
             return Composite._wrap(
@@ -467,13 +474,13 @@ class Composite:
     def max_positive_dim(self):
         """Return the highest positive dimension, or None if none exist."""
         dims, vals = self._backend.to_arrays(self._data)
-        pos = [int(d) for d, v in zip(dims, vals) if int(d) > 0 and v != 0]
+        pos = [dim_cast(d) for d, v in zip(dims, vals) if d > 0 and v != 0]
         return max(pos) if pos else None
 
     def coeffs_dict(self):
         """Return {dim: coeff} dict for all non-zero dimensions."""
         dims, vals = self._backend.to_arrays(self._data)
-        return {int(d): float(v) for d, v in zip(dims, vals)}
+        return {dim_cast(d): float(v) for d, v in zip(dims, vals)}
 
     # -------------------------------------------------------------------------
     # Simplified integration operators (dimensional shifts)
@@ -485,7 +492,7 @@ class Composite:
         mask = dims < 0
         neg_dims = dims[mask]
         neg_vals = vals[mask]
-        return sum(float(v) * h_value ** (-int(d))
+        return sum(float(v) * h_value ** (-float(d))
                    for d, v in zip(neg_dims, neg_vals))
 
     def integrate_step(self, dx):
@@ -548,8 +555,8 @@ def _compare(a, b):
         return 0
 
     for dim in reversed(all_dims):
-        ca = a._backend.read_dim(a._data, int(dim))
-        cb = b._backend.read_dim(b._data, int(dim))
+        ca = a._backend.read_dim(a._data, float(dim))
+        cb = b._backend.read_dim(b._data, float(dim))
         if math.isnan(ca) or math.isnan(cb):
             return float('nan')
         if ca < cb:
@@ -708,7 +715,10 @@ def _has_infinitesimal_part(x):
     that zero into |1|_-1, manufacturing an infinitesimal that is not there.
     """
     dims, vals = x._backend.to_arrays(x._data)
-    return any(int(d) != 0 and v != 0.0 for d, v in zip(dims, vals))
+    # NB: compare the dimension itself, not int(d) -- int(-0.5) is 0, which
+    # made a purely fractional infinitesimal (sqrt of an odd dimension) look
+    # like a bare standard part, so sin/ln returned f(st(x)) and dropped it.
+    return any(d != 0 and v != 0.0 for d, v in zip(dims, vals))
 
 
 def _is_nothing(x):
@@ -881,15 +891,19 @@ def sqrt(x, terms=12):
         return Composite({})
 
     # Dimensions HALVE under a square root:  sqrt(|c|_d) = |sqrt(c)|_(d/2).
-    # The dimension index is an int, so this exists only when d is even; an odd
-    # d needs a half-integer dimension the representation cannot name.
     #
     # This used to keep the dimension instead of halving it, returning ZERO for
     # sqrt(ZERO) and silently giving wrong LIMITS, not just wrong intermediates:
     #   lim(x->0+) sqrt(x)/x   gave 1.0   (is infinity)
     #   lim(x->0+) x/sqrt(x)   gave 1.0   (is 0)
     #   lim(x->0+) sqrt(x*x)/x gave 0.0   (is 1 -- |x|/x for x > 0)
-    # Halving fixes every even case; odd ones now raise and name the fix.
+    #
+    # Halving an ODD dimension lands on a half-integer.  That used to be
+    # unrepresentable and raised, naming the x = s*s substitution as the way
+    # round it.  Dimensions are float64 now, so sqrt(|1|_-1) = |1|_-0.5 is an
+    # ordinary value and the substitution is no longer required.  Note the
+    # result stays UNIT-SPACED -- sqrt shifts the lattice by 1/2, it does not
+    # refine it -- so the run representation is unaffected.
     _nz = {d: c for d, c in x.coeffs_dict().items() if c != 0.0}
     if _nz:
         _lead = max(_nz)
@@ -898,14 +912,7 @@ def sqrt(x, terms=12):
             if _c < 0:
                 raise ValueError(
                     f"sqrt of a negative leading coefficient |{_c}|_{_lead}")
-            if _lead % 2 != 0:
-                raise ValueError(
-                    f"sqrt(|{_c}|_{_lead}) needs dimension {_lead}/2, which is not "
-                    f"an integer and cannot be represented. Substitute to make the "
-                    f"exponent whole -- for a half power, set x = s*s and work in s "
-                    f"(this is the standard Williams substitution at a crack tip). "
-                    f"Even dimensions are fine: sqrt(|c|_-2) = |sqrt(c)|_-1.")
-            _root = Composite({_lead // 2: math.sqrt(_c)})
+            _root = Composite({dim_cast(_lead / 2): math.sqrt(_c)})
             _rest = x / Composite({_lead: _c})        # leading dim 0, st() == 1
             return _root * sqrt(_rest, terms)
 
