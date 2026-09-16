@@ -222,6 +222,15 @@ class Composite:
     @classmethod
     def real(cls, value):
         """Real number: |value|₀"""
+        if isinstance(value, Composite):
+            # float(Composite) is st(), so this would drop every dimension but
+            # 0 and return a plausible wrong answer.  That is how
+            # power(1+x, 1/x) returned 1.0: the exponent 1/x is |1|_1, whose
+            # standard part is 0, so it computed x^0.
+            raise TypeError(
+                "Composite.real() takes a real number, not a Composite -- "
+                "converting one collapses it to its standard part. If the "
+                "value is already a composite, use it directly.")
         return cls({0: float(value)})
 
     # -------------------------------------------------------------------------
@@ -577,6 +586,12 @@ def R(x):
     R(0) returns the canonical form |1|₋₁.
     A raw Python scalar 0 (via Composite(0)) keeps the |0|₀ form.
     """
+    if isinstance(x, Composite):
+        raise TypeError(
+            "R() takes a real number. Passing a Composite silently collapses it "
+            "to its standard part -- float(|2|_0 + |1|_-1) is 2.0 -- which is how "
+            "power(1+x, 1/x) returned 1.0. If the value is already a composite, "
+            "use it directly.")
     if x == 0:
         return Composite.zero()
     return Composite.real(x)
@@ -851,7 +866,29 @@ def ln(x, terms=15):
             min_dim = min(neg_dims.keys())
             coeff = neg_dims[min_dim]
             if coeff > 0:
-                return R(math.log(coeff))
+                # ln(|c|_d) = ln(c) + d*ln(h), and ln(h) needs a dimension that
+                # is positive but smaller than EVERY power -- log x outgrows any
+                # constant and is outgrown by x^e for every e > 0.  No float can
+                # sit there, so the d*ln(h) term has nowhere to go.
+                #
+                # This used to drop it and return ln(c) alone, which makes
+                # ln(h), ln(h^2), ln(h^3) and ln(sqrt(h)) all the SAME object
+                # and produces wrong answers, not merely lost structure:
+                #   lim(x->0+) ln(x)/ln(x*x)      gave 1.0   (is 0.5)
+                #   lim(x->0+) ln(x)/ln(sqrt(x))  gave 1.0   (is 2.0)
+                #   lim(x->0+) 1/ln(x)            gave |1|_1 (is 0.0, inverted)
+                # It is right only when the log is multiplied by something that
+                # vanishes, which is why x*ln(x) and x^x survived it.
+                raise ValueError(
+                    f"ln(|{coeff}|_{min_dim}): the log SCALE cannot be "
+                    f"represented. ln of an infinitesimal is ln({coeff}) + "
+                    f"({min_dim})*ln(h), and ln(h) needs a dimension between 0 "
+                    f"and every positive power -- not expressible as a float. "
+                    f"Dropping it silently returned ln({coeff}) and made "
+                    f"ln(h), ln(h^2) and ln(sqrt(h)) indistinguishable. "
+                    f"Rewrite so the log is multiplied by a vanishing factor "
+                    f"(x*ln(x) and x^x work), or expand about a point with a "
+                    f"nonzero standard part.")
         raise ValueError("ln requires positive standard part")
 
     if not _has_infinitesimal_part(x):
@@ -1060,11 +1097,25 @@ def tanh(x, terms=15):
 # =============================================================================
 
 def power(x, s, terms=15):
-    """x^s for any real s, via exp(s * ln(x))."""
+    """x^s via exp(s * ln(x)).  The exponent may be real OR a Composite.
+
+    A composite exponent used to be routed through R(s), which calls float(s)
+    -- that is st(s), and the standard part of an infinity is 0.  So the
+    exponent was silently replaced by an expressed zero and the function
+    computed x^0:
+
+        power(1+x, 1/x)  returned 1.0   (is e)
+
+    because 1/x is |1|_1, float(|1|_1) is 0.0, and R(0.0) is |0|_0.  The
+    exponent has to stay a composite, which is what __pow__ already did --
+    hence a ** b and exp(ln(a)*b) both gave e while power() did not.
+    """
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if isinstance(s, int):
         return x ** s
+    if isinstance(s, Composite):
+        return exp(s * ln(x, terms), terms)
     return exp(R(s) * ln(x, terms), terms)
 
 
@@ -1161,6 +1212,18 @@ def _limit_impl(f, as_x_to, terms, dir, fallback):
             coeffs = as_x_to.coeffs_dict()
             _is_inf = True
             as_x_to = float('inf') if coeffs.get(max_d, 0) > 0 else float('-inf')
+        elif _has_infinitesimal_part(as_x_to):
+            # No positive dimension, so not an infinity -- and it carries an
+            # infinitesimal part, so st() would silently throw that away and
+            # answer a DIFFERENT question.  "Approach 2 + eps" is not a limit
+            # point; "approach 2" is.  A composite that is purely dimension 0
+            # falls through and collapses losslessly, which is fine.
+            raise TypeError(
+                f"limit(as_x_to={as_x_to}): the point to approach must be a "
+                f"real, float('inf'), or a composite INFINITY. This carries an "
+                f"infinitesimal part, and taking its standard part would "
+                f"silently change which limit is computed. Pass st() explicitly "
+                f"if that is what you meant.")
         else:
             as_x_to = as_x_to.st()
 
