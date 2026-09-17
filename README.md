@@ -2,6 +2,22 @@
 
 ## Announcements
 
+### New release
+
+After months of experimenting, learning (finding about Levi Civita fields etc.), building and testing different implementations, here is the new release that contains the accumulated findings.
+
+What it adds:
+
+- refinements to zero handling edge cases
+- adds float dimensions so we can finally take a square roots on composites with exact precision and remain composite
+- adds experimental support for vector dimensions which enables taking log of an
+composite number
+- tons of edge case bugfixes (especially for integration)
+
+Note of caution: this is still highly experimental and most likely (for sure) still contains some misconceptions and a lot of edge cases and other bugs. The purpose of the library is to showcase what is possible and to serve as a baseline for further exploration.
+
+### Library release
+
 The first proper pypy library based on this experimental features has been released. A standalone tool to evaluate Python functions at points where they're undefined and get exact limit values if they exists.
 
 - **[https://github.com/FWDhr/composite-resolve](https://github.com/FWDhr/composite-resolve)**
@@ -26,7 +42,7 @@ Alpha stage. Research code. The math works, ~~performance doesn't (yet)~~. AGPL-
 
 ## What's this
 
-Numbers are sparse dicts mapping integer dimensions to coefficients. Dimension 0 is the value. Negative dimensions store derivative info. Multiply dimensions — turns out that's the same thing as the product rule and chain rule, just expressed as data structure operations.
+Numbers are sparse dicts mapping dimensions to coefficients. A dimension is an integer, or a vector over an iterated-logarithm basis when log-scale terms are in play. Dimension 0 is the value. Negative dimensions store derivative info. Multiply dimensions — turns out that's the same thing as the product rule and chain rule, just expressed as data structure operations.
 
 ```python
 from composite.composite_lib import R, ZERO
@@ -37,7 +53,7 @@ result = x ** 4           # just compute normally
 result.st()               # 81  — the value, f(3)
 result.d(1)               # 108 — first derivative
 result.d(2)               # 108 — second derivative
-result.d(3)               # 24  — third derivative
+result.d(3)               # 72  — third derivative
 result.d(4)               # 24  — fourth derivative
 ```
 
@@ -48,6 +64,10 @@ One evaluation. All derivatives fall out. No separate differentiation pass.
 ## Background
 
 The derivative computation part builds on well-known work: Clifford's **dual numbers** (1873), Wengert's **forward-mode AD** (1964), Rall's **Taylor arithmetic** (1981), Griewank's framework (2000).
+
+The number system has a separate and older lineage. A sparse map from exponents to coefficients, with non-integer exponents and finitely many terms below any given one, is the shape of the **Levi-Civita field** (Levi-Civita, 1892–1898) — the smallest non-Archimedean ordered field extension of the reals that is real-closed and Cauchy-complete. Letting an exponent be a *vector* ordered lexicographically instead of a single number gives **Hahn series** (Hahn, 1907), which is what the iterated-logarithm basis here amounts to: dimensions valued in an ordered group, compared componentwise. The scale those vectors index — *x*, log *x*, log log *x*, ranked by eventual dominance — is du Bois-Reymond's *Infinitärcalcül* as set out in Hardy's **Orders of Infinity** (1910), and the **Hardy fields** built on it. Expansions that mix powers, exponentials and iterated logs are **transseries** (Écalle, 1992; van der Hoeven, 2006). The infinitesimals themselves are made rigorous by Robinson's **non-standard analysis** (1966), and the surreals (Conway, 1976) contain the Levi-Civita field as a subfield.
+
+Computing in such a field, rather than reasoning about it, also has prior art. Berz framed **automatic differentiation as non-Archimedean analysis** (1992), and Shamseddine and Berz developed numerical analysis directly on the Levi-Civita field, including derivatives of functions where classical AD breaks down. The overlap is worth stating plainly: the algebra here is not new, and where this library's structures coincide with those, the credit is theirs.
 
 What this library explores is a different algebraic context for that mechanism. Higher-order terms are preserved instead of truncated. Subtraction retains provenance instead of collapsing to zero. Multiplication by zero shifts structure instead of destroying it. The idea is that if you stop throwing away information at each step, calculus operations become extractable from the algebra.
 
@@ -63,6 +83,7 @@ The trade-off is breadth vs speed. This covers a lot of operations in one struct
 
 - **vs PyTorch/JAX** — They're fast but give you first-order gradients. This gives you all orders, plus limits and integration, but is ~1000x slower.
 - **vs SymPy** — SymPy does symbolic math. This is numerical. SymPy is slow for large expressions. This is slow for everything, but conceptually simpler.
+- **vs mpmath** — mpmath is arbitrary-precision and carries the special-function library this does not (gamma, zeta, Bessel). On derivatives the two agree exactly: the 4th derivative of x⁴eˣ at 1 matches to all 15 digits. The difference is method — mpmath samples and extrapolates, so a limit is only as good as the extrapolation converges. On six harder limits it returned 0.99962 for xˣ as x→0⁺ and −2.7e−8 for x²·ln x, where reading the standard part off the algebra gives both exactly.
 - **vs dual numbers** — Classic dual numbers give you one derivative (epsilon squared is zero). Here epsilon squared is kept, so you get all orders.
 
 ---
@@ -138,6 +159,7 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 - **[composite_multivar.py](composite/composite_multivar.py)** — Multivariable calculus. MC class, partial derivatives, gradient, Hessian, Jacobian, Laplacian, divergence, curl.
 - **[composite_extended.py](composite/composite_extended.py)** — Complex analysis. Complex composites, residues, poles, contour integrals, asymptotics, ODE solver.
 - **[composite_vector.py](composite/composite_vector.py)** — Vector calculus. Triple integrals, line integrals, surface integrals.
+- **[backends/](composite/backends/)** — Interchangeable storage for the dimension map: dict, sparse-dense, vector-dimension, dense-series.
 
 ---
 
@@ -147,10 +169,15 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 
 - Full arithmetic with dimensional convolution and deconvolution
 - Integer and real-exponent powers
-- Transcendentals — sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, exp, ln, sqrt
+- Transcendentals — sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, exp, ln, sqrt, erf, erfc, normal_cdf
 - All-order derivatives from a single evaluation
 - Algebraic limits including indeterminate forms and limits at infinity
 - Definite, improper, and adaptive integration with error estimates
+- Vector dimensions over an iterated-logarithm basis — log, loglog and deeper
+  scales as ordinary arithmetic, at any depth, with the transcendentals
+  accepting log-axis arguments
+- Completeness tracking — every value carries the highest order it is complete
+  to, propagated through each operation
 - TracedComposite for step-by-step operation logging
 
 **Experimental:**
@@ -174,6 +201,8 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 Pure Python, dict-based sparse storage. Roughly 500–1000x slower than PyTorch for simple gradients.
 
 Fine for research, prototyping, and problems where higher-order derivatives or algebraic limits matter more than throughput.
+
+One measured exception, from holding only what is occupied: on an explicit PDE over a large domain where the active region stays small, storing only occupied cells runs ~131x faster than the equivalent dense NumPy grid. Absent is not zero, so the support tracks the front on its own.
 
 A high-performance backend using PyTorch with CUDA and MPS acceleration is available under commercial license. Contact [tmilovan@fwd.hr](mailto:tmilovan@fwd.hr).
 
@@ -210,18 +239,23 @@ PYTHONPATH=. python tests/test_integration_comprehensive.py # every integral for
 import path rather than the repo root, so `composite` resolves to whatever is
 installed instead of the working copy.
 
-**509 tests across nine suites, all passing.**
+**839 tests across thirteen suites, all passing.**
 
 | suite | tests | covers |
 |---|---|---|
 | `test_standalone.py` | 167 | paper theorems T1–T8, algebra, derivatives, limits, zero division |
+| `test_vector_dimensions.py` | 150 | vector dimensions, depth genericity, log-axis transcendentals |
+| `test_dimension_scales.py` | 131 | dimensions that are not integers, and not scalars |
 | `test_limits.py` | 105 | indeterminate forms, oscillatory, at infinity, directional, domain errors |
 | `test_multivar_disprove.py` | 68 | multivariable vs single-variable, Black-Scholes Greeks |
 | `test_integration_comprehensive.py` | 54 | definite, improper, triple, line, surface |
 | `test_multivar_extended.py` | 50 | gradients, Hessians, Jacobians, complex analysis, ODEs |
 | `test_composite_vector.py` | 25 | vector calculus |
+| `test_series_completeness.py` | 22 | every transcendental returns only the orders it completes |
+| `test_identities.py` | 20 | identities computed through independent paths |
 | `test_stress.py` | 20 | hard limits, derivatives, integrals |
 | `test_stress_hard_edge.py` | 20 | 3rd/4th order, deep composition chains |
+| `test_composite_metadata.py` | 7 | one number carrying data and metadata |
 | `turing_completeness/` | 3 files | Turing-completeness experiments |
 
 ---
@@ -242,7 +276,7 @@ Milovan, T. (2026). *Provenance-Preserving Arithmetic: A Unified Framework for A
 - [**Examples**](docs/Examples.md) - Code snippets for common tasks
 - [**Roadmap (DRAFT)**](docs/Roadmap%20(DRAFT).md) - What's next
 - [**Zero Rules v2**](docs/Zero%20Rules%20v2%20%E2%80%94%20Formal%20Specification%20(DRAFT).md) - What a zero coefficient means, and how it behaves
-- [**Changelog**](CHANGELOG.md) - What changed and why
+- ~~[**Changelog**](CHANGELOG.md) - What changed and why~~ *(not currently in the tree)*
 
 ---
 
