@@ -482,7 +482,11 @@ class Composite:
             else:
                 return Composite._wrap(
                     self._backend.scalar_multiply(self._data, 1.0 / other),
-                    complete=self._complete)
+                    # self._backend, not the global one: __mul__ passes it and
+                    # __truediv__ did not, so `x / 2` on a vector composite
+                    # wrapped DictData in sparse-dense methods.  sinh, cosh,
+                    # tanh and atan all divide by a scalar at the end.
+                    self._backend, complete=self._complete)
         if not isinstance(other, Composite):
             return NotImplemented
         if _is_unit(other):
@@ -505,8 +509,15 @@ class Composite:
             my_dims, my_vals = a._backend.to_arrays(a._data)
             if isinstance(div_dim, tuple):
                 # Vector dimensions subtract componentwise; object arrays do not
-                # broadcast `-`, so shift each one explicitly.
-                shifted = [tuple(x - y for x, y in zip(d, div_dim)) for d in my_dims]
+                # broadcast `-`, so shift each one explicitly.  PAD FIRST: zip
+                # over different-length tuples truncates to the shorter and
+                # drops the deepest axes without a word, which turned
+                # 1/ln(ln(1/h)) -- dim (0,0) over (0,0,1) -- into a plain 1.
+                from composite.backends.vector_dim_backend import pair, canon
+                shifted = []
+                for d in my_dims:
+                    _a, _b = pair(d, div_dim)
+                    shifted.append(canon(tuple(x - y for x, y in zip(_a, _b))))
             else:
                 shifted = my_dims - div_dim
             return Composite._wrap(
@@ -587,10 +598,14 @@ class Composite:
     def max_positive_dim(self):
         """Return the highest positive dimension, or None if none exist."""
         dims, vals = self._backend.to_arrays(self._data)
-        # A vector dimension is positive when its POWER component is.
-        _p = lambda d: d[0] if isinstance(d, tuple) else d
-        pos = [dim_cast(d) for d, v in zip(dims, vals) if _p(d) > 0 and v != 0]
-        return max(pos) if pos else None
+
+        pos = [d for d, v in zip(dims, vals) if _dim_positive(d) and v != 0]
+        if not pos:
+            return None
+        if any(isinstance(d, tuple) for d in pos):
+            from composite.backends.vector_dim_backend import as_vec
+            return max(pos, key=lambda d: as_vec(d))
+        return max(dim_cast(d) for d in pos)
 
     def coeffs_dict(self):
         """Return {dim: coeff} dict for all non-zero dimensions."""
@@ -822,6 +837,84 @@ def _has_positive_dims(x):
     return x.max_positive_dim() is not None
 
 
+def _dim_nonzero(d):
+    """Is this dimension anything other than THE zero dimension?
+
+    `d != 0` is the scalar spelling, and a tuple is never equal to 0 -- so the
+    vector zero (0, 0) tested as non-zero, sqrt took its leading-term branch,
+    divided x by 1, and recursed on itself until the stack ran out.
+    """
+    if isinstance(d, tuple):
+        return any(c != 0 for c in d)
+    return d != 0
+
+
+def _zero_dim_like(x):
+    """The zero dimension in x's own KIND -- 0, or (0, 0, ...) for vectors.
+
+    sorted() cannot order a tuple against an int, so a scalar 0 mixed into a
+    dict of vector dims raises on construction.
+    """
+    for d in x.c:
+        if isinstance(d, tuple):
+            return tuple(0 for _ in range(len(d)))
+    return 0
+
+
+def _dim_shift(d, k):
+    """Move a dimension by k on the POWER axis, leaving the log axes alone.
+
+    Integration and differentiation change the order in x, which is the power
+    component; the log components ride along unchanged.  `d - 1` is the scalar
+    spelling and raises "unsupported operand for -: 'tuple' and 'int'" as soon
+    as a log axis is present -- which is what stopped erf on a log-axis
+    argument.
+    """
+    if isinstance(d, tuple):
+        return (d[0] + k,) + tuple(d[1:])
+    return d + k
+
+
+def _dim_scaled(d, factor):
+    """Scale a dimension by `factor`, componentwise for a vector dim.
+
+    sqrt halves the index; for (p, l) that is (p/2, l/2), since
+    sqrt(h**p * L**l) = h**(p/2) * L**(l/2).  Writing `d / 2` works only for a
+    scalar and raises "unsupported operand for /: 'tuple'" the moment a log
+    axis is involved.
+    """
+    if isinstance(d, tuple):
+        return tuple(c * factor for c in d)
+    return dim_cast(d * factor)
+
+
+def _dim_positive(d):
+    """Dimension lexicographically ABOVE zero -- the infinite side, any depth.
+
+    `d > 0` is the scalar spelling of this and it raises TypeError the moment a
+    dimension is a tuple.  The first NON-ZERO component decides: (0,1) is
+    log(1/h), infinite; (0,0,-1) is 1/loglog(1/h), infinitesimal.  Reading only
+    the power component -- the previous shortcut -- calls every pure log term
+    finite, which routes infinite arguments down the Taylor path.
+    """
+    if not isinstance(d, tuple):
+        return d > 0
+    for c in d:
+        if c != 0:
+            return c > 0
+    return False
+
+
+def _dim_negative(d):
+    """Dimension lexicographically BELOW zero -- the infinitesimal side."""
+    if not isinstance(d, tuple):
+        return d < 0
+    for c in d:
+        if c != 0:
+            return c < 0
+    return False
+
+
 def _dim_order(d):
     """Taylor order carried by a dimension: -power, scalar or vector dim alike.
 
@@ -852,6 +945,8 @@ def _complete_order(h_terms, terms):
     so never reads past the boundary; the consumers that sweep the whole
     coefficient dict -- antiderivative, and integrate through it -- did.
     """
+    if not h_terms:
+        return None          # nothing infinitesimal: no order bound to state
     m = min(_dim_order(d) for d in h_terms)
     if m <= 0:
         return None
@@ -1026,9 +1121,27 @@ def _like(x, terms):
     "setting an array element with a sequence".
     """
     be = x._backend
-    return Composite._wrap(
-        be.create_from_terms(list(terms.keys()), list(terms.values())),
-        be, demote=False)
+    if not terms:
+        return Composite._wrap(
+            be.create_from_terms(np.array([], dtype=DIM_DTYPE),
+                                 np.array([], dtype=np.float64)),
+            be, demote=False)
+    # SORTED, and as the same array kinds Composite.__init__ builds.  Passing a
+    # dict's insertion order straight through is what broke asin: its result is
+    # assembled with key 0 first and the negative dims after, and the
+    # sparse-dense backend reads runs off the order it is given -- so the
+    # standard part was dropped and asin(x) came back with st() == 0.  _like
+    # only ever worked because every earlier caller happened to pass a sorted
+    # dict.
+    sorted_dims = sorted(terms.keys())
+    if isinstance(sorted_dims[0], tuple):
+        dims = np.empty(len(sorted_dims), dtype=object)
+        for _i, _d in enumerate(sorted_dims):
+            dims[_i] = _d
+    else:
+        dims = np.array(sorted_dims, dtype=DIM_DTYPE)
+    vals = np.array([terms[d] for d in sorted_dims], dtype=np.float64)
+    return Composite._wrap(be.create_from_terms(dims, vals), be, demote=False)
 
 
 def _vec_composite(terms):
@@ -1063,6 +1176,32 @@ def _demote(data, be):
     return active.create_from_terms(flat, vals), active
 
 
+def _vec_unit(k, width=None):
+    """The dimension that IS the k-th basis element: 1 at index k, 0 elsewhere."""
+    from composite.backends.vector_dim_backend import ensure_depth
+    w = ensure_depth(max(k + 1, width or 0))
+    return tuple(1 if i == k else 0 for i in range(w))
+
+
+def _sole_log_index(d):
+    """(k, e) when dim d is e copies of ONE basis element at index k >= 1.
+
+    exp can only lower a term that is a single basis element: exp(v*B_k) is
+    B_{k-1}**v.  A term like (0, 2) -- that is (log x)**2 -- has no image at
+    any depth, because exponentiating a SQUARED log produces a scale outside
+    this family entirely.  That is a different refusal from "the basis is too
+    shallow", and conflating the two is what made the old k == 1 test look like
+    a depth limit when it is really an exponent limit.
+    """
+    from composite.backends.vector_dim_backend import as_vec
+    v = as_vec(d)
+    nz = [(i, c) for i, c in enumerate(v) if c != 0]
+    if len(nz) != 1:
+        return None
+    k, e = nz[0]
+    return (k, e) if k >= 1 else None
+
+
 def _log_part(x):
     """Split the INFINITE log terms off an exponent.  Returns (logs, rest).
 
@@ -1080,10 +1219,14 @@ def _log_part(x):
     logs, rest = {}, {}
     for d, v in zip(dims, vals):
         if isinstance(d, tuple) and len(d) > 1:
-            p, l = d[0], d[1]
-            infinite = p > 0 or (p == 0 and l > 0)
-            if infinite and p == 0:
-                logs[d] = v                     # k * ln(1/h): changes scale
+            # A term changes SCALE under exp when its power component is zero
+            # and it is positive on some log axis -- at ANY depth, not only the
+            # first.  Lexicographic order decides the sign: the first non-zero
+            # component after the power is what dominates.
+            rest_comps = d[1:]
+            lead = next((c for c in rest_comps if c != 0), 0)
+            if d[0] == 0 and lead > 0:
+                logs[d] = v
                 continue
         rest[d] = v
     return logs, rest
@@ -1121,11 +1264,16 @@ def sin(x, terms=12):
     if not _has_infinitesimal_part(x):
         return Composite({0: math.sin(a)})
     _nz = {d: c for d, c in x.c.items() if d != 0 and c != 0.0}
-    h = Composite({d: c for d, c in x.c.items() if d != 0})
+    # _like, not Composite({...}): the bare constructor binds whatever backend
+    # is globally ACTIVE, so a vector-dimension argument had its tuples handed
+    # to numpy -- "setting an array element with a sequence" -- or came back as
+    # DictData wearing sparse-dense methods.
+    h = _like(x, {d: c for d, c in x.c.items() if d != 0})
     sin_a, cos_a = math.sin(a), math.cos(a)
-    sin_h = Composite({})
-    cos_h = Composite({0: 1.0})
-    h_power = Composite({0: 1.0})
+    _one = _like(x, {_unit_dim(x): 1.0})
+    sin_h = _like(x, {})
+    cos_h = _one
+    h_power = _one
     for n in range(1, terms):
         h_power = h_power * h
         if n % 2 == 1:
@@ -1135,7 +1283,7 @@ def sin(x, terms=12):
             sign = (-1) ** (n // 2)
             cos_h = cos_h + (sign / math.factorial(n)) * h_power
     # Skip zero-coefficient terms to avoid 0 * Composite uplift
-    result = Composite({})
+    result = _like(x, {})
     if sin_a != 0:
         result = result + sin_a * cos_h
     if cos_a != 0:
@@ -1156,11 +1304,16 @@ def cos(x, terms=12):
     if not _has_infinitesimal_part(x):
         return Composite({0: math.cos(a)})
     _nz = {d: c for d, c in x.c.items() if d != 0 and c != 0.0}
-    h = Composite({d: c for d, c in x.c.items() if d != 0})
+    # _like, not Composite({...}): the bare constructor binds whatever backend
+    # is globally ACTIVE, so a vector-dimension argument had its tuples handed
+    # to numpy -- "setting an array element with a sequence" -- or came back as
+    # DictData wearing sparse-dense methods.
+    h = _like(x, {d: c for d, c in x.c.items() if d != 0})
     sin_a, cos_a = math.sin(a), math.cos(a)
-    sin_h = Composite({})
-    cos_h = Composite({0: 1.0})
-    h_power = Composite({0: 1.0})
+    _one = _like(x, {_unit_dim(x): 1.0})
+    sin_h = _like(x, {})
+    cos_h = _one
+    h_power = _one
     for n in range(1, terms):
         h_power = h_power * h
         if n % 2 == 1:
@@ -1169,7 +1322,7 @@ def cos(x, terms=12):
         else:
             sign = (-1) ** (n // 2)
             cos_h = cos_h + (sign / math.factorial(n)) * h_power
-    result = Composite({})
+    result = _like(x, {})
     if cos_a != 0:
         result = result + cos_a * cos_h
     if sin_a != 0:
@@ -1195,20 +1348,32 @@ def exp(x, terms=15):
         if _logs:
             # exp(k * ln(1/h)) = (1/h)^k = h^(-k), which sits at power +k.
             out = None
-            for (_, k), v in _logs.items():
-                t = _vec_composite({(v, 0): 1.0}) if k == 1 else None
-                if t is None:
+            for _d, v in _logs.items():
+                # exp(v * B_k) = B_{k-1} ** v: one step DOWN the basis, at any
+                # depth.  B_1 = ln(1/h) so exp lands on the power axis; B_2 =
+                # ln(ln(1/h)) so exp lands on the log axis; and so on.
+                _ke = _sole_log_index(_d)
+                if _ke is None or _ke[1] != 1:
+                    from composite.backends.vector_dim_backend import BASIS
                     raise ValueError(
-                        f"exp of a log term at level {k} needs a deeper basis "
-                        f"than {('power', 'log')}.")
+                        f"exp of {_d}: a log term can only be exponentiated when "
+                        f"it is ONE basis element to the first power. "
+                        f"{_d} is not, and no depth fixes that -- exp of a "
+                        f"squared or mixed log leaves this family of scales. "
+                        f"(basis {tuple(BASIS)})")
+                _k = _ke[0]
+                _tgt = list(_vec_unit(_k - 1))
+                _tgt[_k - 1] = v
+                t = _vec_composite({tuple(_tgt): 1.0})
                 out = t if out is None else out * t
             if _rest:
                 # A remainder that is only the standard part needs no series --
                 # and recursing would rebuild it through the ACTIVE backend,
                 # which cannot hold vector dimensions.
-                if set(_rest) <= {(0, 0)}:
+                _zero = tuple(0 for _ in range(len(next(iter(_rest)))))
+                if set(_rest) <= {_zero}:
                     out = out * _vec_composite(
-                        {(0, 0): math.exp(_rest.get((0, 0), 0.0))})
+                        {_zero: math.exp(_rest.get(_zero, 0.0))})
                 else:
                     out = out * exp(_vec_composite(_rest), terms)
             return out
@@ -1238,6 +1403,58 @@ def exp(x, terms=15):
                                     _min_complete(x)))
 
 
+def _ln_vector(x, terms):
+    """ln of a vector-dimension composite, at any depth.  None = not ours.
+
+    A dimension (e0, e1, ...) means c * (1/h)**e0 * B1**e1 * B2**e2 * ..., so
+
+        ln(c * prod B_k**e_k) = ln(c) + sum_k e_k * ln(B_k)
+                              = ln(c) + sum_k e_k * B_{k+1}
+
+    because ln(1/h) IS B1 and ln(B_k) IS B_{k+1}.  Every exponent moves ONE
+    index up and becomes a coefficient.  That single rule covers every depth:
+    ln(h) lands on the log axis, ln(ln(1/h)) on the loglog axis, and the basis
+    grows to hold it.  Without this branch ln simply compared a tuple against
+    0 and raised TypeError, which then surfaced through limit() as
+    "not composable with composite arithmetic" -- pointing at the wrong thing
+    entirely, since the function composed fine and the basis was the problem.
+    """
+    from composite.backends.vector_dim_backend import as_vec, canon, ensure_depth
+    dims, vals = x._backend.to_arrays(x._data)
+    # CANONICAL length, not the padded one: as_vec pads to the current WIDTH,
+    # so measuring it and asking for one more grew the basis on EVERY ln call,
+    # ratcheting to 19 components over a handful of limits.  The canonical form
+    # is what the term actually needs.
+    items = [(canon(as_vec(d)), float(v)) for d, v in zip(dims, vals) if v != 0.0]
+    if not items:
+        return None
+    lead_d, lead_c = max(items, key=lambda t: t[0])
+    if all(e == 0 for e in lead_d):
+        return None                      # a plain real: the scalar path owns it
+    if lead_c <= 0.0:
+        raise ValueError(
+            f"ln of a composite whose leading coefficient is {lead_c}: "
+            "the logarithm needs a positive leading term.")
+    w = ensure_depth(len(lead_d) + 1)
+    out = {}
+    lc = math.log(lead_c)
+    if lc != 0.0:
+        out[tuple(0 for _ in range(w))] = lc
+    for k, e in enumerate(lead_d):
+        if e == 0:
+            continue
+        u = _vec_unit(k + 1, w)
+        out[u] = out.get(u, 0.0) + e
+    lead = _vec_composite(out)
+    if len(items) == 1:
+        return lead
+    # x = lead_term * (1 + r); ln(x) = ln(lead_term) + ln(1 + r)
+    ratio = x / _vec_composite({lead_d: lead_c})
+    if _is_unit(ratio):
+        return lead
+    return lead + ln(ratio, terms)
+
+
 def ln(x, terms=15):
     """Natural logarithm for composite numbers.
 
@@ -1255,6 +1472,11 @@ def ln(x, terms=15):
     if _is_nothing(x):
         return Composite({})
 
+    if LOG_SCALE and getattr(x._backend, "VECTOR_DIMS", False):
+        _v = _ln_vector(x, terms)
+        if _v is not None:
+            return _v
+
     a = x.st()
 
     if a <= 0:
@@ -1266,7 +1488,8 @@ def ln(x, terms=15):
             # INFINITY is the same rule with the sign the other way round:
             # ln(1/h) = -ln(h) = +L.  Handled here because the branch below
             # only looks at negative dimensions.
-            _pos = {d: c for d, c in coeffs.items() if d > 0 and c != 0.0}
+            _pos = {d: c for d, c in coeffs.items()
+                    if _dim_positive(d) and c != 0.0}
             if _pos:
                 _pd = max(_pos)
                 _pc = _pos[_pd]
@@ -1276,11 +1499,11 @@ def ln(x, terms=15):
                     if _lc != 0.0:
                         _t[(0, 0)] = _lc
                     _lead = _vec_composite(_t)
-                    _rest = x / Composite({_pd: _pc})
+                    _rest = x / _like(x, {_pd: _pc})
                     if _is_unit(_rest):
                         return _lead
                     return _lead + ln(_rest, terms)
-        neg_dims = {d: c for d, c in coeffs.items() if d < 0}
+        neg_dims = {d: c for d, c in coeffs.items() if _dim_negative(d)}
         if neg_dims:
             min_dim = min(neg_dims.keys())
             coeff = neg_dims[min_dim]
@@ -1306,7 +1529,7 @@ def ln(x, terms=15):
                     if _lc != 0.0:
                         _lead_terms[(0, 0)] = _lc
                     _lead = _vec_composite(_lead_terms)
-                    _rest = x / Composite({min_dim: coeff})
+                    _rest = x / _like(x, {min_dim: coeff})
                     if _is_unit(_rest):
                         return _lead
                     return _lead + ln(_rest, terms)
@@ -1332,8 +1555,8 @@ def ln(x, terms=15):
     # term holds NOTHING, not zero -- seeding with Composite({0: 0.0}) would
     # assert a zero, which R1 converts to |1|_-1 and adds to the series.
     lead = math.log(a)
-    result = Composite({}) if lead == 0.0 else Composite({0: lead})
-    power = Composite({0: 1})
+    result = _like(x, {}) if lead == 0.0 else _like(x, {_unit_dim(x): lead})
+    power = _like(x, {_unit_dim(x): 1.0})
 
     for n in range(1, terms):
         power = power * ratio
@@ -1378,13 +1601,13 @@ def sqrt(x, terms=12):
     _nz = {d: c for d, c in x.coeffs_dict().items() if c != 0.0}
     if _nz:
         _lead = max(_nz)
-        if _lead != 0:
+        if _dim_nonzero(_lead):
             _c = _nz[_lead]
             if _c < 0:
                 raise ValueError(
                     f"sqrt of a negative leading coefficient |{_c}|_{_lead}")
-            _root = Composite({dim_cast(_lead / 2): math.sqrt(_c)})
-            _rest = x / Composite({_lead: _c})        # leading dim 0, st() == 1
+            _root = _like(x, {_dim_scaled(_lead, 0.5): math.sqrt(_c)})
+            _rest = x / _like(x, {_lead: _c})         # leading dim 0, st() == 1
             return _root * sqrt(_rest, terms)
 
     a = x.st()
@@ -1406,8 +1629,8 @@ def sqrt(x, terms=12):
             result *= (0.5 - k)
         return result / math.factorial(n)
 
-    result = Composite({0: sqrt_a})
-    power = Composite({0: 1})
+    result = _like(x, {_unit_dim(x): sqrt_a})
+    power = _like(x, {_unit_dim(x): 1.0})
 
     for n in range(1, terms):
         power = power * ratio
@@ -1442,8 +1665,8 @@ def _reciprocal(x, terms=15):
         raise ZeroDivisionError("Cannot compute 1/x at x=0")
     h_part = x - R(a)
     ratio = h_part / R(-a)
-    result = Composite({0: 1/a})
-    power = Composite({0: 1})
+    result = _like(x, {_unit_dim(x): 1/a})
+    power = _like(x, {_unit_dim(x): 1.0})
     for n in range(1, terms):
         power = power * ratio
         result = result + power / a
@@ -1466,13 +1689,13 @@ def atan(x, terms=15):
     if not _has_infinitesimal_part(x):
         return Composite({0: math.atan(a)})
     _lead = math.atan(a)
-    result = {} if _lead == 0.0 else {0: _lead}   # R6, see ln
+    result = {} if _lead == 0.0 else {_zero_dim_like(x): _lead}   # R6, see ln
     deriv = deriv * _d_deps(x)          # chain rule; see _d_deps
     for dim, coeff in deriv.c.items():
-        new_dim = dim - 1
-        if new_dim != 0:
-            result[new_dim] = coeff / abs(new_dim)
-    out = Composite(result)
+        new_dim = _dim_shift(dim, -1)
+        if _dim_order(new_dim) != 0:
+            result[new_dim] = coeff / abs(_dim_order(new_dim))
+    out = _like(x, result)
     _c = _min_complete(deriv)
     if _c is not None:
         out._complete = _c + 1
@@ -1494,13 +1717,13 @@ def asin(x, terms=15):
     if not _has_infinitesimal_part(x):
         return Composite({0: math.asin(a)})
     _lead = math.asin(a)
-    result = {} if _lead == 0.0 else {0: _lead}   # R6, see ln
+    result = {} if _lead == 0.0 else {_zero_dim_like(x): _lead}   # R6, see ln
     deriv = deriv * _d_deps(x)          # chain rule; see _d_deps
     for dim, coeff in deriv.c.items():
-        new_dim = dim - 1
-        if new_dim != 0:
-            result[new_dim] = coeff / abs(new_dim)
-    out = Composite(result)
+        new_dim = _dim_shift(dim, -1)
+        if _dim_order(new_dim) != 0:
+            result[new_dim] = coeff / abs(_dim_order(new_dim))
+    out = _like(x, result)
     # Same order shift as antiderivative, and the same reason to record it:
     # this dict is built directly, so nothing else would.  Read the bound from
     # deriv AFTER the chain-rule multiply, which has already taken the min of
@@ -1628,9 +1851,74 @@ def normal_cdf(x, terms=15):
 Phi = normal_cdf          # the name the finance literature uses
 
 
+
 # =============================================================================
 # REAL-VALUED POWERS
 # =============================================================================
+
+def _is_clean_dyadic(s, max_k=40):
+    """True when s is m/2**k for a small k -- a number the index set can hold.
+
+    Every float64 IS a dyadic rational, so "is it dyadic" is trivially yes and
+    useless as a test.  What matters is whether the value the CALLER meant is
+    dyadic: 0.5, 0.25, 3/8 are; 1/3 and 1/7 are not, and float64 merely holds
+    their nearest neighbour.  Scaling by 2**k and asking for an integer
+    separates the two.
+    """
+    v = float(s)
+    if v != v or v in (float("inf"), float("-inf")):
+        return False
+    for k in range(max_k + 1):
+        if (v * (1 << k)).is_integer():
+            return True
+    return False
+
+
+def _warn_non_dyadic_exponent(x, s):
+    """Audible when a root asks for an index the set cannot hold exactly.
+
+    WHEN THIS DOES NOT APPLY, which is most of the time.  If x has a non-zero
+    standard part then ln(x) is an ordinary series with INTEGER dimensions, so
+    the exponent only scales coefficients and never reaches the index at all:
+    power(_seeded(8), 1/3) comes back with dims -14..0 and values correct to
+    2.2e-16.  Nothing is approximate about its structure.  An earlier version
+    of this guard refused that case, which was simply wrong.
+
+    WHEN IT DOES.  If x is a pure infinitesimal or infinity, ln(x) sits on the
+    log axis and exp moves the exponent onto the POWER axis, where it becomes
+    the index.  Dimensions are exact under {+, -, /2} -- the dyadics -- so 1/2,
+    1/4, 3/8 land exactly and 1/3, 1/7 do not.
+
+    WHY A WARNING AND NOT A REFUSAL.  The index is still right to sixteen
+    digits, which is no worse than any other floating-point result, and asking
+    for h**(1/3) is a reasonable thing to do.  What is NOT ordinary rounding is
+    the shape of the failure: h**(1/7) raised to the seventh lands at
+    -0.9999999999999998, a SEPARATE term from the -1 it should have merged
+    with, so coeff(-1) returns the wrong number rather than a slightly wrong
+    one.  That deserves to be heard, not blocked.  (h**(1/3) closes only
+    because rounding happens to land favourably -- luck, not a guarantee.)
+    """
+    if _is_clean_dyadic(s):
+        return
+    if x.st() != 0.0:
+        return                      # exponent stays in the coefficients
+    if not any(_dim_nonzero(d) for d in x.c):
+        return                      # no dimension at all
+    # _dim_order reads only the POWER component, so a pure log-axis term like
+    # (0, 1) looked dimensionless and the warning never fired for
+    # power(ln(1/h), 1/3) -- which lands a fractional index on the LOG axis,
+    # exactly the same failure one axis over.
+    import warnings
+    warnings.warn(
+        f"power(x, {s!r}) on a composite with no standard part: the exponent "
+        f"becomes the DIMENSION, and dimensions are exact only under "
+        f"{{+, -, /2}} (the dyadics). {s!r} is not m/2**k, so the index is a "
+        f"float approximation -- accurate to ~1e-16, but it will not always "
+        f"recombine: h**(1/7) to the 7th lands at -0.9999999999999998, a "
+        f"separate term from -1, so coeff(-1) then reads the wrong value. "
+        f"sqrt and repeated halving are exact and always will be.",
+        stacklevel=3)
+
 
 def power(x, s, terms=15):
     """x^s via exp(s * ln(x)).  The exponent may be real OR a Composite.
@@ -1652,6 +1940,7 @@ def power(x, s, terms=15):
         return x ** s
     if isinstance(s, Composite):
         return exp(s * ln(x, terms), terms)
+    _warn_non_dyadic_exponent(x, s)
     return exp(R(s) * ln(x, terms), terms)
 
 
@@ -1671,8 +1960,21 @@ def _d_deps(x):
     its true first derivative; asin(x*x) looked correct only because 2a == 1 at
     the probe point a = 0.5.
     """
-    out = Composite({d + 1: c * abs(d) for d, c in x.c.items()
-                     if not isinstance(d, tuple) and d < 0 and c != 0.0})
+    if any(isinstance(d, tuple) and any(e != 0 for e in d[1:]) for d in x.c):
+        # Differentiating a LOG axis needs the chain rule across scales:
+        # L1 = ln(1/h) has dL1/dh = -1/h, L2 = ln(L1) has dL2/dh = -1/(h*L1),
+        # so one term becomes a SUM of terms, one per axis it touches.  Not
+        # implemented.  Returning the power-axis part alone silently dropped
+        # the factor entirely and made atan(1/ln(1/h)) come back as NOTHING --
+        # a wrong answer with no complaint, which is worse than this.
+        raise NotImplementedError(
+            "d/d(eps) of a composite with a log-axis component: the chain rule "
+            "across scales (dln(1/h)/dh = -1/h) is not implemented, so asin and "
+            "atan cannot take a log-axis argument yet. exp, ln, sqrt, sin, cos, "
+            "tan, sinh, cosh, tanh and erf all can.")
+    out = Composite({_dim_shift(d, 1): c * abs(_dim_order(d))
+                     for d, c in x.c.items()
+                     if _dim_negative(d) and c != 0.0})
     # Differentiating LOSES an order: the top coefficient of x produces the top
     # of x', and there is nothing above it to produce the next.  Failing to
     # record that made asin(sin x) claim order 12 on 11 sound ones.
@@ -1697,7 +1999,8 @@ def _reject_pole(result, what: str, at: float):
     legitimate and must not trip this: INF - INF = |0|_+1 by the canon rule that
     a constructed dimension is retained.
     """
-    poles = {d: c for d, c in result.coeffs_dict().items() if d > 0 and c != 0.0}
+    poles = {d: c for d, c in result.coeffs_dict().items()
+             if _dim_positive(d) and c != 0.0}
     if poles:
         order = max(poles)
         raise ValueError(
@@ -1839,7 +2142,8 @@ def _limit_impl(f, as_x_to, terms, dir, fallback):
     # Positive dims → unbounded divergence (from exp, ln, etc.)
     max_pos = result.max_positive_dim()
     if max_pos is not None:
-        pos_coeffs = {d: c for d, c in result.coeffs_dict().items() if d > 0}
+        pos_coeffs = {d: c for d, c in result.coeffs_dict().items()
+                      if _dim_positive(d)}
         signs = [c > 0 for c in pos_coeffs.values()]
         if all(signs):
             return INF
@@ -2039,18 +2343,28 @@ def antiderivative(f_composite: Composite, constant: float = 0) -> Composite:
       dim=2 -> new_dim=1 -> divisor=1 -> silently created a dim+1 term.
     Now skips all positive dims (INF components, etc.).
     """
-    result = {0: constant}
+    # The constant's key has to be the same KIND as the dimensions it will sit
+    # beside: sorted() cannot order a tuple against an int, so a scalar 0 mixed
+    # with vector dims raised "'<' not supported between tuple and int" the
+    # moment erf integrated a log-axis argument.
+    _dims = list(f_composite.c)
+    _zero = 0
+    for _d in _dims:
+        if isinstance(_d, tuple):
+            _zero = tuple(0 for _ in range(len(_d)))
+            break
+    result = {_zero: constant}
     for dim, coeff in f_composite.c.items():
-        if dim <= 0:
-            new_dim = dim - 1
-            divisor = abs(new_dim)
+        if not _dim_positive(dim):
+            new_dim = _dim_shift(dim, -1)
+            divisor = abs(_dim_order(new_dim))
             result[new_dim] = coeff / divisor
     # Every order moves up by one, so a f sound to K integrates to one sound to
     # K+1.  Building the dict directly skips _truncate_order, which is where
     # the bound would otherwise be recorded -- dropping it here made asin, atan
     # and the derivative round trip all claim to be exact.
     _c = getattr(f_composite, "_complete", None)
-    out = Composite(result)
+    out = _like(f_composite, result)
     if _c is not None:
         out._complete = _c + 1
     return out
@@ -2378,7 +2692,7 @@ def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms:
         dx = min(step, b - x0)
         fx = f(_seeded(x0))
         Fx = antiderivative(fx)
-        neg_terms = {d: c for d, c in Fx.c.items() if d < 0}
+        neg_terms = {d: c for d, c in Fx.c.items() if _dim_negative(d)}
         contribution = sum(
             coeff * dx ** abs(dim)
             for dim, coeff in neg_terms.items()
@@ -2421,7 +2735,7 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
 
     # --- LIFT AT THE GATE ---
     probe = _ensure_composite(f(_seeded((a + b) / 2)))
-    if not any(dim < 0 for dim in probe.c):
+    if not any(_dim_negative(dim) for dim in probe.c):
         import warnings
         warnings.warn(
             "integrate_adaptive: f does not propagate composite structure to output. "

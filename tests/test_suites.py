@@ -25,6 +25,7 @@ SUITES = [
     "tests/test_dimension_scales.py",
     "tests/test_series_completeness.py",
     "tests/test_identities.py",
+    "tests/test_vector_dimensions.py",
     "tests/test_multivar_extended.py",
     "tests/turing_completeness/test_turing_completeness.py",
     "tests/turing_completeness/test_indicator_polinomial_step_test.py",

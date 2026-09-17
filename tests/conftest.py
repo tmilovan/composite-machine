@@ -20,6 +20,7 @@ collect_ignore = [
     "test_dimension_scales.py",
     "test_series_completeness.py",
     "test_identities.py",
+    "test_vector_dimensions.py",
     "test_multivar_extended.py",
 ]
 collect_ignore_glob = ["turing_completeness/*.py"]

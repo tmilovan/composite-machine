@@ -28,16 +28,78 @@ from typing import Tuple
 from .dict_backend import DictBackend, DictData
 from .base_backend import DIM_DTYPE
 
-BASIS = ("power", "log")          # extend here; order IS the dominance order
+# Index k is the k-times-iterated logarithm: 0 = power, 1 = log, 2 = log log.
+# The list GROWS on demand -- ln() pushes a term one index up, so the depth a
+# program needs is not knowable in advance.  Order IS the dominance order, and
+# it stays so at any depth: each further log outgrows nothing and is outgrown
+# by everything before it.
+BASIS = ["power", "log"]
 WIDTH = len(BASIS)
 MIN_QUOTIENT_TERMS = 50   # floor; matches the scalar backend's bound
 
 
-def as_vec(d, width: int = WIDTH) -> tuple:
-    """Any dimension as a vector of `width` components."""
+def basis_name(k: int) -> str:
+    return ("power", "log")[k] if k < 2 else f"log^{k}"
+
+
+def ensure_depth(n: int) -> int:
+    """Widen the basis to at least n components.  Returns the new WIDTH.
+
+    Nothing already built becomes invalid: as_vec pads on read, so a dimension
+    created at width 2 compares and adds correctly against one created at 4.
+    """
+    global WIDTH
+    while len(BASIS) < n:
+        BASIS.append(basis_name(len(BASIS)))
+    WIDTH = len(BASIS)
+    return WIDTH
+
+
+def canon(d):
+    """Canonical dimension: trailing zeros stripped, minimum length 2.
+
+    A dimension created at width 2 and one created at width 4 must be the SAME
+    KEY, or a lookup after the basis grows pads (0,1) to (0,1,0), misses the
+    stored (0,1), and silently returns 0 -- which made log(1/h) compare as not
+    greater than loglog(1/h), because every cross-depth read was zero.
+
+    Stripping also makes Python's own tuple ordering the dominance order: for
+    canonical forms, (0,1) > (0,0,1) and (0,1) < (0,1,1) both come out right
+    without padding either side.  And it stops the basis from ratcheting: the
+    stored length stays at what a term actually needs.
+    """
+    if not isinstance(d, tuple):
+        return d
+    e = len(d)
+    while e > 2 and d[e - 1] == 0:
+        e -= 1
+    return d[:e] if e != len(d) else d
+
+
+def as_vec(d, width: int = None) -> tuple:
+    """Any dimension as a vector of `width` components (default: current WIDTH).
+
+    `width` must be read at CALL time, not bound as a default at import -- a
+    default captures the width the module happened to have when it loaded, so
+    every dimension built after a widening would be silently truncated.
+    """
+    if width is None:
+        width = WIDTH
     if isinstance(d, tuple):
-        return d if len(d) == width else d + (0,) * (width - len(d))
+        return d if len(d) == width else (d + (0,) * (width - len(d)))[:max(width, len(d))]
     return (d,) + (0,) * (width - 1)
+
+
+def pair(da, db):
+    """Two dimensions padded to a COMMON width, for componentwise arithmetic.
+
+    zip() over tuples of different lengths truncates to the shorter and drops
+    the trailing components in silence -- so a width-2 dim convolved with a
+    width-3 one lost the deepest axis entirely, with no error.
+    """
+    va, vb = as_vec(da), as_vec(db)
+    w = max(len(va), len(vb))
+    return as_vec(da, w), as_vec(db, w)
 
 
 def is_scalarish(dims) -> bool:
@@ -57,17 +119,17 @@ class VectorDimBackend(DictBackend):
     VECTOR_DIMS = True
 
     def create(self, dim, value: float) -> DictData:
-        return DictData({as_vec(dim): float(value)})
+        return DictData({canon(as_vec(dim)): float(value)})
 
     def create_from_terms(self, dims, vals) -> DictData:
-        return DictData({as_vec(d): float(v) for d, v in zip(dims, vals)})
+        return DictData({canon(as_vec(d)): float(v) for d, v in zip(dims, vals)})
 
     def read_dim(self, data: DictData, dim) -> float:
-        return data.terms.get(as_vec(dim), 0.0)
+        return data.terms.get(canon(as_vec(dim)), 0.0)
 
     def write_dim(self, data: DictData, dim, value: float) -> DictData:
         t = dict(data.terms)
-        t[as_vec(dim)] = value
+        t[canon(as_vec(dim))] = value
         return DictData(t)
 
     def to_arrays(self, data: DictData) -> Tuple[np.ndarray, np.ndarray]:
@@ -88,19 +150,18 @@ class VectorDimBackend(DictBackend):
         return out
 
     def add(self, a: DictData, b: DictData) -> DictData:
-        out = {as_vec(d): v for d, v in a.terms.items()}
+        out = {canon(as_vec(d)): v for d, v in a.terms.items()}
         for d, v in b.terms.items():
-            d = as_vec(d)
+            d = canon(as_vec(d))
             out[d] = out.get(d, 0.0) + v
         return DictData(out)
 
     def convolve(self, a: DictData, b: DictData) -> DictData:
         out = {}
         for da, va in a.terms.items():
-            da = as_vec(da)
             for db, vb in b.terms.items():
-                db = as_vec(db)
-                k = tuple(x + y for x, y in zip(da, db))
+                pa, pb = pair(da, db)
+                k = canon(tuple(x + y for x, y in zip(pa, pb)))
                 out[k] = out.get(k, 0.0) + va * vb
         return DictData(out)
 
@@ -108,8 +169,8 @@ class VectorDimBackend(DictBackend):
         """Long division; dimensions SUBTRACT componentwise."""
         if not b.terms:
             raise ZeroDivisionError("Cannot deconvolve by empty Composite")
-        rem = {as_vec(d): v for d, v in a.terms.items() if v != 0.0}
-        bnz = {as_vec(d): v for d, v in b.terms.items() if v != 0.0}
+        rem = {canon(as_vec(d)): v for d, v in a.terms.items() if v != 0.0}
+        bnz = {canon(as_vec(d)): v for d, v in b.terms.items() if v != 0.0}
         if not bnz:
             raise ZeroDivisionError("Cannot deconvolve by zero Composite")
         b_lead = max(bnz)
@@ -127,11 +188,13 @@ class VectorDimBackend(DictBackend):
         while rem and limit > 0:
             limit -= 1
             r_dim = max(rem)
-            q_dim = tuple(x - y for x, y in zip(r_dim, b_lead))
+            _r, _b = pair(r_dim, b_lead)
+            q_dim = canon(tuple(x - y for x, y in zip(_r, _b)))
             q_val = rem[r_dim] / b_coef
             quot[q_dim] = quot.get(q_dim, 0.0) + q_val
             for d_b, v_b in bnz.items():
-                o = tuple(x + y for x, y in zip(q_dim, d_b))
+                _q, _d = pair(q_dim, d_b)
+                o = canon(tuple(x + y for x, y in zip(_q, _d)))
                 rem[o] = rem.get(o, 0.0) - q_val * v_b
                 if rem[o] == 0.0:
                     del rem[o]
