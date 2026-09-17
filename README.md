@@ -2,7 +2,7 @@
 
 ## Announcements
 
-### New release
+### New release (September 2026)
 
 After months of experimenting, learning (finding about Levi Civita fields etc.), building and testing different implementations, here is the new release that contains the accumulated findings.
 
@@ -16,12 +16,11 @@ composite number
 
 Note of caution: this is still highly experimental and most likely (for sure) still contains some misconceptions and a lot of edge cases and other bugs. The purpose of the library is to showcase what is possible and to serve as a baseline for further exploration.
 
-### Library release
+### Library release (April 2026)
 
 The first proper pypy library based on this experimental features has been released. A standalone tool to evaluate Python functions at points where they're undefined and get exact limit values if they exists.
 
 - **[https://github.com/FWDhr/composite-resolve](https://github.com/FWDhr/composite-resolve)**
-
 
 
 # Composite Machine
