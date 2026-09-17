@@ -70,12 +70,17 @@ class TestSuite:
     def add(self, name: str, passed: bool, details: str = ""):
         self.results.append(TestResult(name, passed, details))
 
-    def assert_eq(self, name: str, actual, expected, tol=1e-10):
+    def assert_eq(self, name: str, actual, expected, tol=1e-12):
         if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
             passed = abs(actual - expected) < tol
         else:
             passed = actual == expected
-        self.add(name, passed, f"actual={actual}, expected={expected}")
+        self.add(name, passed,
+                 f"got={actual}  want={expected}  "
+                 f"err={abs(actual-expected):.2e}  tol={tol:.1e}"
+                 if isinstance(expected, (int, float))
+                 and isinstance(actual, (int, float))
+                 else f"got={actual}  want={expected}")
 
     def assert_true(self, name: str, condition: bool, details: str = ""):
         self.add(name, condition, details)
@@ -103,8 +108,9 @@ class TestSuite:
         print(f"{'='*70}")
         for r in self.results:
             status = "\u2713" if r.passed else "\u2717"
+            # Numbers on PASS too -- a tick alone cannot be audited.
             print(f"  {status} {r.name}")
-            if not r.passed and r.details:
+            if r.details:
                 print(f"      {r.details}")
         return passed, total
 
@@ -176,7 +182,7 @@ def test_higher_order_cancellation():
 
     suite.assert_eq(
         "lim(x\u21920) (x - sin x)/(x - tan x) = -1/2",
-        limit(lambda x: (x-sin(x))/(x-tan(x)), 0), -0.5, tol=1e-8)
+        limit(lambda x: (x-sin(x))/(x-tan(x)), 0), -0.5, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920) (cos(sin x) - cos x)/x\u2074 = 1/6",
@@ -206,7 +212,7 @@ def test_polynomial_algebraic():
 
     suite.assert_eq(
         "lim(x\u21920) (x\u00b3+2x\u00b2)/(x\u00b2+x) = 0",
-        limit(lambda x: (x**3+R(2)*x**2)/(x**2+x), 0), 0.0, tol=1e-8)
+        limit(lambda x: (x**3+R(2)*x**2)/(x**2+x), 0), 0.0, tol=1e-12)
 
     return suite.report()
 
@@ -224,11 +230,11 @@ def test_general_powers():
 
     suite.assert_eq(
         "lim(x\u21920) (1+2x)^(1/x) = e\u00b2",
-        limit(lambda x: (R(1)+R(2)*x)**(R(1)/x), 0), math.e**2, tol=1e-6)
+        limit(lambda x: (R(1)+R(2)*x)**(R(1)/x), 0), math.e**2, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920) (1+x/3)^(1/x) = e^(1/3)",
-        limit(lambda x: (R(1)+x/R(3))**(R(1)/x), 0), math.e**(1.0/3), tol=1e-6)
+        limit(lambda x: (R(1)+x/R(3))**(R(1)/x), 0), math.e**(1.0/3), tol=1e-12)
 
     return suite.report()
 
@@ -367,7 +373,7 @@ def test_limits_at_infinity():
     # sin(1/x) as x->inf: 1/x -> 0, sin(small) ~ small, sin(1/x)/1/x -> 1
     suite.assert_eq(
         "lim(x\u2192\u221e) x\u00b7sin(1/x) = 1",
-        limit(lambda x: x*sin(R(1)/x), INF), 1.0, tol=1e-6)
+        limit(lambda x: x*sin(R(1)/x), INF), 1.0, tol=1e-12)
 
     return suite.report()
 
@@ -409,7 +415,7 @@ def test_hyperbolic():
 
     suite.assert_eq(
         "lim(x\u21920) (x\u00b7cosh x - sinh x)/x\u00b3 = 1/3",
-        limit(lambda x: (x*cosh(x)-sinh(x))/(x**3), 0), 1.0/3, tol=1e-8)
+        limit(lambda x: (x*cosh(x)-sinh(x))/(x**3), 0), 1.0/3, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920) (sinh x - tanh x)/x\u00b3 = 1/2",
@@ -421,7 +427,7 @@ def test_hyperbolic():
 
     suite.assert_eq(
         "lim(x\u21920) (cosh x - 1)/x\u00b2 = 1/2",
-        limit(lambda x: (cosh(x)-R(1))/(x**2), 0), 0.5, tol=1e-8)
+        limit(lambda x: (cosh(x)-R(1))/(x**2), 0), 0.5, tol=1e-12)
 
     return suite.report()
 
@@ -439,27 +445,27 @@ def test_domain_errors():
 
     suite.assert_eq(
         "lim(x\u21920+) x\u00b7ln(x) = 0",
-        _safe_limit(lambda x: x*ln(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: x*ln(x), 0, dir='+'), 0.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) x^x = 1",
-        _safe_limit(lambda x: x**x, 0, dir='+'), 1.0, tol=1e-6)
+        _safe_limit(lambda x: x**x, 0, dir='+'), 1.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) x^(sin x) = 1",
-        _safe_limit(lambda x: x**(sin(x)), 0, dir='+'), 1.0, tol=1e-6)
+        _safe_limit(lambda x: x**(sin(x)), 0, dir='+'), 1.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) sqrt(x) = 0",
-        _safe_limit(lambda x: sqrt(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: sqrt(x), 0, dir='+'), 0.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) sqrt(x)\u00b7sin(x) = 0",
-        _safe_limit(lambda x: sqrt(x)*sin(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: sqrt(x)*sin(x), 0, dir='+'), 0.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) x\u00b7sqrt(x) = 0",
-        _safe_limit(lambda x: x*sqrt(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: x*sqrt(x), 0, dir='+'), 0.0, tol=1e-12)
 
     # Answerable again.  ln of an infinitesimal is ln(c) + d*ln(h), and ln(h)
     # needs a dimension between 0 and every positive power -- no float sits
@@ -470,19 +476,19 @@ def test_domain_errors():
     # properly, so the value is now computed rather than compensated for.
     suite.assert_eq(
         "lim(x\u21920+) sqrt(x)\u00b7ln(x) = 0",
-        _safe_limit(lambda x: sqrt(x)*ln(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: sqrt(x)*ln(x), 0, dir='+'), 0.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) x\u00b2\u00b7ln(x) = 0",
-        _safe_limit(lambda x: x**2*ln(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: x**2*ln(x), 0, dir='+'), 0.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) exp(-1/x\u00b2) = 0",
-        _safe_limit(lambda x: exp(R(-1)/(x**2)), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: exp(R(-1)/(x**2)), 0, dir='+'), 0.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) x\u00b7exp(-1/x) = 0",
-        _safe_limit(lambda x: x*exp(R(-1)/x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: x*exp(R(-1)/x), 0, dir='+'), 0.0, tol=1e-12)
 
     return suite.report()
 
@@ -586,11 +592,11 @@ def test_compositions():
 
     suite.assert_eq(
         "lim(x\u21920) sin(sin(x))/x = 1",
-        limit(lambda x: sin(sin(x))/x, 0), 1.0, tol=1e-6)
+        limit(lambda x: sin(sin(x))/x, 0), 1.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920) sin(cos(x)) = sin(1)",
-        limit(lambda x: sin(cos(x)), 0), math.sin(1.0), tol=1e-6)
+        limit(lambda x: sin(cos(x)), 0), math.sin(1.0), tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920) x\u00b2\u00b7sin(1/x) + x = 0",
@@ -631,12 +637,12 @@ def test_edge_cases():
 
     suite.assert_eq(
         "lim(x\u2192\u03c0/2) sin(x) = 1",
-        limit(lambda x: sin(x), math.pi/2), 1.0, tol=1e-6)
+        limit(lambda x: sin(x), math.pi/2), 1.0, tol=1e-12)
 
     # Nested compositions without singularity
     suite.assert_eq(
         "lim(x\u21920) sin(sin(x))/sin(x) = 1",
-        limit(lambda x: sin(sin(x))/sin(x), 0), 1.0, tol=1e-6)
+        limit(lambda x: sin(sin(x))/sin(x), 0), 1.0, tol=1e-12)
 
     # asin/acos at regular points
     suite.assert_eq(

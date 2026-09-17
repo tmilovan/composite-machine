@@ -46,9 +46,10 @@ class Suite:
     def _note(self, tag, ok, detail=""):
         self.passed += ok
         self.failed += (not ok)
-        print(f"  {'OK  ' if ok else 'FAIL'} {tag}")
+        # Numbers on PASS too -- a tick alone cannot be audited.
+        print(f"  {'OK  ' if ok else 'FAIL'} {tag}"
+              + (f"   {detail}" if detail else ""))
         if not ok:
-            print(f"         {detail}")
             self.fails.append(tag)
 
     # Every check takes a THUNK where the value could throw, so a regression

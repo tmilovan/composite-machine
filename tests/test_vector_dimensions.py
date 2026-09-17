@@ -53,9 +53,13 @@ class T:
         self.failed = []
 
     def _note(self, tag, ok, detail=""):
+        # Print the numbers on PASS as well as on fail.  Showing got/want only
+        # when something breaks means a passing suite reveals nothing, and a
+        # tolerance can be widened until the tick appears with no trace of it
+        # in the output.  A green run has to be auditable from its own log.
         if ok:
             self.passed += 1
-            print(f"  OK   {tag}")
+            print(f"  OK   {tag}" + (f"   {detail}" if detail else ""))
         else:
             self.failed.append((tag, detail))
             print(f"  FAIL {tag}\n         {detail}")
@@ -82,7 +86,7 @@ class T:
         except Exception as e:
             return self._note(tag, False, f"raised {type(e).__name__}: {e}")
         self._note(tag, abs(g - want) <= tol,
-                   f"got {g!r}  want {want!r}  err {abs(g-want):.2e}")
+                   f"got {g!r}  want {want!r}  err {abs(g-want):.2e}  tol {tol:.1e}")
 
     def raises(self, tag, exc, fn):
         try:

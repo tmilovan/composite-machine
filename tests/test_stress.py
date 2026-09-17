@@ -29,24 +29,24 @@ from composite.composite_lib import (
 
 passed = failed = errors = 0
 
-def check(tag, got, want, tol=1e-6):
+def check(tag, got, want, tol=1e-12):
     global passed, failed, errors
     try:
         ok = abs(got - want) < tol
         passed += ok; failed += (not ok)
-        print(f"  {'✓' if ok else '✗'} {tag}")
-        if not ok: print(f"      got={got:.12g}  want={want:.12g}  diff={abs(got-want):.2e}")
+        print(f"  {'✓' if ok else '✗'} {tag}  got={got:.12g}  want={want:.12g}  "
+              f"err={abs(got-want):.2e}  tol={tol:.1e}")
     except Exception as e:
         errors += 1; print(f"  ⚠ {tag}  ERROR: {e}")
 
-def check_int(tag, f, a, b, want, tol=1e-4):
+def check_int(tag, f, a, b, want, tol=1e-9):
     global passed, failed, errors
     try:
         val, err = integrate_adaptive(f, a, b)
         ok = abs(val - want) < tol
         passed += ok; failed += (not ok)
-        print(f"  {'✓' if ok else '✗'} {tag}")
-        if not ok: print(f"      got={val:.12g}  want={want:.12g}  diff={abs(val-want):.2e}")
+        print(f"  {'✓' if ok else '✗'} {tag}  got={val:.12g}  want={want:.12g}  "
+              f"err={abs(val-want):.2e}  tol={tol:.1e}")
     except Exception as e:
         errors += 1; print(f"  ⚠ {tag}  ERROR: {e}")
 

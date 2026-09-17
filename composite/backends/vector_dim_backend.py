@@ -76,6 +76,49 @@ def canon(d):
     return d[:e] if e != len(d) else d
 
 
+def dom_key(d, width=None):
+    """Sort key giving the DOMINANCE order for a canonical dimension.
+
+    canon() strips trailing zeros so a dimension built at width 2 is the same
+    dict KEY as one built at width 4.  That is required for lookups, but it
+    breaks raw tuple comparison: Python ranks a strict prefix as LESS, which is
+    right when the extension is positive -- (0,0,1) is loglog(1/h), infinite --
+    and backwards when it is negative, because (0,0,-1) is 1/loglog(1/h), an
+    infinitesimal.  Measured: max([(0,0), (0,0,-3)]) returned (0,0,-3), so sqrt
+    took a -1.2e-32 cancellation term for its leading coefficient and refused
+    the whole expression.
+
+    Comparing at equal width restores the direction automatically: extending
+    with a positive component raises the dimension, with a negative one lowers
+    it.  No separate pass for negatives is needed.
+    """
+    if width is None:
+        width = WIDTH
+    return as_vec(d, width)
+
+
+def _common_width(dims):
+    w = WIDTH
+    for d in dims:
+        if isinstance(d, tuple) and len(d) > w:
+            w = len(d)
+    return w
+
+
+def dom_max(dims):
+    """max by dominance order.  All keys padded to ONE common width."""
+    dims = list(dims)
+    w = _common_width(dims)
+    return max(dims, key=lambda d: as_vec(d, w))
+
+
+def dom_sorted(dims, reverse=False):
+    """sorted by dominance order.  All keys padded to ONE common width."""
+    dims = list(dims)
+    w = _common_width(dims)
+    return sorted(dims, key=lambda d: as_vec(d, w), reverse=reverse)
+
+
 def as_vec(d, width: int = None) -> tuple:
     """Any dimension as a vector of `width` components (default: current WIDTH).
 
@@ -173,7 +216,7 @@ class VectorDimBackend(DictBackend):
         bnz = {canon(as_vec(d)): v for d, v in b.terms.items() if v != 0.0}
         if not bnz:
             raise ZeroDivisionError("Cannot deconvolve by zero Composite")
-        b_lead = max(bnz)
+        b_lead = dom_max(bnz)
         b_coef = bnz[b_lead]
         quot = {}
         # Long division of a non-exact quotient descends forever (1/(1+x) is an
@@ -187,7 +230,7 @@ class VectorDimBackend(DictBackend):
         limit = max(len(rem) + len(bnz), MIN_QUOTIENT_TERMS)
         while rem and limit > 0:
             limit -= 1
-            r_dim = max(rem)
+            r_dim = dom_max(rem)
             _r, _b = pair(r_dim, b_lead)
             q_dim = canon(tuple(x - y for x, y in zip(_r, _b)))
             q_val = rem[r_dim] / b_coef

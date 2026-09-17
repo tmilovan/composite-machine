@@ -35,7 +35,7 @@ FIXES applied:
   6. Truncation: per-variable MAX_ORDER_PER_VAR after multiply (fixes term explosion)
 
 Usage:
-    from composite_multivar import *
+    from composite.composite_multivar import *
 
     # Two variables
     x = RR(3, var=0, nvars=2)   # x = 3 + hx
@@ -787,12 +787,33 @@ def multivar_limit(f, as_vars_to: List[float]):
 
 def double_integral(f, x_range, y_range, tol=1e-8):
     """
-    Compute ∫∫ f(x,y) dy dx by iterated single-variable integration.
-    x_range = (a, b), y_range = (c, d)
+    Compute the double integral of f over x_range = (a, b), y_range = (c, d).
 
-    Uses composite adaptive integration in each variable.
+    DELEGATES to composite_lib.integrate, the library's 2-D entry point.  This
+    was a second, weaker implementation of the same integral:
+
+      - the outer variable was a fixed 20-step midpoint sum, so the integral
+        of x**2 over the unit square came out 2.1e-04 low where integrate()
+        gives 2.1e-06;
+      - it accumulated into `total = 0.0`, and a bare Python zero meeting a
+        composite converts (R1), so every result carried a spurious |1|_-1
+        beside the correct standard part -- right value, polluted derivative.
+
+    Returns a float, matching integrate().  The previous body is kept below as
+    _double_integral_mc; it is no longer called, not removed.
     """
-    from composite_lib import integrate_adaptive, R, ZERO, Composite
+    from composite.composite_lib import integrate
+    return integrate(f, x_range, y_range, tol=tol)
+
+
+def _double_integral_mc(f, x_range, y_range, tol=1e-8):
+    """The former double_integral body. Retained, no longer called.
+
+    Routes through MC rather than Composite, so this is the path to reach for
+    if a two-variable integrand ever needs MC semantics integrate() cannot
+    express.  Carries both defects described in double_integral above.
+    """
+    from composite.composite_lib import integrate_adaptive, R, ZERO, Composite
 
     a, b = x_range
     c, d = y_range
@@ -803,11 +824,16 @@ def double_integral(f, x_range, y_range, tol=1e-8):
             x_mc = RR_const(x_val, nvars=2)
             y_mc = MC({(0,0): y_comp.st(), (0,-1): y_comp.coeff(-1)}, nvars=2)
             result_mc = f(x_mc, y_mc)
-            out = Composite({})
+            # Accumulate in a plain dict and build the Composite ONCE.
+            # `Composite.c` is a property that rebuilds a dict from backend
+            # data on every access, so `out.c[k] = v` wrote into a throwaway
+            # and `out` stayed empty -- every double integral returned 0.0,
+            # including the integral of the constant 1.
+            acc = {}
             for dim, coeff in result_mc.c.items():
                 if dim[0] == 0:
-                    out.c[dim[1]] = out.c.get(dim[1], 0) + coeff
-            return out
+                    acc[dim[1]] = acc.get(dim[1], 0.0) + coeff
+            return Composite(acc)
 
         val, err = integrate_adaptive(g, c, d, tol=tol)
         return val

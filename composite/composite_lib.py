@@ -27,7 +27,7 @@ v3 changes:
   - Empty composite repr changed from |0|₀ to ∅
 
 Usage:
-    from composite_lib import *
+    from composite.composite_lib import *
 
     # Derivatives
     derivative(lambda x: x**2, at=3)           # → 6
@@ -229,7 +229,8 @@ class Composite:
             # it was expressed, even if its coefficient is 0.0
             # Previously: {k: v for k, v in ... if v != 0} stripped them
             if coefficients:
-                sorted_dims = sorted(coefficients.keys())
+                from composite.backends.vector_dim_backend import dom_sorted as _dom_sorted
+                sorted_dims = _dom_sorted(coefficients.keys())
                 if sorted_dims and isinstance(sorted_dims[0], tuple):
                     # VECTOR dimensions (power, log, ...).  np.array would turn
                     # these into a 2-D float grid and the rows are unhashable;
@@ -535,6 +536,17 @@ class Composite:
                 a._backend.create_from_terms(shifted, my_vals / div_coeff),
                 a._backend, complete=_min_complete(self, other))
 
+        # deconvolve is lexicographic long division: it repeatedly takes
+        # max(rem).  With infinitesimals on TWO independent axes that starves
+        # one of them -- (0,-k) outranks (-1,anything), so the y-axis geometric
+        # series (which never terminates) eats every iteration and the x-axis
+        # terms sit in the remainder until the cap runs out.  1/(1+x+y) came
+        # back with NO x-dependence at all.  The geometric series treats the
+        # whole infinitesimal part as one object and has no such ordering, so
+        # use it when the divisor genuinely spans more than one axis.
+        if _spans_multiple_axes(b) and b.st() != 0.0:
+            return a * _reciprocal(b, terms=_effective_terms(15))
+
         result = a._backend.deconvolve(a._data, b._data)
         out = Composite._wrap(_truncate_dims(a._backend, result), a._backend,
                               complete=_min_complete(self, other))
@@ -633,6 +645,34 @@ class Composite:
         _p = lambda d: d[0] if isinstance(d, tuple) else d
         return sum(float(v) * h_value ** (-float(_p(d)))
                    for d, v in zip(dims, vals) if _p(d) < 0)
+
+    def eval_taylor_axes(self, h_value):
+        """eval_taylor, but the NON-power axes survive as dimensions.
+
+        eval_taylor substitutes h and returns a FLOAT, which adds terms that
+        differ only on a later axis into the same number: (-1, 0) and (-1, -1)
+        both become coefficient * h**1.  That is correct when the power axis is
+        the only one in play, and it is what collapses a box integral -- the
+        second variable's structure is destroyed at exactly this step, not at
+        .st() as it appears.
+
+        Returns {dim: coeff} with the power component consumed and every other
+        component kept, so the caller still has a series in the remaining
+        variables.  eval_taylor is left alone: its callers want the float.
+        """
+        dims, vals = self._backend.to_arrays(self._data)
+        out = {}
+        for d, v in zip(dims, vals):
+            p = d[0] if isinstance(d, tuple) else d
+            if p >= 0:
+                continue
+            if isinstance(d, tuple):
+                from composite.backends.vector_dim_backend import canon
+                key = canon((0,) + tuple(d[1:]))
+            else:
+                key = 0
+            out[key] = out.get(key, 0.0) + float(v) * h_value ** (-float(p))
+        return out
 
     def integrate_step(self, dx):
         """Integrate over interval [x, x+dx]."""
@@ -1170,7 +1210,12 @@ def _like(x, terms):
     # standard part was dropped and asin(x) came back with st() == 0.  _like
     # only ever worked because every earlier caller happened to pass a sorted
     # dict.
-    sorted_dims = sorted(terms.keys())
+    # dom_sorted, not sorted: _r1 shifts dims[0] on the stated contract that
+    # to_arrays comes back ascending and [0] is the LOWEST dimension.  Raw
+    # tuple order puts a canonical (0,0) BELOW (0,0,-3), so "lowest" could be
+    # a term that dominates it, and R1 would uplift the wrong one.
+    from composite.backends.vector_dim_backend import dom_sorted as _dom_sorted
+    sorted_dims = _dom_sorted(terms.keys())
     if isinstance(sorted_dims[0], tuple):
         dims = np.empty(len(sorted_dims), dtype=object)
         for _i, _d in enumerate(sorted_dims):
@@ -1547,7 +1592,8 @@ def ln(x, terms=15):
             _pos = {d: c for d, c in coeffs.items()
                     if _dim_positive(d) and c != 0.0}
             if _pos:
-                _pd = max(_pos)
+                from composite.backends.vector_dim_backend import dom_max as _dom_max
+                _pd = _dom_max(_pos)
                 _pc = _pos[_pd]
                 if _pc > 0:
                     _t = {(0, 1): float(_pd)}
@@ -1656,7 +1702,12 @@ def sqrt(x, terms=12):
     # refine it -- so the run representation is unaffected.
     _nz = {d: c for d, c in x.coeffs_dict().items() if c != 0.0}
     if _nz:
-        _lead = max(_nz)
+        # dom_max, not max: raw tuple order ranks a strict prefix lower, so a
+        # canonical (0,0) lost to (0,0,-3) -- an INFINITESIMAL taken as the
+        # leading term.  sqrt then read a 1e-32 cancellation coefficient and
+        # refused the expression.
+        from composite.backends.vector_dim_backend import dom_max as _dom_max
+        _lead = _dom_max(_nz)
         if _dim_nonzero(_lead):
             _c = _nz[_lead]
             if _c < 0:
@@ -1711,6 +1762,49 @@ def tan(x, terms=12):
 # =============================================================================
 # INVERSE TRIGONOMETRIC FUNCTIONS
 # =============================================================================
+
+def _spans_multiple_axes(x):
+    """True when x's non-standard terms live on more than one basis axis.
+
+    The axis a dimension belongs to is the index of its first non-zero
+    component: (-1, 0) is the power axis, (0, -1) the first log axis.  A value
+    touching both is the case lexicographic long division cannot order.
+    """
+    axes = set()
+    for d in x.c:
+        if not isinstance(d, tuple):
+            if d != 0:
+                axes.add(0)
+            continue
+        for i, e in enumerate(d):
+            if e != 0:
+                axes.add(i)
+                break
+        if len(axes) > 1:
+            return True
+    return len(axes) > 1
+
+
+def _lane_d1(x, axis=1):
+    """First derivative with respect to the variable on `axis`.
+
+    Composite.d(1) reads the POWER axis, which is correct when the variable is
+    seeded there.  Once the integrator moved its seed to a lane, every reader
+    of that derivative has to follow -- the curve tangent did not, so every
+    line integral came back exactly 0.0: r'(t) read off an axis the parameter
+    no longer occupies.
+    """
+    from composite.backends.vector_dim_backend import as_vec
+    if not isinstance(x, Composite):
+        return 0.0
+    total = 0.0
+    for d, c in x.c.items():
+        v = as_vec(d)
+        if len(v) > axis and v[axis] == -1 and v[0] == 0 and \
+                all(e == 0 for i, e in enumerate(v) if i not in (0, axis)):
+            total += c
+    return total
+
 
 def _reciprocal(x, terms=15):
     """Compute 1/x via geometric series. Internal helper."""
@@ -2595,6 +2689,265 @@ def definite_integral(f: Callable, a: float, b: float, terms: int = 12) -> float
 # =============================================================================
 
 
+def _perturbation_seed(axis):
+    """Unit infinitesimal on basis axis `axis` (1 = first non-power axis).
+
+    The basis axes past 0 mean iterated logarithms, and this borrows them as
+    independent perturbation directions.  That is sound HERE because the only
+    way a log-axis dimension enters is ln/exp of an infinitesimal or infinite
+    value, and a panel midpoint is neither -- ln(_seeded(t)) expands purely on
+    the power axis for every finite non-zero t.  _box_exact probes for that
+    and declines the exact path if the integrand brings its own log axes.
+    """
+    from composite.backends.vector_dim_backend import canon, ensure_depth
+    ensure_depth(axis + 1)
+    return _vec_composite({canon((0,) * axis + (-1,)): 1.0})
+
+
+def _derivative_axis(x, axis):
+    """d/d(variable on `axis`), staying a composite in every other lane.
+
+    The inverse shift to _antiderivative_axis.  A term at lane order k becomes
+    k times the term at order k-1, so d(sigma)/du comes back as a SERIES in
+    (u, v) rather than a number at one point -- which is what a surface
+    integral needs: the area element varies across the patch, and reading the
+    tangent off as a float freezes it at the midpoint.
+    """
+    from composite.backends.vector_dim_backend import canon, as_vec
+    out = {}
+    for dim, coeff in x.c.items():
+        v = list(as_vec(dim))
+        while len(v) <= axis:
+            v.append(0)
+        k = v[axis]
+        if k >= 0:
+            continue                      # no content on this lane: d/d(var)=0
+        v[axis] = k + 1
+        key = canon(tuple(v))
+        out[key] = out.get(key, 0.0) + coeff * abs(k)
+    return _like(x, out)
+
+
+def _antiderivative_axis(x, axis):
+    """Antiderivative with respect to the variable living on `axis`.
+
+    antiderivative() shifts the POWER axis, which is right when the integration
+    variable is seeded there.  It is not right once the seed has its own lane:
+    the power axis then carries the INTEGRAND's own infinitesimal content --
+    R1 zeros, anything the caller's expression genuinely made small -- and
+    shifting that is integrating something that is not the variable.
+    """
+    from composite.backends.vector_dim_backend import canon, as_vec
+    out = {}
+    for dim, coeff in x.c.items():
+        v = list(as_vec(dim))
+        while len(v) <= axis:
+            v.append(0)
+        if v[axis] > 0:
+            continue                       # positive: an INF component, skip
+        v[axis] -= 1
+        divisor = abs(v[axis])
+        out[canon(tuple(v))] = coeff / divisor
+    return out
+
+
+def _eval_axis(terms, h_value, axis):
+    """Substitute a real h for the axis-`axis` infinitesimal, keep every other.
+
+    This is the only place a real number may replace an infinitesimal, and it
+    may do so ONLY for the lane the integrator seeded.  Doing it for every
+    dimension at once is what turned a structural zero into a real 4.967e-09:
+    x*0 leaves h*z and z*z both at dim -2 when the seed shares the power axis,
+    and no substitution can separate them afterwards.
+    """
+    from composite.backends.vector_dim_backend import canon, as_vec
+    out = {}
+    for dim, coeff in terms.items():
+        v = list(as_vec(dim))
+        while len(v) <= axis:
+            v.append(0)
+        k = v[axis]
+        if k >= 0:
+            continue
+        v[axis] = 0
+        out_key = canon(tuple(v))
+        out[out_key] = out.get(out_key, 0.0) + coeff * h_value ** (-k)
+    return out
+
+
+@_contextlib.contextmanager
+def _box_scope(nvars):
+    """Raise the dimension cap for one box integral.
+
+    The perturbation seeds put a series on each extra axis, so the integrand's
+    expansion is a PRODUCT across nvars axes and easily passes MAX_ACTIVE_DIMS
+    = 60: 1/(1+x+y+z) holds 680 terms at a single panel.  _truncate_dims then
+    keeps the 60 nearest zero, which stops the panel refinement converging --
+    so the loop doubles all the way to the cap and still lands on a worse
+    answer than the Riemann sum it replaced.  Measured on that integrand:
+    cap 60 -> err 9.5e-06 in 34.2s;  cap lifted -> err 7.9e-09 in 0.7s.
+    Slower AND wronger, from a guard written for a different purpose.
+    """
+    global MAX_ACTIVE_DIMS
+    old = MAX_ACTIVE_DIMS
+    MAX_ACTIVE_DIMS = max(MAX_ACTIVE_DIMS, 400 * max(1, nvars - 1))
+    try:
+        yield
+    finally:
+        MAX_ACTIVE_DIMS = old
+
+
+def _surface_exact(f, uv, surface, is_vector, tol=1e-10):
+    """Surface integral with u and v on their own lanes.
+
+    Builds the integrand as a COMPOSITE in (u, v) -- position, both tangents,
+    the cross product and its norm -- and hands it to the box integrator.  The
+    sampling path froze the tangents at each sample point with float(), so the
+    area element was piecewise constant; here it varies across the patch
+    because d(sigma)/du is still a series.
+    """
+    (a_u, b_u), (a_v, b_v) = uv
+
+    def integrand(u_c, v_c):
+        S = surface(u_c, v_c)
+        if not isinstance(S, (list, tuple)) or len(S) < 3:
+            raise TypeError("surface must return three components")
+        S = [_ensure_composite(c) for c in S]
+        Su = [_derivative_axis(c, 1) for c in S]
+        Sv = [_derivative_axis(c, 2) for c in S]
+        nx = Su[1] * Sv[2] - Su[2] * Sv[1]
+        ny = Su[2] * Sv[0] - Su[0] * Sv[2]
+        nz = Su[0] * Sv[1] - Su[1] * Sv[0]
+        if is_vector:
+            F = [_ensure_composite(comp(*S)) for comp in f]
+            return F[0] * nx + F[1] * ny + F[2] * nz
+        val = _ensure_composite(f(*S))
+        return val * sqrt(nx * nx + ny * ny + nz * nz)
+
+    # DOES THE SURFACE PROPAGATE COMPOSITE STRUCTURE?
+    #
+    # A surface written with math.cos rather than the composite cos does NOT
+    # raise: Composite defines __float__, so math.cos silently takes the
+    # standard part and hands back a plain float.  Every component then has no
+    # lane content, both tangents come out empty, the cross product is zero and
+    # the integral is 0.0 -- with no exception anywhere to trigger a fallback.
+    # That is how five passing tests turned into exact zeros.  Check for it.
+    try:
+        u_p = 0.5 * (a_u + b_u) + _perturbation_seed(1)
+        v_p = 0.5 * (a_v + b_v) + _perturbation_seed(2)
+        S_p = surface(u_p, v_p)
+        if not isinstance(S_p, (list, tuple)) or len(S_p) < 3:
+            return None
+        # A CONSTANT component is legitimate -- [u, v, 0] is a flat patch, and
+        # requiring every component to be a Composite sent it to the fallback
+        # (5.0e-10 in 182ms instead of 0.0e+00 in 5ms).  What matters is not
+        # that each part is composite but that the patch MOVES on both
+        # parameters, which is what the two checks below test.
+        S_p = [_ensure_composite(c) for c in S_p]
+        moves_u = any(_derivative_axis(c, 1).c for c in S_p)
+        moves_v = any(_derivative_axis(c, 2).c for c in S_p)
+        if not (moves_u and moves_v):
+            return None
+    except Exception:
+        return None
+
+    try:
+        return _box_exact(integrand, [(a_u, b_u), (a_v, b_v)], tol=tol,
+                          probe_floats=False)
+    except Exception:
+        return None
+
+
+def _box_exact(f, ranges, tol=1e-10, max_panels=4096, probe_floats=True):
+    """Exact box integral.  The INTEGRAND keeps the power axis; every
+    integration variable gets its own lane.
+
+    Variable i is seeded on basis axis i+1.  Nothing the caller's expression
+    produces on the power axis is ever touched: it is not the variable, so it
+    is not integrated, and it is never handed to a real panel width.
+
+    Returns None when the exact path does not apply, so the caller falls back
+    rather than returning something wrong.
+    """
+    from composite.backends.vector_dim_backend import canon, as_vec
+    nvars = len(ranges)
+    if nvars < 2:
+        return None
+
+    # The integrand must not bring content on the lanes the seeds will use.
+    probe_pt = [0.5 * (lo + hi) for lo, hi in ranges]
+    if not probe_floats:
+        probe = None            # caller builds its integrand from composites
+    else:
+      try:
+        probe = f(*probe_pt)
+      except Exception:
+        return None
+    if isinstance(probe, Composite):
+        if any(isinstance(d, tuple) and any(e != 0 for e in d[1:nvars + 1])
+               for d in probe.c):
+            return None
+
+    centres = [0.5 * (lo + hi) for lo, hi in ranges]
+    a, b = ranges[0]
+    prev = None
+    last_delta = None
+    stalled = 0
+    panels = 8
+    with _box_scope(nvars):
+        # seeds[i] rides on lane i+1; lane 0 (power) stays the integrand's
+        seeds_tail = [centres[i] + _perturbation_seed(i + 1)
+                      for i in range(1, nvars)]
+        while panels <= max_panels:
+            acc = {}
+            dx = (b - a) / panels
+            try:
+                for i in range(panels):
+                    x_seed = (a + i * dx + dx / 2) + _perturbation_seed(1)
+                    fx = _ensure_composite(f(x_seed, *seeds_tail))
+                    Fx = _antiderivative_axis(fx, 1)
+                    for sign, hv in ((1.0, dx / 2), (-1.0, -dx / 2)):
+                        for k, v in _eval_axis(Fx, hv, 1).items():
+                            acc[k] = acc.get(k, 0.0) + sign * v
+            except Exception:
+                return None
+
+            # integrate the remaining lanes term by term, exactly
+            total = 0.0
+            for key, coeff in acc.items():
+                v = list(as_vec(key))
+                while len(v) <= nvars:
+                    v.append(0)
+                if v[0] != 0:
+                    continue          # the integrand's OWN infinitesimal part:
+                                      # metadata, never fused into the float
+                factor = coeff
+                for var_i in range(1, nvars):
+                    order = -int(v[var_i + 1])
+                    lo, hi = ranges[var_i]
+                    c = centres[var_i]
+                    factor *= ((hi - c) ** (order + 1)
+                               - (lo - c) ** (order + 1)) / (order + 1)
+                total += factor
+
+            if not math.isfinite(total):
+                return None
+            if prev is not None:
+                delta = abs(total - prev)
+                if delta <= tol * max(1.0, abs(total)):
+                    return total
+                if last_delta is not None and delta > 0.5 * last_delta:
+                    stalled += 1
+                    if stalled >= 2:
+                        return total
+                else:
+                    stalled = 0
+                last_delta = delta
+            prev = total
+            panels *= 2
+        return prev
+
+
 def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
     """One integral to rule them all."""
 
@@ -2640,7 +2993,7 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
                 pos_comp = curve(t_comp)
                 pos_comp = [p if isinstance(p, Composite) else Composite({0: float(p)})
                             for p in pos_comp]
-                tangent = [p.d(1) for p in pos_comp]
+                tangent = [_lane_d1(p) for p in pos_comp]
 
                 if is_vector:
                     F_comp = [comp(*pos_comp) for comp in f]
@@ -2696,6 +3049,10 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
         uv = args[0] if args else ((0, 1), (0, 1))
         (a_u, b_u), (a_v, b_v) = uv
         is_vector = isinstance(f, list)
+
+        _exact = _surface_exact(f, uv, surface, is_vector, tol=tol)
+        if _exact is not None:
+            return _exact
 
         from composite.composite_multivar import MC
         composite_surface = True
@@ -2795,6 +3152,9 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
 
     # --- 2D BOX ---
     if len(args) == 2 and isinstance(args[0], tuple):
+        exact = _box_exact(f, list(args), tol=tol)
+        if exact is not None:
+            return exact
         (a_x, b_x), (a_y, b_y) = args
         N = 200
         dx = (b_x - a_x) / N
@@ -2809,6 +3169,9 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
 
     # --- 3D BOX ---
     if len(args) == 3 and isinstance(args[0], tuple):
+        exact = _box_exact(f, list(args), tol=tol)
+        if exact is not None:
+            return exact
         (a_x, b_x), (a_y, b_y), (a_z, b_z) = args
         N = 50
         dx = (b_x - a_x) / N
@@ -2886,15 +3249,33 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
             stacklevel=2)
 
     def _panel_with_error(x, dx):
-        """One composite eval at midpoint -> integral value + error estimate."""
-        mid = x + dx / 2
-        fx = _ensure_composite(f(_seeded(mid)))
+        """One composite eval at midpoint -> integral value + error estimate.
 
-        # Integral via antiderivative
-        Fx = antiderivative(fx)
-        right = Fx.eval_taylor(dx / 2)
-        left = -Fx.eval_taylor(-dx / 2)
-        value = left + right
+        The variable of integration rides on LANE 1, not the power axis.  The
+        power axis belongs to the integrand: R1 zeros and anything else the
+        caller's expression genuinely made infinitesimal live there, and they
+        are not the variable, so they are neither integrated nor handed to a
+        real panel width.  With the seed on the power axis they were, and
+        integral of (x*0 + 1) over [0,1] came back 1.0052083333333333 -- a real
+        number manufactured from a structural zero, off by 5e-3.
+        """
+        mid = x + dx / 2
+        fx = _ensure_composite(f(mid + _perturbation_seed(1)))
+
+        # Integral via antiderivative along the variable's own lane
+        Fx_terms = _antiderivative_axis(fx, 1)
+        acc = {}
+        for sign, hv in ((1.0, dx / 2), (-1.0, -dx / 2)):
+            for k, v in _eval_axis(Fx_terms, hv, 1).items():
+                acc[k] = acc.get(k, 0.0) + sign * v
+        # The float is the STANDARD PART.  Terms still carrying a power-axis
+        # component are the integrand's own infinitesimal content -- metadata,
+        # never summed into dimension 0.
+        value = 0.0
+        for k, v in acc.items():
+            kk = k if isinstance(k, tuple) else (k,)
+            if (kk[0] if kk else 0) == 0:
+                value += v
 
         # The remainder is not something to model -- the top two orders of the
         # expansion ARE it.  Reading it off the last few terms instead assumed
@@ -2907,7 +3288,15 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
         # (see _complete_order), so the top two ARE the leading remainder and
         # there is nothing left to estimate.
         half_dx = abs(dx) / 2
-        orders = [_dim_order(d) for d in fx.c if _dim_order(d) >= 0]
+        # Orders along the VARIABLE's lane.  _dim_order reads the power axis,
+        # which now holds the integrand's own content -- reading it here made
+        # every panel look like a constant.
+        def _lane1(d):
+            from composite.backends.vector_dim_backend import as_vec
+            v = as_vec(d)
+            return -(v[1] if len(v) > 1 else 0)
+
+        orders = [_lane1(d) for d in fx.c if _lane1(d) >= 0]
         if not orders or max(orders) <= 2:
             # Nothing above a quadratic -- the antiderivative is EXACT.
             return value, 0.0
@@ -2915,7 +3304,7 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
         cut = max(max(orders) - 2, 2)
         err_est = 0.0
         for dim, coeff in fx.c.items():
-            k = _dim_order(dim)
+            k = _lane1(dim)
             if k <= cut:
                 continue
             # |h**(k+1) - (-h)**(k+1)| <= 2*h**(k+1), so the orders that cancel
@@ -2933,11 +3322,18 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
     def _panel_classic(x, dx):
         """Classic single-panel integral for fallback comparison."""
         mid = x + dx / 2
-        fx = _ensure_composite(f(_seeded(mid)))
-        Fx = antiderivative(fx)
-        right = Fx.eval_taylor(dx / 2)
-        left = -Fx.eval_taylor(-dx / 2)
-        return left + right
+        fx = _ensure_composite(f(mid + _perturbation_seed(1)))
+        Fx_terms = _antiderivative_axis(fx, 1)
+        acc = {}
+        for sign, hv in ((1.0, dx / 2), (-1.0, -dx / 2)):
+            for k, v in _eval_axis(Fx_terms, hv, 1).items():
+                acc[k] = acc.get(k, 0.0) + sign * v
+        out = 0.0
+        for k, v in acc.items():
+            kk = k if isinstance(k, tuple) else (k,)
+            if (kk[0] if kk else 0) == 0:
+                out += v
+        return out
 
     def _adaptive(a, b, depth):
         dx = b - a
@@ -3190,10 +3586,25 @@ def show(composite: Composite, name: str = "result"):
 
 class TracedComposite(Composite):
     """A Composite that prints each operation as it happens."""
-    def _wrap(self, result):
+    def _as_traced(self, result):
+        """Re-wrap an operation's result so tracing survives the next step.
+
+        Was `_wrap`, which SHADOWED Composite._wrap -- a classmethod taking
+        (data, backend, demote, complete) -- with an instance method taking
+        (result).  Nothing outside this class broke only because every call
+        site spells it `Composite._wrap(...)` on the class rather than on an
+        instance.
+
+        And it assigned `tc.c = result.c`.  `.c` became a read-only property
+        computed from ._data when the backends landed, so this raised
+        AttributeError on the first traced operation -- trace() printed one
+        line and died.  Copy the three slots instead.
+        """
         if isinstance(result, Composite):
             tc = TracedComposite.__new__(TracedComposite)
-            tc.c = result.c
+            tc._backend = result._backend
+            tc._data = result._data
+            tc._complete = result._complete
             return tc
         return result
     def __add__(self, other):
@@ -3202,48 +3613,48 @@ class TracedComposite(Composite):
         print(f"    {self}  +  {other_disp}")
         print(f"  = {result}")
         print()
-        return self._wrap(result)
+        return self._as_traced(result)
     def __radd__(self, other):
         other_disp = f"|{other}|₀"
         result = super().__radd__(other)
         print(f"    {other_disp}  +  {self}")
         print(f"  = {result}")
         print()
-        return self._wrap(result)
+        return self._as_traced(result)
     def __sub__(self, other):
         other_disp = other if isinstance(other, Composite) else f"|{other}|₀"
         result = super().__sub__(other)
         print(f"    {self}  -  {other_disp}")
         print(f"  = {result}")
         print()
-        return self._wrap(result)
+        return self._as_traced(result)
     def __mul__(self, other):
         other_disp = other if isinstance(other, Composite) else f"|{other}|₀"
         result = super().__mul__(other)
         print(f"    {self}  ×  {other_disp}")
         print(f"  = {result}")
         print()
-        return self._wrap(result)
+        return self._as_traced(result)
     def __rmul__(self, other):
         other_disp = f"|{other}|₀"
         result = super().__rmul__(other)
         print(f"    {other_disp}  ×  {self}")
         print(f"  = {result}")
         print()
-        return self._wrap(result)
+        return self._as_traced(result)
     def __truediv__(self, other):
         other_disp = other if isinstance(other, Composite) else f"|{other}|₀"
         result = super().__truediv__(other)
         print(f"    {self}  ÷  {other_disp}")
         print(f"  = {result}")
         print()
-        return self._wrap(result)
+        return self._as_traced(result)
     def __pow__(self, n):
         result = super().__pow__(n)
         print(f"    ({self})^{n}")
         print(f"  = {result}")
         print()
-        return self._wrap(result)
+        return self._as_traced(result)
 
 
 def trace(f: Callable, at: float = None, to: float = None) -> Composite:

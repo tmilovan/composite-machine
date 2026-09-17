@@ -63,7 +63,22 @@ def surface_integral_vector(F, surface, u_range, v_range, tol=1e-6):
     return integrate(F, (u_range, v_range), surface=surface)
 
 # Test tolerance
-TOL = 1e-2
+# TOLERANCES ARE SET FROM THE METHOD, NOT FROM THE MEASURED ERROR.
+#
+#   1e-9  (TOL)  exact paths: composite arithmetic and the lane-based box and
+#                line integrals terminate, so the only error is float rounding.
+#   1e-8         proper/line integrals through integrate_adaptive, whose tol is
+#                1e-10 RELATIVE per panel; a result of magnitude ~10 therefore
+#                carries ~1e-9 before panel accumulation.  Measured 3.5e-9..9.4e-9.
+#   1e-6         a closed loop that must cancel to 0.  There is no magnitude to
+#                scale by and the two halves are each O(2*pi).  MEASURED 6.3e-7 --
+#                recorded, not derived; it is the accuracy this path delivers.
+#   1e-4         surfaces written with math.sin/math.cos.  Those do not propagate
+#                composite structure (Composite.__float__ makes math.* take the
+#                standard part silently), so they run the SAMPLING fallback and
+#                are bounded by its grid, not by the algebra.  Measured 5.7e-5.
+#
+TOL = 1e-9
 
 def assert_close(computed, expected, name, tol=TOL):
     """Check a result against its expected value, on ABSOLUTE error.
@@ -84,7 +99,8 @@ def assert_close(computed, expected, name, tol=TOL):
     if error > tol:
         print(f"❌ {name}: got {computed:.6f}, expected {expected:.6f}, error={error:.3e}, tol={tol:.1e}")
         return False
-    print(f"✅ {name}: {computed:.6f} ≈ {expected:.6f}")
+    print(f"✅ {name}: got {computed:.12g}  want {expected:.12g}  "
+          f"err {error:.3e}  tol {tol:.1e}")
     return True
 
 
@@ -140,7 +156,7 @@ def test_triple_integrals():
         (0, 1), (0, 1), (0, 1)
     )
     expected = 2.0/3.0  # ∫₀¹ x² dx = 1/3, times 2 for x² and y²
-    if assert_close(result, expected, "∭ (x²+y²) dx dy dz", tol=0.01):
+    if assert_close(result, expected, "∭ (x²+y²) dx dy dz", tol=1e-9):
         passed += 1
 
     return passed, total
@@ -196,7 +212,7 @@ def test_line_integrals_scalar():
         (0, 2*math.pi)
     )
     expected = 2*math.pi
-    if assert_close(result, expected, "Circumference of unit circle", tol=1e-6):
+    if assert_close(result, expected, "Circumference of unit circle", tol=1e-8):
         passed += 1
 
     # Test 5: 3D helix arc length (one turn)
@@ -207,7 +223,7 @@ def test_line_integrals_scalar():
         (0, 2*math.pi)
     )
     expected = 2*math.pi * math.sqrt(2)  # √(1² + 1²) × 2π
-    if assert_close(result, expected, "Helix arc length", tol=1e-6):
+    if assert_close(result, expected, "Helix arc length", tol=1e-8):
         passed += 1
 
     return passed, total
@@ -254,7 +270,7 @@ def test_line_integrals_vector():
         (0, 2*math.pi)
     )
     expected = 2*math.pi  # Circulation = ∫ r² dθ = 2π for r=1
-    if assert_close(result, expected, "Rotation field circulation", tol=1e-6):
+    if assert_close(result, expected, "Rotation field circulation", tol=1e-8):
         passed += 1
 
     # Test 4: Gradient field around closed loop (should be zero)
@@ -266,7 +282,7 @@ def test_line_integrals_vector():
         (0, 2*math.pi)
     )
     expected = 0.0  # Conservative field around closed loop
-    if assert_close(result, expected, "Conservative field (closed loop)", tol=1e-5):
+    if assert_close(result, expected, "Conservative field (closed loop)", tol=1e-6):
         passed += 1
 
     # Test 5: 3D vector field work along straight path
@@ -302,7 +318,7 @@ def test_surface_integrals_scalar():
         (0, 1), (0, 1)
     )
     expected = 1.0
-    if assert_close(result, expected, "Unit square area", tol=1e-7):
+    if assert_close(result, expected, "Unit square area", tol=1e-9):
         passed += 1
 
     # Test 2: Surface area of rectangular region
@@ -313,7 +329,7 @@ def test_surface_integrals_scalar():
         (0, 3), (0, 4)
     )
     expected = 12.0
-    if assert_close(result, expected, "3×4 rectangle area", tol=1e-6):
+    if assert_close(result, expected, "3×4 rectangle area", tol=1e-9):
         passed += 1
 
     # Test 3: Surface area of unit sphere
@@ -326,7 +342,7 @@ def test_surface_integrals_scalar():
         (0, math.pi), (0, 2*math.pi)
     )
     expected = 4*math.pi
-    if assert_close(result, expected, "Unit sphere surface area", tol=0.01):
+    if assert_close(result, expected, "Unit sphere surface area", tol=1e-4):
         passed += 1
 
     # Test 4: Surface area of cylinder (lateral surface, radius=1, height=2)
@@ -337,7 +353,7 @@ def test_surface_integrals_scalar():
         (0, 2*math.pi), (0, 2)
     )
     expected = 4*math.pi  # 2πrh = 2π(1)(2)
-    if assert_close(result, expected, "Cylinder lateral surface", tol=1e-6):
+    if assert_close(result, expected, "Cylinder lateral surface", tol=1e-8):
         passed += 1
 
     # Test 5: Integral of z over hemisphere z = √(1-x²-y²)
@@ -350,7 +366,7 @@ def test_surface_integrals_scalar():
         (0, math.pi/2), (0, 2*math.pi)
     )
     expected = math.pi  # ∬ z dS over hemisphere = π (not 2π)
-    if assert_close(result, expected, "∬ z dS over hemisphere", tol=0.001):
+    if assert_close(result, expected, "∬ z dS over hemisphere", tol=1e-4):
         passed += 1
 
     return passed, total
@@ -375,7 +391,7 @@ def test_surface_integrals_vector():
         (0, 1), (0, 1)
     )
     expected = 1.0  # Constant field, area = 1
-    if assert_close(result, expected, "Constant flux through square", tol=1e-7):
+    if assert_close(result, expected, "Constant flux through square", tol=1e-9):
         passed += 1
 
     # Test 2: Flux of F = [x, y, z] through unit sphere (div F = 3)
@@ -390,7 +406,7 @@ def test_surface_integrals_vector():
         (0, math.pi), (0, 2*math.pi)
     )
     expected = 4*math.pi  # Divergence theorem: div F = 3, V = 4π/3
-    if assert_close(result, expected, "Radial flux through sphere", tol=0.3):
+    if assert_close(result, expected, "Radial flux through sphere", tol=1e-4):
         passed += 1
 
     # Test 3: Zero flux for tangent field
@@ -405,7 +421,7 @@ def test_surface_integrals_vector():
         (0, math.pi), (0, 2*math.pi)
     )
     expected = 0.0  # Tangent field has zero flux
-    if assert_close(result, expected, "Tangent field (zero flux)", tol=1e-4):
+    if assert_close(result, expected, "Tangent field (zero flux)", tol=1e-6):
         passed += 1
 
     # Test 4: Flux through cylinder (F = [x, y, 0], outward)
@@ -418,7 +434,7 @@ def test_surface_integrals_vector():
         (0, 2*math.pi), (0, 2)
     )
     expected = 4*math.pi  # div F = 2, V = πr²h = 2π
-    if assert_close(result, expected, "Flux through cylinder", tol=1e-6):
+    if assert_close(result, expected, "Flux through cylinder", tol=1e-8):
         passed += 1
 
     # Test 5: Constant field through tilted plane
@@ -433,7 +449,7 @@ def test_surface_integrals_vector():
     # Normal = ru × rv = [1,0,1] × [0,1,1] = [-1, -1, 1]
     # F · n = [0,0,1] · [-1,-1,1] = 1, integrated over [0,1]² = 1.0
     expected = 1.0  # Flux = 1.0 (not √3)
-    if assert_close(result, expected, "Flux through tilted plane", tol=1e-7):
+    if assert_close(result, expected, "Flux through tilted plane", tol=1e-9):
         passed += 1
 
     return passed, total
