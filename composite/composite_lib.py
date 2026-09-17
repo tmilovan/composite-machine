@@ -137,6 +137,40 @@ def _r1(c):
                            c._backend, demote=False)
 
 
+_ZERO_SEED_MSG = (
+    "bare Python 0 used with `{op}` on a Composite. A Python zero meeting a "
+    "Composite ALWAYS converts to the composite zero |1|_-1 (R1) -- that is the "
+    "rule and it is what just happened. If you meant an accumulator that has not "
+    "added a term yet, that is NOTHING, not zero (R6): use Composite({{}}) or seed "
+    "with the first term. `acc = 0` leaves the dimension-0 value correct while "
+    "injecting |1|_-1 into every derivative -- 321 instead of 257 for a "
+    "5th-degree polynomial. Write R(0) or ZERO to silence this when the "
+    "composite zero is what you want."
+)
+
+
+def _warn_zero_seed(other, op):
+    """R6 made audible.  The SEMANTICS are not in question here.
+
+    A Python 0 meeting a Composite converts to |1|_-1.  That is R1, it is
+    deliberate, and it is why `0 * t` is a perfectly good way to write the zero
+    component of a path -- this repo's own curve tests do exactly that.
+
+    What is missing is visibility.  `acc = 0` is the most natural seed anyone
+    writes, and it silently asks for the composite zero instead of an empty
+    accumulator.  The dimension-0 value stays correct, so the result looks
+    right; only the derivatives are wrong.  That is the worst failure shape
+    there is, so it gets a warning.
+
+    A WARNING, not an error: `0 * t` is legitimate, and raising also broke the
+    exp(-1/x^2) limits by firing inside the limit machinery where the exception
+    became a nan.  Nothing about the arithmetic changes.
+    """
+    if type(other) in (int, float) and other == 0:
+        import warnings
+        warnings.warn(_ZERO_SEED_MSG.format(op=op), stacklevel=3)
+
+
 class Composite:
     """
     Composite number: |coefficient|_dimension
@@ -154,10 +188,16 @@ class Composite:
         |3|₀+|2|₋₁ = 3 + 2h (3 plus 2 infinitesimals)
     """
 
-    __slots__ = ['_data', '_backend']
+    # _complete: highest Taylor order this value is COMPLETE to, or None for
+    # "exact" -- a literal, a seeded variable, a polynomial, a deconvolution.
+    # It cannot be inferred from the coefficients: _seeded(t) is exact with max
+    # order 1, sin(x*x) is truncated with max order 11, and both merely look
+    # like "max order K".  So it is carried.
+    __slots__ = ['_data', '_backend', '_complete']
 
     def __init__(self, coefficients=None, _data=None):
         self._backend = get_backend()
+        self._complete = None          # exact unless a series says otherwise
 
         if _data is not None:
             # Internal fast path: created by arithmetic ops
@@ -202,7 +242,7 @@ class Composite:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _wrap(cls, data, backend=None, demote=True):
+    def _wrap(cls, data, backend=None, demote=True, complete=None):
         """Create a Composite directly from backend data. No dict parsing.
 
         `backend` must be given whenever the data was built by a backend that
@@ -216,6 +256,7 @@ class Composite:
         obj = cls.__new__(cls)
         obj._backend = be
         obj._data = data
+        obj._complete = complete
         return obj
 
     # -------------------------------------------------------------------------
@@ -362,12 +403,14 @@ class Composite:
     def __add__(self, other):
         """Addition never shifts dimensions (R4).  A zero OPERAND converts (R1);
         a zero TERM does not (R2)."""
+        _warn_zero_seed(other, "+")
         if isinstance(other, (int, float)):
             other = Composite({0: 0.0}) if other == 0 else Composite(float(other))
         if not isinstance(other, Composite):
             return NotImplemented
         a, b = _operands(self, other)
-        return Composite._wrap(a._backend.add(a._data, b._data), a._backend)
+        return Composite._wrap(a._backend.add(a._data, b._data), a._backend,
+                               complete=_min_complete(self, other))
 
     def __radd__(self, other):
         return self.__add__(other)
@@ -379,20 +422,24 @@ class Composite:
         it exists and holds zero.  No special case is needed -- |0|_a - |0|_a
         giving 0**(a+1) follows from R1 plus this rule, not from a branch here.
         """
+        _warn_zero_seed(other, "-")
         if isinstance(other, (int, float)):
             other = Composite({0: 0.0}) if other == 0 else Composite(float(other))
         if not isinstance(other, Composite):
             return NotImplemented
         a, b = _operands(self, other)
         return Composite._wrap(a._backend.add(a._data, a._backend.negate(b._data)),
-                               a._backend)
+                               a._backend,
+                               complete=_min_complete(self, other))
 
     def __rsub__(self, other):
+        _warn_zero_seed(other, "-")
         left = Composite({0: 0.0}) if other == 0 else Composite(float(other))
         return left.__sub__(self)
 
     def __neg__(self):
-        return Composite._wrap(self._backend.negate(self._data), self._backend)
+        return Composite._wrap(self._backend.negate(self._data), self._backend,
+                               complete=self._complete)
 
     def __mul__(self, other):
         """Multiplication: dimensions add, coefficients multiply.
@@ -401,13 +448,14 @@ class Composite:
         = |5|_-1 -- the value is translated, not annihilated.  Multiplying by
         |1|_0 is the identity (R3).
         """
+        _warn_zero_seed(other, "*")
         if isinstance(other, (int, float)):
             if other == 0:
                 other = Composite({0: 0.0})
             else:
                 return Composite._wrap(
                     self._backend.scalar_multiply(self._data, float(other)),
-                    self._backend)
+                    self._backend, complete=self._complete)
         if not isinstance(other, Composite):
             return NotImplemented
         if _is_unit(other):
@@ -417,7 +465,7 @@ class Composite:
         a, b = _operands(self, other)
         return Composite._wrap(
             _truncate_dims(a._backend, a._backend.convolve(a._data, b._data)),
-            a._backend)
+            a._backend, complete=_min_complete(self, other))
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -433,7 +481,8 @@ class Composite:
                 other = Composite({0: 0.0})
             else:
                 return Composite._wrap(
-                    self._backend.scalar_multiply(self._data, 1.0 / other))
+                    self._backend.scalar_multiply(self._data, 1.0 / other),
+                    complete=self._complete)
         if not isinstance(other, Composite):
             return NotImplemented
         if _is_unit(other):
@@ -462,10 +511,21 @@ class Composite:
                 shifted = my_dims - div_dim
             return Composite._wrap(
                 a._backend.create_from_terms(shifted, my_vals / div_coeff),
-                a._backend)
+                a._backend, complete=_min_complete(self, other))
 
         result = a._backend.deconvolve(a._data, b._data)
-        return Composite._wrap(_truncate_dims(a._backend, result), a._backend)
+        out = Composite._wrap(_truncate_dims(a._backend, result), a._backend,
+                              complete=_min_complete(self, other))
+        # A multi-term divisor generally yields a NON-TERMINATING quotient that
+        # the backend cuts at a fixed length: 1/(1-x) comes back as 50 correct
+        # coefficients, not as a closed form.  Every order produced is right,
+        # but there is no order beyond them -- so the quotient is complete TO
+        # what it produced, never "exact".  Reporting exact here is what made
+        # (1/x)*x = 1 diverge at order 50.
+        got = [_dim_order(d) for d in out.c if _dim_order(d) >= 0]
+        if got:
+            out._complete = _tighter(out._complete, max(got))
+        return out
 
     def __rtruediv__(self, other):
         # other / self -- the operands are reversed, so no unit-divisor
@@ -798,15 +858,92 @@ def _complete_order(h_terms, terms):
     return m * (terms - 1)
 
 
+def _infinitesimal_terms(x):
+    """The strictly-infinitesimal part of x, as a {dim: coeff} dict."""
+    return {d: c for d, c in x.c.items() if c != 0.0 and _dim_order(d) > 0}
+
+
+def _min_complete(*xs):
+    """Lowest CARRIED completeness among the operands; None if all are exact.
+
+    This is the propagation rule for every arithmetic op: a sum, product or
+    quotient is complete only as far as its least complete operand.
+    """
+    best = None
+    for x in xs:
+        v = getattr(x, "_complete", None) if isinstance(x, Composite) else None
+        if v is None:
+            continue
+        best = v if best is None else min(best, v)
+    return best
+
+
+def _tighter(*bounds):
+    """The strictest of several bounds, ignoring None (= no bound)."""
+    best = None
+    for b in bounds:
+        if b is None:
+            continue
+        best = b if best is None else min(best, b)
+    return best
+
+
+def _shared_order(*xs):
+    """Highest order a COMBINATION of truncated series is valid to.
+
+    A product or quotient is only as complete as its least complete operand.
+    sin and cos are each sound to order 11 at the default depth; their quotient
+    comes back from the deconvolution carrying orders up to 49, and every one
+    above 11 is built from coefficients neither operand ever had.  That is how
+    tan, tanh, asin and acos each returned dozens of finished-looking orders
+    they could not support -- asin reached 785, with a backend overflow warning
+    on the way there.
+    """
+    best = None
+    for x in xs:
+        if not isinstance(x, Composite):
+            continue
+        got = [_dim_order(d) for d in x.c if _dim_order(d) >= 0]
+        if not got:
+            continue
+        m = max(got)
+        best = m if best is None else min(best, m)
+    return best
+
+
 def _truncate_order(result, order):
-    """Drop the orders above `order`, keeping every dimension at or below it."""
+    """Drop the orders above `order`, keeping every dimension at or below it.
+
+    Reads the backend arrays rather than the .c dict.  Building that dict was
+    ~20% of an exp evaluation once the series loop was fused -- it allocates a
+    Python dict and calls dim_cast per term, to answer a question numpy can
+    answer with one comparison.
+    """
     if order is None:
         return result
+    dims = result._backend.active_dims(result._data)
+    if getattr(dims, "dtype", None) is not None and dims.dtype != object:
+        over = (-dims) > order
+        if not over.any():
+            result._complete = _tighter(result._complete, order)
+            return result
+        keep = ~over
+        d2 = dims[keep]
+        _, v = result._backend.to_arrays(result._data)
+        out = Composite._wrap(
+            result._backend.create_from_terms(d2, v[keep]), result._backend,
+            complete=_tighter(getattr(result, "_complete", None), order))
+        return out
     extra = [d for d in result.c if _dim_order(d) > order]
     if not extra:
+        # Nothing to drop, but the bound still HOLDS and must be recorded --
+        # otherwise a caller downstream reads "exact" off a truncated series.
+        result._complete = _tighter(result._complete, order)
         return result
-    return _like(result, {d: v for d, v in result.c.items()
-                          if _dim_order(d) <= order})
+    out = _like(result, {d: v for d, v in result.c.items()
+                         if _dim_order(d) <= order})
+    out._complete = _tighter(getattr(result, "_complete", None), order)
+    return out
 
 
 def _bounded_at_inf(func, x):
@@ -1003,7 +1140,8 @@ def sin(x, terms=12):
         result = result + sin_a * cos_h
     if cos_a != 0:
         result = result + cos_a * sin_h
-    return _truncate_order(result, _complete_order(_nz, terms))
+    return _truncate_order(result, _tighter(_complete_order(_nz, terms),
+                                            _min_complete(x)))
 
 
 def cos(x, terms=12):
@@ -1036,7 +1174,8 @@ def cos(x, terms=12):
         result = result + cos_a * cos_h
     if sin_a != 0:
         result = result - sin_a * sin_h
-    return _truncate_order(result, _complete_order(_nz, terms))
+    return _truncate_order(result, _tighter(_complete_order(_nz, terms),
+                                            _min_complete(x)))
 
 
 def exp(x, terms=15):
@@ -1092,7 +1231,11 @@ def exp(x, terms=15):
         h_power = h_power * h
         exp_h = exp_h + (1.0 / math.factorial(n)) * h_power
 
-    return _truncate_order(base * exp_h, _complete_order(non_zero, terms))
+    # f(g(x)) is complete only as far as g is: the outer series reaches for
+    # orders of its argument that a truncated inner function never produced.
+    return _truncate_order(base * exp_h,
+                           _tighter(_complete_order(non_zero, terms),
+                                    _min_complete(x)))
 
 
 def ln(x, terms=15):
@@ -1197,7 +1340,10 @@ def ln(x, terms=15):
         sign = (-1) ** (n + 1)
         result = result + sign * power / n
 
-    return result
+    return _truncate_order(result,
+                           _tighter(_complete_order(_infinitesimal_terms(ratio),
+                                                    terms),
+                                    _min_complete(x)))
 
 
 def sqrt(x, terms=12):
@@ -1267,7 +1413,10 @@ def sqrt(x, terms=12):
         power = power * ratio
         result = result + binom(n) * sqrt_a * power
 
-    return result
+    return _truncate_order(result,
+                           _tighter(_complete_order(_infinitesimal_terms(ratio),
+                                                    terms),
+                                    _min_complete(x)))
 
 
 def tan(x, terms=12):
@@ -1276,7 +1425,9 @@ def tan(x, terms=12):
         x = Composite({0: float(x)})
     if _is_nothing(x):
         return Composite({})
-    return sin(x, terms) / cos(x, terms)
+    _s, _c = sin(x, terms), cos(x, terms)
+    return _truncate_order(_s / _c, _tighter(_shared_order(_s, _c),
+                                             _min_complete(_s, _c, x)))
 
 # =============================================================================
 # INVERSE TRIGONOMETRIC FUNCTIONS
@@ -1296,7 +1447,10 @@ def _reciprocal(x, terms=15):
     for n in range(1, terms):
         power = power * ratio
         result = result + power / a
-    return result
+    return _truncate_order(result,
+                           _tighter(_complete_order(_infinitesimal_terms(ratio),
+                                                    terms),
+                                    _min_complete(x)))
 
 def atan(x, terms=15):
     """Arctangent for composite numbers."""
@@ -1313,11 +1467,16 @@ def atan(x, terms=15):
         return Composite({0: math.atan(a)})
     _lead = math.atan(a)
     result = {} if _lead == 0.0 else {0: _lead}   # R6, see ln
+    deriv = deriv * _d_deps(x)          # chain rule; see _d_deps
     for dim, coeff in deriv.c.items():
         new_dim = dim - 1
         if new_dim != 0:
             result[new_dim] = coeff / abs(new_dim)
-    return Composite(result)
+    out = Composite(result)
+    _c = _min_complete(deriv)
+    if _c is not None:
+        out._complete = _c + 1
+    return out
 
 def asin(x, terms=15):
     """Arcsine for composite numbers."""
@@ -1336,11 +1495,20 @@ def asin(x, terms=15):
         return Composite({0: math.asin(a)})
     _lead = math.asin(a)
     result = {} if _lead == 0.0 else {0: _lead}   # R6, see ln
+    deriv = deriv * _d_deps(x)          # chain rule; see _d_deps
     for dim, coeff in deriv.c.items():
         new_dim = dim - 1
         if new_dim != 0:
             result[new_dim] = coeff / abs(new_dim)
-    return Composite(result)
+    out = Composite(result)
+    # Same order shift as antiderivative, and the same reason to record it:
+    # this dict is built directly, so nothing else would.  Read the bound from
+    # deriv AFTER the chain-rule multiply, which has already taken the min of
+    # 1/sqrt(1-u^2) and u'.
+    _c = _min_complete(deriv)
+    if _c is not None:
+        out._complete = _c + 1
+    return out
 
 def acos(x, terms=15):
     """Arccosine for composite numbers."""
@@ -1378,7 +1546,9 @@ def tanh(x, terms=15):
         return Composite({})
     if _has_positive_dims(x):
         return _bounded_at_inf(math.tanh, x)
-    return sinh(x, terms) / cosh(x, terms)
+    _s, _c = sinh(x, terms), cosh(x, terms)
+    return _truncate_order(_s / _c, _tighter(_shared_order(_s, _c),
+                                             _min_complete(_s, _c, x)))
 
 
 # =============================================================================
@@ -1488,6 +1658,29 @@ def power(x, s, terms=15):
 # =============================================================================
 # HIGH-LEVEL API: AUTOMATIC TRANSLATION
 # =============================================================================
+
+def _d_deps(x):
+    """d(x)/d(eps): the derivative of a composite w.r.t. its own infinitesimal.
+
+    A term c*eps**k sits at dim -k, and differentiating gives k*c*eps**(k-1) at
+    dim -(k-1) = d+1.  This is the CHAIN RULE FACTOR that asin and atan need:
+    they form deriv = 1/sqrt(1-u**2) (resp. 1/(1+u**2)) and then antidifferentiate
+    it with respect to eps, but d/deps asin(u(eps)) = u'(eps)/sqrt(1-u**2).
+    Without the u' factor they are correct only when u' == 1 -- a bare seeded
+    variable, which is what every test used.  asin(2x) came back exactly half
+    its true first derivative; asin(x*x) looked correct only because 2a == 1 at
+    the probe point a = 0.5.
+    """
+    out = Composite({d + 1: c * abs(d) for d, c in x.c.items()
+                     if not isinstance(d, tuple) and d < 0 and c != 0.0})
+    # Differentiating LOSES an order: the top coefficient of x produces the top
+    # of x', and there is nothing above it to produce the next.  Failing to
+    # record that made asin(sin x) claim order 12 on 11 sound ones.
+    _c = getattr(x, "_complete", None)
+    if _c is not None:
+        out._complete = _c - 1
+    return out
+
 
 def _reject_pole(result, what: str, at: float):
     """Raise if the seeded result carries a POLE, instead of quietly dropping it.
@@ -1852,7 +2045,15 @@ def antiderivative(f_composite: Composite, constant: float = 0) -> Composite:
             new_dim = dim - 1
             divisor = abs(new_dim)
             result[new_dim] = coeff / divisor
-    return Composite(result)
+    # Every order moves up by one, so a f sound to K integrates to one sound to
+    # K+1.  Building the dict directly skips _truncate_order, which is where
+    # the bound would otherwise be recorded -- dropping it here made asin, atan
+    # and the derivative round trip all claim to be exact.
+    _c = getattr(f_composite, "_complete", None)
+    out = Composite(result)
+    if _c is not None:
+        out._complete = _c + 1
+    return out
 
 
 def _ensure_composite(val):
@@ -2387,24 +2588,86 @@ def improper_integral(f, a, tol=1e-8, cutoff=20):
                     is_power_law = True
 
             if is_power_law:
-                # Genuine power-law tail: analytical integration
-                C = f_val / (M ** alpha)
-                ap1 = alpha + 1
-                tail_val = -C * (M ** ap1) / ap1
+                # A LOCAL exponent is not the ASYMPTOTIC one.  For 1/(1+x^2)
+                # alpha(5) = -1.923 while the true tail exponent is -2, and the
+                # 30% agreement test above happily accepts it -- which put
+                # integral 1/(1+x^2) over the whole line 0.7% off pi.
+                #
+                # So do not trust alpha at the first M.  Push the cutoff out,
+                # accumulating the bulk rather than recomputing it, and stop
+                # when the ANSWER stops moving.  That tests what is actually
+                # wanted instead of a proxy for it.
                 bulk, bulk_err = integrate_adaptive(f, a, M, tol=tol)
-                return Composite({0: bulk.st() + tail_val}), bulk_err
+                acc = bulk.st()
+                prev_total = None
+                for _ in range(60):
+                    fxM = _ensure_composite(f(_seeded(M)))
+                    vM, dM = fxM.st(), fxM.d(1)
+                    if abs(vM) <= 1e-300 or not math.isfinite(dM):
+                        return Composite({0: acc}), bulk_err
+                    aM = M * dM / vM
+                    if aM >= -1.0:
+                        # The power-law reading has broken down.  For an
+                        # OSCILLATING decay like e^-x sin(x), alpha = M(cos-sin)/sin
+                        # swings with the phase: -6.48 at M=5 (which passes the
+                        # 30% test at M/2) and +5.42 at M=10.  Returning the
+                        # earlier estimate would keep a tail computed from a
+                        # classification now known to be wrong, so DISCARD it and
+                        # finish by integrating outward instead.
+                        prev_total = None
+                        break
+                    C = vM / (M ** aM)
+                    total = acc - C * (M ** (aM + 1)) / (aM + 1)
+                    if (prev_total is not None
+                            and abs(total - prev_total)
+                                <= tol * max(1.0, abs(total))):
+                        return Composite({0: total}), abs(total - prev_total)
+                    prev_total = total
+                    nxt = M * 2.0
+                    seg, seg_err = integrate_adaptive(f, M, nxt, tol=tol)
+                    acc += seg.st()
+                    bulk_err += seg_err
+                    M = nxt
+                    if M > 1e12:
+                        break
+                if prev_total is not None:
+                    return Composite({0: prev_total}), bulk_err
+                # Fall through: integrate outward and stop on what the tail
+                # actually CONTRIBUTES, not on how big f looks at probe points.
+                # Sampling can never be phase-immune -- a window tuned to catch
+                # e^-x sin(x) still lands wrong for e^-x cos(x).  Integrating
+                # the next octave answers the real question and costs one more
+                # panel set.  Two consecutive negligible octaves, so a single
+                # near-cancelling octave cannot end it early.
+                quiet = 0
+                for _ in range(80):
+                    nxt = M * 2.0
+                    seg, seg_err = integrate_adaptive(f, M, nxt, tol=tol)
+                    acc += seg.st()
+                    bulk_err += seg_err
+                    M = nxt
+                    quiet = quiet + 1 if abs(seg.st()) <= tol * max(1.0, abs(acc)) else 0
+                    if quiet >= 2 or M > 1e12:
+                        break
+                return Composite({0: acc}), bulk_err
 
-    # Not power-law — find cutoff where f decays to ~0
-    for _ in range(20):
-        fx = _ensure_composite(f(_seeded(M)))
-        if abs(fx.st()) < tol * 0.01 and abs(fx.d(1)) < tol * 0.01:
-            break
-        M *= 2
-        if M > 1e15:
-            break
-
+    # Not power-law — integrate outward until successive octaves stop
+    # contributing.  A pointwise |f(M)| < tol test fires at every zero of an
+    # oscillating decay, truncating a tail that is still alive; what matters is
+    # the CONTRIBUTION of the next stretch, so measure that.
     bulk, bulk_err = integrate_adaptive(f, a, M, tol=tol)
-    return bulk, bulk_err
+    acc = bulk.st()
+    quiet = 0
+    for _ in range(80):
+        nxt = M * 2.0
+        seg, seg_err = integrate_adaptive(f, M, nxt, tol=tol)
+        acc += seg.st()
+        bulk_err += seg_err
+        M = nxt
+        quiet = quiet + 1 if abs(seg.st()) <= tol * max(1.0, abs(acc)) else 0
+        if quiet >= 2 or M > 1e12:
+            break
+    return Composite({0: acc}), bulk_err
 
 
 def improper_integral_both(f, tol=1e-8):

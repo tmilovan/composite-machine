@@ -523,11 +523,33 @@ def limits_with_log_scale(t):
         ("L05 lim(x->0+) 1/ln(x) = 0",
          lambda x: R(1) / cl.ln(x), 0.0),
     ]
+    # With LOG_SCALE off, ln of an infinitesimal RAISES -- that guardrail is
+    # asserted directly below.  What limit_right() then does is a separate
+    # question: it falls back to numeric extrapolation at real probe points,
+    # where ln takes its ordinary series branch and never raises.  Whether that
+    # fallback converges is not something the log scale controls, so requiring
+    # an exception here tested the wrong thing.  It passed only because
+    # ln(x*x) -- two-order h -- used to return incomplete high orders that
+    # poisoned the extrapolation; once ln was truncated to the orders it
+    # completes, L02 and L03 started converging to 13 digits.
+    #
+    # The property that actually matters is that DISABLING the log scale never
+    # produces a silently WRONG answer.  Raise or be right, never neither.
     cl.LOG_SCALE = False
     try:
-        for tag, f, _ in blocked:
-            t.raises(tag.replace("=", "raises when DISABLED, want"), Exception,
-                     lambda f=f: cl.limit_right(f, 0.0))
+        for tag, f, want in blocked:
+            nm = tag.replace("=", "raises or is correct when DISABLED, want")
+            try:
+                got = float(cl.limit_right(f, 0.0))
+            except Exception:
+                t.true(nm + " [raised]", True)
+                continue
+            t.close(nm + " [converged]", got, want, tol=1e-9)
+        # the guardrail itself, unmediated by the limit machinery
+        t.raises("L00 ln(ZERO) raises when log scale DISABLED", ValueError,
+                 lambda: cl.ln(cl.ZERO))
+        t.raises("L00b ln(ZERO*ZERO) raises when DISABLED", ValueError,
+                 lambda: cl.ln(cl.ZERO * cl.ZERO))
     finally:
         cl.LOG_SCALE = True
 

@@ -7,6 +7,7 @@ import sys as _sys
 
 from .sparse_dense_backend import SparseDenseBackend
 from .dict_backend import DictBackend
+from .dense_series_backend import DenseSeriesBackend
 
 # Default: Clustered Sparse-Dense (NumPy)
 _active_backend = SparseDenseBackend(gap_threshold=64)
@@ -31,3 +32,14 @@ def use_sparse_dense(gap_threshold=64, zero_tol=0.0, allow_fft=False):
 
 def use_dict():
     set_backend(DictBackend())
+
+
+def use_dense_series(max_span=1 << 20):
+    """Contiguous-array backend: the right one for CALCULUS, wrong for grids.
+
+    A Taylor series has no gaps, so run/lattice bookkeeping is pure overhead --
+    measured at ~85% of an exp(-(x*x)) evaluation.  Anything genuinely sparse
+    (a PDE front over a large domain) must stay on the sparse-dense backend;
+    max_span makes the misuse fail loudly instead of allocating the domain.
+    """
+    set_backend(DenseSeriesBackend(max_span=max_span))
