@@ -131,7 +131,18 @@ def _r1(c):
     dims, vals = c._backend.to_arrays(c._data)
     dims = dims.copy()
     vals = vals.copy()
-    dims[0] = dims[0] - 1          # to_arrays is sorted ascending: [0] is lowest
+    # to_arrays is sorted ascending, so [0] is the lowest dimension.
+    #
+    # _dim_shift, not `- 1`: on a vector dimension the scalar spelling raises
+    # "unsupported operand for -: 'tuple' and 'int'", and it raised from inside
+    # R1 -- so `0.0 + ln(1/h)`, the most ordinary line anyone would write,
+    # could not be evaluated at all.  Shifting the POWER axis is the right
+    # move rather than the leading axis: it lowers the dimension in every case
+    # ((-1, 1) < (0, 1) lexicographically), whereas decrementing the leading
+    # axis would turn the zero at (0, 1) into (0, 0) -- finite, not
+    # infinitesimal, which is not what R1 means.  R(0) already produced
+    # (-1, 0) by this convention, so this only makes the two paths agree.
+    dims[0] = _dim_shift(dims[0], -1)
     vals[0] = 1.0
     return Composite._wrap(c._backend.create_from_terms(dims, vals),
                            c._backend, demote=False)
@@ -947,15 +958,41 @@ def _complete_order(h_terms, terms):
     """
     if not h_terms:
         return None          # nothing infinitesimal: no order bound to state
-    m = min(_dim_order(d) for d in h_terms)
+    m = min(_lead_order(d) for d in h_terms)
     if m <= 0:
         return None
     return m * (terms - 1)
 
 
+def _lead_order(d):
+    """Order along the DOMINANT axis -- positive for an infinitesimal.
+
+    _dim_order reads only the POWER component and returns 0 for anything living
+    purely on a log axis, so (0, -1) -- which IS an infinitesimal, 1/ln(1/h) --
+    read as order zero and was excluded from every "infinitesimal terms" test.
+    That is how a truncated log-axis series kept reporting itself EXACT.
+
+    This has now been the same mistake four times in one day: max_positive_dim,
+    the non-dyadic guard, atan's antiderivative filter, and here.  _dim_order is
+    correct for what it means (Taylor order on the power axis) and dangerous for
+    what it reads like, so anything asking "how small is this dimension" across
+    axes must use THIS instead.
+    """
+    if not isinstance(d, tuple):
+        return -d
+    for c in d:
+        if c != 0:
+            return -c
+    return 0
+
+
 def _infinitesimal_terms(x):
-    """The strictly-infinitesimal part of x, as a {dim: coeff} dict."""
-    return {d: c for d, c in x.c.items() if c != 0.0 and _dim_order(d) > 0}
+    """The strictly-infinitesimal part of x, as a {dim: coeff} dict.
+
+    Infinitesimal means lexicographically BELOW zero, on whichever axis leads --
+    not merely "negative power component".
+    """
+    return {d: c for d, c in x.c.items() if c != 0.0 and _dim_negative(d)}
 
 
 def _min_complete(*xs):
@@ -1244,7 +1281,12 @@ def _has_infinitesimal_part(x):
     # NB: compare the dimension itself, not int(d) -- int(-0.5) is 0, which
     # made a purely fractional infinitesimal (sqrt of an odd dimension) look
     # like a bare standard part, so sin/ln returned f(st(x)) and dropped it.
-    return any(d != 0 and v != 0.0 for d, v in zip(dims, vals))
+    #
+    # _dim_nonzero, not `d != 0`: the VECTOR zero is (0, 0), and a tuple is
+    # never equal to an int, so a vector-keyed standard part tested as an
+    # infinitesimal.  sin then built its series with a = st(x) AND h still
+    # holding that same standard part, so sin(5) came back as sin(10).
+    return any(_dim_nonzero(d) and v != 0.0 for d, v in zip(dims, vals))
 
 
 def _is_nothing(x):
@@ -1263,12 +1305,16 @@ def sin(x, terms=12):
     a = x.st()
     if not _has_infinitesimal_part(x):
         return Composite({0: math.sin(a)})
-    _nz = {d: c for d, c in x.c.items() if d != 0 and c != 0.0}
+    _nz = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
     # _like, not Composite({...}): the bare constructor binds whatever backend
     # is globally ACTIVE, so a vector-dimension argument had its tuples handed
     # to numpy -- "setting an array element with a sequence" -- or came back as
     # DictData wearing sparse-dense methods.
-    h = _like(x, {d: c for d, c in x.c.items() if d != 0})
+    #
+    # _dim_nonzero, not `d != 0`: h must hold the part AWAY from dimension
+    # zero.  The scalar spelling let the vector zero (0, 0) through, so the
+    # standard part was counted twice -- once as a, once inside h.
+    h = _like(x, {d: c for d, c in x.c.items() if _dim_nonzero(d)})
     sin_a, cos_a = math.sin(a), math.cos(a)
     _one = _like(x, {_unit_dim(x): 1.0})
     sin_h = _like(x, {})
@@ -1303,12 +1349,16 @@ def cos(x, terms=12):
     a = x.st()
     if not _has_infinitesimal_part(x):
         return Composite({0: math.cos(a)})
-    _nz = {d: c for d, c in x.c.items() if d != 0 and c != 0.0}
+    _nz = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
     # _like, not Composite({...}): the bare constructor binds whatever backend
     # is globally ACTIVE, so a vector-dimension argument had its tuples handed
     # to numpy -- "setting an array element with a sequence" -- or came back as
     # DictData wearing sparse-dense methods.
-    h = _like(x, {d: c for d, c in x.c.items() if d != 0})
+    #
+    # _dim_nonzero, not `d != 0`: h must hold the part AWAY from dimension
+    # zero.  The scalar spelling let the vector zero (0, 0) through, so the
+    # standard part was counted twice -- once as a, once inside h.
+    h = _like(x, {d: c for d, c in x.c.items() if _dim_nonzero(d)})
     sin_a, cos_a = math.sin(a), math.cos(a)
     _one = _like(x, {_unit_dim(x): 1.0})
     sin_h = _like(x, {})
@@ -1381,7 +1431,13 @@ def exp(x, terms=15):
     a = x.st()
     # 7.1: a term exists iff its coefficient is nonzero -- exactly zero,
     # not 'small'.  A tolerance here silently discards real content.
-    non_zero = {d: c for d, c in x.c.items() if d != 0 and c != 0.0}
+    # _dim_nonzero, not `d != 0`: non_zero must hold the part AWAY from
+    # dimension zero, because the result is exp(a) * exp(h) and a is already
+    # the standard part.  The scalar spelling let the vector zero (0, 0)
+    # through, so exp(0.4 + h*ln(1/h)) came back as e**0.8 -- the standard
+    # part multiplied in twice, the same double-count that made sin(5)
+    # return sin(10).
+    non_zero = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
 
     if not non_zero:
         return Composite({0: math.exp(a)})
@@ -1675,6 +1731,46 @@ def _reciprocal(x, terms=15):
                                                     terms),
                                     _min_complete(x)))
 
+def _maclaurin_odd(x, coeffs, terms):
+    """sum coeffs[n] * x**(2n+1) for a composite x with ZERO standard part.
+
+    asin and atan normally go the derivative route: form 1/sqrt(1-u**2) or
+    1/(1+u**2), then antidifferentiate w.r.t. eps.  That works on the power
+    axis, where the shift is one dimension and the divisor is the order.  It
+    does NOT generalise across log axes -- integral of h**k * B1**m dh is not
+    a single term unless k == -1, so there is no shift to apply.
+
+    When the standard part is zero the Maclaurin series can just be composed
+    instead, which needs no derivative, no antiderivative and no chain rule,
+    and works on any axis at any depth.  Powers of x are formed once and
+    reused.
+    """
+    x2 = x * x
+    term = x                       # x**1
+    out = None
+    for n, c in enumerate(coeffs):
+        if c != 0.0:
+            piece = term * c
+            out = piece if out is None else out + piece
+        term = term * x2
+    if out is None:
+        return _like(x, {})
+    # RECORD THE TRUNCATION.  Summing T odd powers omits c_T * x**(2T+1), whose
+    # lowest order is m*(2T+1) with m the lowest order in x -- so every order
+    # below that is complete and nothing above it is.  Leaving this out let
+    # asin(h) and atan(h) report _complete = None, i.e. EXACT, while being a
+    # 15-term truncation reaching order 29: the same claim-more-than-you-have
+    # failure the completeness bookkeeping exists to stop, reintroduced by a
+    # second code path that skipped it.
+    nz = _infinitesimal_terms(x)
+    bound = None
+    if nz:
+        m = min(_lead_order(d) for d in nz)
+        if m > 0:
+            bound = m * (2 * len(coeffs) + 1) - 1
+    return _truncate_order(out, _tighter(bound, _min_complete(x)))
+
+
 def atan(x, terms=15):
     """Arctangent for composite numbers."""
     if isinstance(x, (int, float)):
@@ -1684,10 +1780,21 @@ def atan(x, terms=15):
     if _has_positive_dims(x):
         return _bounded_at_inf(math.atan, x)
     a = x.st()
-    one_plus_x2 = R(1) + x * x
-    deriv = _reciprocal(one_plus_x2, terms)
     if not _has_infinitesimal_part(x):
         return Composite({0: math.atan(a)})
+    if a == 0.0:
+        # atan(z) = z - z**3/3 + z**5/5 - ...
+        return _maclaurin_odd(
+            x, [(-1.0) ** n / (2 * n + 1) for n in range(terms)], terms)
+    # Built AFTER both early returns.  Standing above them, this was computed
+    # and then discarded on every bare standard part -- and for a vector-keyed
+    # one it did not merely waste the work: R(1) + x*x is wholly zero at no
+    # point, but _reciprocal divides by R(-a), and dividing sends both operands
+    # through R1, whose `dims[0] - 1` is a scalar spelling.  atan was the only
+    # transcendental still raising TypeError on a log-axis argument, and this
+    # ordering was the whole reason.
+    one_plus_x2 = R(1) + x * x
+    deriv = _reciprocal(one_plus_x2, terms)
     _lead = math.atan(a)
     result = {} if _lead == 0.0 else {_zero_dim_like(x): _lead}   # R6, see ln
     deriv = deriv * _d_deps(x)          # chain rule; see _d_deps
@@ -1716,6 +1823,12 @@ def asin(x, terms=15):
     deriv = _reciprocal(sqrt(inner, terms), terms)
     if not _has_infinitesimal_part(x):
         return Composite({0: math.asin(a)})
+    if a == 0.0:
+        # asin(z) = sum C(2n,n) / (4**n (2n+1)) * z**(2n+1)
+        _co = []
+        for n in range(terms):
+            _co.append(math.comb(2 * n, n) / (4.0 ** n * (2 * n + 1)))
+        return _maclaurin_odd(x, _co, terms)
     _lead = math.asin(a)
     result = {} if _lead == 0.0 else {_zero_dim_like(x): _lead}   # R6, see ln
     deriv = deriv * _d_deps(x)          # chain rule; see _d_deps
@@ -1951,37 +2064,67 @@ def power(x, s, terms=15):
 def _d_deps(x):
     """d(x)/d(eps): the derivative of a composite w.r.t. its own infinitesimal.
 
-    A term c*eps**k sits at dim -k, and differentiating gives k*c*eps**(k-1) at
-    dim -(k-1) = d+1.  This is the CHAIN RULE FACTOR that asin and atan need:
-    they form deriv = 1/sqrt(1-u**2) (resp. 1/(1+u**2)) and then antidifferentiate
-    it with respect to eps, but d/deps asin(u(eps)) = u'(eps)/sqrt(1-u**2).
-    Without the u' factor they are correct only when u' == 1 -- a bare seeded
-    variable, which is what every test used.  asin(2x) came back exactly half
-    its true first derivative; asin(x*x) looked correct only because 2a == 1 at
-    the probe point a = 0.5.
+    THE POWER AXIS.  A term c*eps**k sits at dim -k and differentiates to
+    k*c*eps**(k-1) at dim -(k-1).  In (e0, e1, ...) form, where a dim means
+    c * (1/h)**e0 * B1**e1 * B2**e2 ... , that is e0 += 1 with the coefficient
+    scaled by -e0.
+
+    THE LOG AXES.  These are not constants -- they are functions of h, so the
+    chain rule reaches across scales:
+
+        B1 = ln(1/h)        dB1/dh = -1/h
+        B2 = ln(B1)         dB2/dh = -(1/h) * B1**-1
+        B_k                 dB_k/dh = -(1/h) * B1**-1 ... B_{k-1}**-1
+
+    so differentiating B_k**e_k gives  -e_k * (1/h) * B1**-1 ... B_{k-1}**-1
+    * B_k**(e_k - 1): e0 += 1, every axis from 1 to k drops by one, and the
+    coefficient is scaled by -e_k.  ONE TERM PER AXIS THE DIMENSION TOUCHES,
+    summed.
+
+    Returning only the power-axis part -- which is what this did before -- made
+    atan(1/ln(1/h)) come back as NOTHING, since a pure log-axis term has no
+    power component at all and the whole factor vanished.
+
+    THE CHAIN RULE FACTOR is what asin and atan need: they form 1/sqrt(1-u**2)
+    (resp. 1/(1+u**2)) and antidifferentiate w.r.t. eps, but
+    d/deps asin(u(eps)) = u' / sqrt(1-u**2).
     """
-    if any(isinstance(d, tuple) and any(e != 0 for e in d[1:]) for d in x.c):
-        # Differentiating a LOG axis needs the chain rule across scales:
-        # L1 = ln(1/h) has dL1/dh = -1/h, L2 = ln(L1) has dL2/dh = -1/(h*L1),
-        # so one term becomes a SUM of terms, one per axis it touches.  Not
-        # implemented.  Returning the power-axis part alone silently dropped
-        # the factor entirely and made atan(1/ln(1/h)) come back as NOTHING --
-        # a wrong answer with no complaint, which is worse than this.
-        raise NotImplementedError(
-            "d/d(eps) of a composite with a log-axis component: the chain rule "
-            "across scales (dln(1/h)/dh = -1/h) is not implemented, so asin and "
-            "atan cannot take a log-axis argument yet. exp, ln, sqrt, sin, cos, "
-            "tan, sinh, cosh, tanh and erf all can.")
-    out = Composite({_dim_shift(d, 1): c * abs(_dim_order(d))
-                     for d, c in x.c.items()
-                     if _dim_negative(d) and c != 0.0})
     # Differentiating LOSES an order: the top coefficient of x produces the top
-    # of x', and there is nothing above it to produce the next.  Failing to
-    # record that made asin(sin x) claim order 12 on 11 sound ones.
+    # of x', and there is nothing above it to produce the next.  Not recording
+    # that made asin(sin x) claim order 12 on 11 sound ones.
     _c = getattr(x, "_complete", None)
-    if _c is not None:
-        out._complete = _c - 1
-    return out
+
+    def _tag(out):
+        if _c is not None:
+            out._complete = _c - 1
+        return out
+
+    if not any(isinstance(d, tuple) for d in x.c):
+        # Scalar fast path: keeps scalar work off the vector backend entirely.
+        return _tag(Composite({_dim_shift(d, 1): c * abs(_dim_order(d))
+                               for d, c in x.c.items()
+                               if _dim_negative(d) and c != 0.0}))
+
+    from composite.backends.vector_dim_backend import as_vec, canon, ensure_depth
+    out = {}
+    for d, c in x.c.items():
+        if c == 0.0:
+            continue
+        v = list(as_vec(d))
+        for k, ek in enumerate(v):
+            if ek == 0:
+                continue
+            nd = list(v)
+            nd[0] += 1                      # every axis contributes a 1/h
+            for j in range(1, k + 1):       # ...and drops axes 1..k by one
+                nd[j] -= 1
+            key = canon(tuple(nd))
+            out[key] = out.get(key, 0.0) + c * (-ek)
+    out = {k: val for k, val in out.items() if val != 0.0}
+    if not out:
+        return _tag(Composite({}))
+    ensure_depth(max(len(k) if isinstance(k, tuple) else 2 for k in out))
+    return _tag(_vec_composite(out))
 
 
 def _reject_pole(result, what: str, at: float):

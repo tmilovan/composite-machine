@@ -340,6 +340,14 @@ class SparseDenseBackend(CompositeBackend):
         not pay for splitting into runs just to answer a read.  So fall back to
         searchsorted on the flat form when runs have not been needed yet.
         """
+        # This backend stores dimensions in a float64 array and cannot hold a
+        # VECTOR dimension at all, so it definitionally does not have one --
+        # the answer is 0.0.  Without this, searchsorted compares a float
+        # element against a tuple and raises "truth value of an array is
+        # ambiguous", so reading a log-axis coefficient off a scalar composite
+        # crashed instead of saying "not present".
+        if isinstance(dim, tuple):
+            return 0.0
         runs = data._runs
         if runs is None:
             d = data._dims
