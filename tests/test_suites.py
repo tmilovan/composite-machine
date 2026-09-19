@@ -27,6 +27,7 @@ SUITES = [
     "tests/test_identities.py",
     "tests/test_vector_dimensions.py",
     "tests/test_multivar_extended.py",
+    "tests/test_resummation.py",
     # RED ON PURPOSE.  11 of its 34 checks assert what the library must do at a
     # singularity and does not yet: a fractional power of a sum with positive
     # grade, exp outside the value group, sin/cos of an unbounded argument, and

@@ -1937,10 +1937,21 @@ def _spans_multiple_axes(x):
             if d != 0:
                 axes.add(0)
             continue
+        # EVERY non-zero component, not just the leading one.  Breaking at the
+        # first one filed a dimension like (-1, -1) -- which touches the power
+        # axis AND a log axis -- under the power axis alone, so a value that
+        # genuinely spans both reported False and division fell through to
+        # lexicographic long division, the one case the docstring above says it
+        # cannot order.
+        #
+        # Measured on exp(-t)/(1 + eps*t) with t carrying a quadrature seed:
+        # the long-division route returned 4 power grades (complete to order 3)
+        # where the reciprocal route returns 10 (order 9), for the same
+        # expression written as exp(-t)*(1/(1+eps*t)).  That is what capped the
+        # Euler-Stieltjes derivation at four coefficients.
         for i, e in enumerate(d):
             if e != 0:
                 axes.add(i)
-                break
         if len(axes) > 1:
             return True
     return len(axes) > 1
@@ -3606,8 +3617,19 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
         right_val, right_err = _adaptive(mid, b, depth + 1)
         return left_val + right_val, left_err + right_err
 
-    # Pre-subdivide into min_panels equal panels
-    total_val = 0.0
+    # Pre-subdivide into min_panels equal panels.
+    #
+    # NOTHING, not zero (R6).  `total_val = 0.0` looks harmless and is not: a
+    # bare Python zero meeting a Composite converts to the composite zero
+    # |1|_-1 by R1, so the accumulator injected +1 at grade -1 on its first
+    # addition.  Dimension 0 stayed right, which is why it went unseen -- but
+    # a panel value of -1 at grade -1 came out 0, and the Euler-Stieltjes
+    # coefficient of eps^1 read 1.8e-19 instead of -1 while every neighbouring
+    # grade was exact.  It was bit-identical at every refinement depth because
+    # the injection is one constant, not an error that refines away.
+    #
+    # The library's own R1 warning names this case exactly.  It was firing.
+    total_val = Composite({})
     total_err = 0.0
     panel_dx = (b - a) / min_panels
     for i in range(min_panels):
