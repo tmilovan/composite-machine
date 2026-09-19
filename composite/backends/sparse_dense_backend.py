@@ -6,7 +6,8 @@
 import math
 import numpy as np
 from typing import Tuple
-from .base_backend import CompositeBackend, DIM_DTYPE, dim_cast
+from .base_backend import (CompositeBackend, DIM_DTYPE, dim_cast,
+                            InexactGradeError, _add_exact)
 
 # Direct convolution costs len(a)*len(b) multiply-adds; FFT costs O(M log M) on
 # the padded transform length.  So the choice must be made on the PRODUCT of the
@@ -485,7 +486,20 @@ class SparseDenseBackend(CompositeBackend):
                         conv = np.convolve(dense_a, dense_b)
                 else:
                     conv = np.convolve(dense_a, dense_b)
-                results.append((offset_a + offset_b, conv))
+                # RUN OFFSETS ARE GRADES.  A run starts at offset_a and the
+                # product's run starts at offset_a + offset_b, so this single
+                # addition carries every grade in the run.  If it is inexact
+                # the whole run lands one ulp off the grades it should share
+                # with terms built another way -- and this backend then merges
+                # such near-misses while DictBackend keeps them, so the same
+                # two grades are one term or two depending on their history.
+                off, ok = _add_exact(float(offset_a), float(offset_b))
+                if not ok:
+                    raise InexactGradeError(
+                        f"grade {offset_a!r} + {offset_b!r} is not exact in "
+                        f"float64 (got {off!r}); the product would carry an "
+                        f"identifier one ulp from the one it should share")
+                results.append((off, conv))
 
         return self._truncate(SparseData(runs=_merge_runs(results)))
 

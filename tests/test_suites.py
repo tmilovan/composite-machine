@@ -27,6 +27,13 @@ SUITES = [
     "tests/test_identities.py",
     "tests/test_vector_dimensions.py",
     "tests/test_multivar_extended.py",
+    # RED ON PURPOSE.  11 of its 34 checks assert what the library must do at a
+    # singularity and does not yet: a fractional power of a sum with positive
+    # grade, exp outside the value group, sin/cos of an unbounded argument, and
+    # st() returning 0.0 where no standard part exists.  It is the
+    # specification, so it fails until the specification is met -- not a
+    # regression, and not to be silenced by loosening the assertions.
+    "tests/test_singularity_handling.py",
     "tests/turing_completeness/test_turing_completeness.py",
     "tests/turing_completeness/test_indicator_polinomial_step_test.py",
     "tests/turing_completeness/test_self_hosted_execution.py",

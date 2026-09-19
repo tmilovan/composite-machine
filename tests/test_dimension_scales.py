@@ -6,13 +6,34 @@
 
 Two capabilities, one theme: what a dimension is allowed to be.
 
-  FRACTIONAL (dyadic).  Dimensions are float64, so sqrt(|c|_d) = |sqrt(c)|_(d/2)
-  exists for odd d.  Every float64 IS a dyadic rational (m x 2^e), and the
-  dyadics are closed under {+, -, /2} -- exactly composite's index operations,
-  since multiply adds dimensions, divide subtracts, and sqrt halves.  So the
-  representation and the reachable set coincide: nothing composite can do
-  leaves it, and nothing outside it is representable.  An n-th root for n not a
-  power of 2 WOULD leave it, which is why there is no cbrt.
+  FRACTIONAL.  Dimensions are float64, so sqrt(|c|_d) = |sqrt(c)|_(d/2) exists
+  for odd d.
+
+  SQRT's OWN PATH stays dyadic: every float64 is a dyadic rational (m x 2^e),
+  and repeated halving never leaves them, so sqrt^25(h) lands on -2**-25 bit
+  exactly and squaring back returns -1.0 exactly (measured).
+
+  THE AXIS IS NOT LIMITED TO THEM, and this docstring used to claim it was.
+  ** routes a fractional exponent through exp(n*ln x), which reaches any
+  float64 grade: h**(1/3) gives |1|_-0.333..., and (h**(1/3))**3 round-trips
+  to |1|_-1.  There is no cbrt function, but the grade it would need is
+  representable -- what is absent is the FUNCTION, not the slot.
+
+  The protection that does end at the dyadics is CLOSURE UNDER ADDITION, and
+  multiplication adds dimensions.  Non-dyadic grades drift:
+
+      h**0.1 * h**0.2     grade -0.30000000000000004
+      h**0.3              grade -0.3                  one ulp apart
+      h**(1/7) seven times            -0.9999999999999998, not -1
+      h**0.1 ten times                -0.9999999999999999, not -1
+      h**0.25 * h**0.75               -1 exactly (dyadic)
+
+  Worse, whether two such grades stay distinct depends on how they were
+  BUILT: the sparse-dense backend merged the first pair above into one term
+  and summed their coefficients, while the same pair constructed from a dict
+  kept both.  So the same two grades are one term or two depending on their
+  history.  Both failure directions -- like terms that never collapse, and
+  distinct orders that silently merge -- are live.
 
   VECTOR (the log scale).  ln of an infinitesimal is ln(c) + d*ln(h), and ln(h)
   needs a dimension that is positive but smaller than EVERY power -- log x

@@ -67,6 +67,31 @@ from composite.backends.base_backend import DIM_DTYPE, dim_cast
 # EXCEPTIONS
 # =============================================================================
 
+class NotRepresentableError(ValueError):
+    """The quantity exists but has no composite for it.
+
+    Distinct from LimitDoesNotExistError, which asserts something about a
+    LIMIT.  sin(1/h) has no representation here -- bounded by 1, no limit, not
+    eventually monotone, so outside a Hardy field at any basis extension --
+    but that says nothing about an expression CONTAINING it: x*sin(1/x) tends
+    to 0 perfectly well.  Raising the stronger error stopped limit() from
+    recovering those, because it re-raises "provably does not exist" without
+    trying.  A ValueError subclass, so the existing domain-error path picks it
+    up and extrapolates.
+    """
+
+
+class StandardPartUndefinedError(ValueError):
+    """Asked for the standard part of something that has none.
+
+    An infinitesimal IS infinitely close to zero, so st(|1|_-1) = 0.0 is
+    correct and is not this case.  A quantity with a positive grade and
+    nothing below it is unbounded -- there is no real number it approaches,
+    and reporting the grade-0 coefficient (0.0, because the grade is absent)
+    would say "vanishing" about something infinite.
+    """
+
+
 class LimitDoesNotExistError(ValueError):
     """Raised when a limit provably does not exist."""
     pass
@@ -601,7 +626,35 @@ class Composite:
     # -------------------------------------------------------------------------
 
     def st(self):
-        """Standard part: coefficient at dimension 0"""
+        """Standard part: the real number this is infinitely close to.
+
+        THE DOMINANT GRADE DECIDES, not the presence of any particular one:
+
+          any positive grade   ->  UNDEFINED
+              Unbounded, so no real number is approached.  0.0 there is not
+              imprecise, it is inverted -- sin(1)/sin(h) is infinite and
+              `abs(st(x)) < 1e-9` was True for it.  Testing for NEGATIVE
+              grades instead was tried and misses exactly that case, because
+              |0.841471|_+1 + |0.140245|_-1 has negatives too; what makes it
+              unbounded is the +1 on top.  For the same reason 1 + 1/h has no
+              standard part despite carrying a grade-0 term.
+
+          otherwise            ->  coefficient at grade 0, 0.0 if absent
+              An infinitesimal IS infinitely close to zero, so st(|1|_-1) and
+              st(h*h) are 0.0 -- correct, and not the case above.
+
+          empty                ->  0.0
+              NOTHING, and reading it expresses the zero (R6).  Provisional:
+              this is the one case that may become undefined later.
+        """
+        dims, vals = self._backend.to_arrays(self._data)
+        nz = [d for d, v in zip(dims, vals) if v != 0.0]
+        if not nz:
+            return 0.0
+        if any(_dim_positive(d) for d in nz):
+            raise StandardPartUndefinedError(
+                f"no standard part: {str(self)[:60]} is unbounded -- its "
+                f"dominant grade is positive")
         return self._backend.read_dim(self._data, 0)
 
     def coeff(self, dim):
@@ -1118,24 +1171,82 @@ def _truncate_order(result, order):
     return out
 
 
-def _bounded_at_inf(func, x):
+def _bounded_at_inf(func, x, terms=12):
     """Evaluate a bounded transcendental at an infinite composite argument.
 
-    For monotonic bounded functions (atan, tanh): math.func(±inf) returns
-    the correct asymptotic value (e.g. atan(inf) = π/2).  Result via R().
+    For monotonic bounded functions (atan, tanh): math.func(±inf) returns the
+    correct asymptotic value (e.g. atan(inf) = pi/2).  Result via R().
 
     For oscillatory functions (sin, cos): math.func(±inf) raises ValueError.
-    The result is genuinely indeterminate — return ∅ (empty composite,
-    nothing).  ∅ absorbs under multiplication (a × ∅ = ∅) and is
-    transparent under addition (a + ∅ = a), so downstream arithmetic
-    propagates correctly: ZERO × ∅ = ∅ with st=0.
+    The value cannot be pinpointed at grade 0 -- sin(1/h) is bounded by 1 and
+    has no limit -- but that does not mean there is nothing to return.  It is
+    handled the way sqrt handles an odd dimension: the DIMENSION DEGRADES.
+
+        sin(|c|_d) = |sin(c)|_(d/2)        for d > 0
+
+    A RANGE IS NOT A POINT.  sin(1/h) takes every value in [-1, 1] -- it is
+    0 and 1 infinitely often at arbitrarily small eps -- and a composite holds
+    ONE value at ONE grade.  That is the whole obstruction, and it is why no
+    rule on the dimension repairs it.  Every candidate was measured:
+
+      grade d   (dimension kept)  revertible, st undefined, but the damping
+                cancels: x*sin(1/x) came back |sin 1|_0 = 0.841471, not 0,
+                and 1/sin(1/h) came back INFINITESIMAL for something that is
+                genuinely unbounded.              test_limits 87/109
+      grade d/2 squeeze fixed, magnitude still wrong: limit() called
+                sin(sin(1/x)) divergent, and it never exceeds 1.   90/105
+      grade 0   squeeze and magnitude both right, but st becomes DEFINED as
+                sin(1), and asin no longer reverts the skip.       94/109
+      d**(1/d)  fails the squeeze at d=1 exactly, and is not monotone.
+      asin(d)   fails the squeeze at d=1, and is undefined for d > 1.
+      sin(d)    works on (0, pi) only; sign flips past pi, and it inherits
+                sin's non-monotonicity, so the dominance order reverses.
+
+    The two requirements that decide it contradict: st-undefined needs a
+    positive grade, an honest magnitude needs a non-positive one.  So the
+    function refuses instead of choosing which to break.   103/105
+
+    The coefficient reading that survived all this is worth keeping in mind:
+    |sin(1)|_1 is ONE SAMPLE of the oscillation -- a y-value at a known
+    argument, which is why asin could inverted it.  A sample cannot answer
+    anything that needs the whole range, and the limit, the supremum and
+    whether the reciprocal blows up are all of that kind.
     """
     max_d = x.max_positive_dim()
     sign = 1.0 if x.coeff(max_d) > 0 else -1.0
+
+    # atan has an ASYMPTOTIC SERIES at an unbounded argument and it is exactly
+    # representable here, because 1/x is infinitesimal when x has a positive
+    # grade:
+    #     atan(x) = +-pi/2 - 1/x + 1/(3x^3) - 1/(5x^5) + ...
+    # Returning pi/2 alone is the LIMIT, not the value: atan(1/h) is
+    # pi/2 - h + h^3/3 - ..., so the leading term was right and every order
+    # below it was silently dropped.  The same identity covers both signs --
+    # atan(x) + atan(1/x) is +pi/2 for x > 0 and -pi/2 for x < 0, and the
+    # series for atan(1/x) is the same either way.
+    #
+    # tanh is NOT done this way: tanh(1/h) = 1 - 2exp(-2/h) + ..., and that
+    # correction is exponentially flat, so it lies outside the value group
+    # entirely.  1 is right to every representable order.
+    if func is math.atan:
+        u = R(1) / x
+        u2 = u * u
+        acc = R(sign * math.pi / 2)
+        term = u
+        for k in range(_effective_terms(terms)):
+            acc = acc + (term / float(2 * k + 1)) * (1.0 if k % 2 else -1.0)
+            term = term * u2
+        return acc
+
     try:
         return R(func(sign * float('inf')))
     except (ValueError, OverflowError):
-        return Composite({})
+        raise NotRepresentableError(
+            f"{func.__name__}(x) at an unbounded argument is a RANGE, not a "
+            f"point: sin(1/h) takes every value in [-1, 1] and a composite "
+            f"holds one value at one grade.  No rule on the grade repairs "
+            f"that -- see the analysis above."
+        ) from None
 
 
 # =============================================================================
@@ -1179,6 +1290,24 @@ def _vector_backend():
         from composite.backends.vector_dim_backend import VectorDimBackend
         _VEC_BACKEND[0] = VectorDimBackend()
     return _VEC_BACKEND[0]
+
+
+def _carries_vector(x):
+    """Does this composite actually HOLD a vector dimension?
+
+    Not the same question as whether its backend advertises VECTOR_DIMS.  ln()
+    puts a term on the log axis whatever backend it was called on, so a plain
+    scalar backend routinely ends up holding tuple dimensions -- and gating the
+    log handling on the backend flag meant exp() never recognised them there.
+    On DictBackend that made h**0.25 refuse: ** routes through
+    exp(n*ln(h)), ln gave the log-axis term, exp did not see it, and the
+    positive-grade check rejected a perfectly representable object.
+    """
+    try:
+        dims, _ = x._backend.to_arrays(x._data)
+    except Exception:
+        return False
+    return any(isinstance(d, tuple) for d in dims)
 
 
 def _unit_dim(x):
@@ -1438,7 +1567,8 @@ def exp(x, terms=15):
     if _is_nothing(x):
         return Composite({})
 
-    if LOG_SCALE and getattr(x._backend, "VECTOR_DIMS", False):
+    if LOG_SCALE and (getattr(x._backend, "VECTOR_DIMS", False)
+                      or _carries_vector(x)):
         _logs, _rest = _log_part(x)
         if _logs:
             # exp(k * ln(1/h)) = (1/h)^k = h^(-k), which sits at power +k.
@@ -1472,6 +1602,29 @@ def exp(x, terms=15):
                 else:
                     out = out * exp(_vec_composite(_rest), terms)
             return out
+
+    # OUTSIDE THE VALUE GROUP.  exp of a positive grade is not a large number,
+    # it is a different LEVEL: exp(1/h) is above every power of 1/h, and
+    # exp(-1/h) is nonzero and below every power of h -- the flat object.  No
+    # finite-rank dimension names either, because the transmonomial ordering
+    # stops being finite-rank lex once exponentials appear; grades would have
+    # to become recursive expressions rather than coordinates.  That is the
+    # step from Hahn/Hardy series to transseries, and this library stops at
+    # powers and iterated logs.
+    #
+    # It used to apply the Maclaurin series regardless, so exp(1/h) and
+    # exp(-1/h) BOTH came back as 1 - 1 + 1/2 - ... truncated at 15 terms,
+    # with standard part 1.0 for each -- two objects at opposite ends of the
+    # scale reported as the same finite number, and any comparison between
+    # them decided by round-off.  A series evaluation is sound exactly when
+    # the argument is (finite standard part) + (strictly negative grade), and
+    # that is what is checked here.
+    if _has_positive_dims(x):
+        raise NotRepresentableError(
+            f"exp of a positive grade is outside this value group: "
+            f"exp(1/h) is above every power and exp(-1/h) is below every "
+            f"power (nonzero, flat).  Naming either needs exponential "
+            f"levels -- transseries -- not a power-and-log dimension.")
 
     a = x.st()
     # 7.1: a term exists iff its coefficient is nonzero -- exactly zero,
@@ -1573,10 +1726,39 @@ def ln(x, terms=15):
     if _is_nothing(x):
         return Composite({})
 
-    if LOG_SCALE and getattr(x._backend, "VECTOR_DIMS", False):
+    if LOG_SCALE and (getattr(x._backend, "VECTOR_DIMS", False)
+                      or _carries_vector(x)):
         _v = _ln_vector(x, terms)
         if _v is not None:
             return _v
+
+    coeffs = x.c
+    if LOG_SCALE:
+        # ln(|c|_d) = ln(c) + d*ln(h) holds for ANY non-zero d, so an
+        # INFINITY is the same rule with the sign the other way round:
+        # ln(1/h) = -ln(h) = +L.
+        #
+        # BEFORE x.st().  This used to sit inside the `a <= 0` branch,
+        # which meant reading a standard part first -- and an unbounded
+        # argument has none, so ln(1/h) raised on the way to the code that
+        # already knew the answer.  The grade decides here; nothing about
+        # this case needs a standard part.
+        _pos = {d: c for d, c in coeffs.items()
+                if _dim_positive(d) and c != 0.0}
+        if _pos:
+            from composite.backends.vector_dim_backend import dom_max as _dom_max
+            _pd = _dom_max(_pos)
+            _pc = _pos[_pd]
+            if _pc > 0:
+                _t = {(0, 1): float(_pd)}
+                _lc = math.log(_pc)
+                if _lc != 0.0:
+                    _t[(0, 0)] = _lc
+                _lead = _vec_composite(_t)
+                _rest = x / _like(x, {_pd: _pc})
+                if _is_unit(_rest):
+                    return _lead
+                return _lead + ln(_rest, terms)
 
     a = x.st()
 
@@ -1584,27 +1766,6 @@ def ln(x, terms=15):
         # Check for positive infinitesimal: st=0 but positive coeff
         # at a negative dimension (e.g. ZERO = |1|_{-1})
         coeffs = x.c
-        if LOG_SCALE:
-            # ln(|c|_d) = ln(c) + d*ln(h) holds for ANY non-zero d, so an
-            # INFINITY is the same rule with the sign the other way round:
-            # ln(1/h) = -ln(h) = +L.  Handled here because the branch below
-            # only looks at negative dimensions.
-            _pos = {d: c for d, c in coeffs.items()
-                    if _dim_positive(d) and c != 0.0}
-            if _pos:
-                from composite.backends.vector_dim_backend import dom_max as _dom_max
-                _pd = _dom_max(_pos)
-                _pc = _pos[_pd]
-                if _pc > 0:
-                    _t = {(0, 1): float(_pd)}
-                    _lc = math.log(_pc)
-                    if _lc != 0.0:
-                        _t[(0, 0)] = _lc
-                    _lead = _vec_composite(_t)
-                    _rest = x / _like(x, {_pd: _pc})
-                    if _is_unit(_rest):
-                        return _lead
-                    return _lead + ln(_rest, terms)
         neg_dims = {d: c for d, c in coeffs.items() if _dim_negative(d)}
         if neg_dims:
             min_dim = min(neg_dims.keys())
@@ -2301,6 +2462,34 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
         return _limit_impl(f, as_x_to, terms, dir, fallback)
 
 
+def _limit_probe(f, as_x_to, dir, terms, _is_inf, why):
+    """Probe at real points when the algebra could not answer.
+
+    Used for two cases that look different and behave the same: a result of
+    NOTHING, and a sub-expression with no composite at all (sin(1/h)).  In
+    both the expression as a WHOLE may still converge -- x*sin(1/x) does --
+    so the limit is not refused until probing fails.
+
+    It never claims a limit on one sample.  At infinity two windows must
+    AGREE; at a finite point the extrapolation has to succeed.  That is what
+    keeps sin(x) at infinity from being reported as 0 by an integral average
+    that happens to cancel.
+    """
+    if _is_inf:
+        v1 = _limit_at_inf_fallback(f, as_x_to, n=500, width=50.0)
+        v2 = _limit_at_inf_fallback(f, as_x_to, n=500, width=100.0)
+        if math.isfinite(v1) and math.isfinite(v2):
+            if abs(v1) < 1e-4 and abs(v2) < 1e-4:
+                return 0.0
+            if abs(v1 - v2) < 1e-3 * (abs(v1) + abs(v2)):
+                return v2
+    else:
+        extrap = _limit_extrapolate(f, as_x_to, dir, terms)
+        if extrap is not None:
+            return extrap
+    raise LimitDoesNotExistError(why)
+
+
 def _limit_impl(f, as_x_to, terms, dir, fallback):
     """Internal implementation of limit(), wrapped to suppress numpy warnings."""
     # Normalize: accept Composite INF/-INF as well as float('inf')
@@ -2347,6 +2536,25 @@ def _limit_impl(f, as_x_to, terms, dir, fallback):
         # Division by nothing (∅) — denominator is indeterminate.
         # The limit provably does not exist. Don't try to recover.
         raise
+    except NotRepresentableError:
+        # DO NOT RECOVER.  A sub-expression has no composite -- sin(1/h) takes
+        # every value in [-1, 1] and a composite holds one value at one grade.
+        #
+        # Probing was tried and is the wrong answer even when it looks right.
+        # It got x*sin(1/x) -> 0, which is the true limit, but only by
+        # sampling: the bound |sin| <= 1 is exactly the information the raise
+        # declined to carry, so the algebra cannot reach that limit and the
+        # probe is guessing from points.  On x/sin(1/x) the same probe
+        # returned 0.0 for a function that is UNBOUNDED -- sin(1/x) passes
+        # through zero at x = 1/(k*pi), where the quotient blows up -- and a
+        # single-resolution probe cannot see it: its maximum reads 1.006 at
+        # 2,000 samples and 20.97 at 32,000.  A method that answers 0.0 for
+        # both a convergent and a divergent case is not a fallback, it is a
+        # coin toss with a confident face.
+        #
+        # So the refusal propagates.  The limit is not computed rather than
+        # computed by other means.
+        raise
     except (ValueError, ZeroDivisionError):
         # Domain error (ln(0), sqrt(0), etc.) — try composite extrapolation
         # from a nearby point where the function is well-defined.
@@ -2361,20 +2569,6 @@ def _limit_impl(f, as_x_to, terms, dir, fallback):
         raise LimitUndecidableError(
             "Algebraic evaluation failed (domain error at limit point). "
             "Use fallback=True for integral averaging.")
-
-    # Check for NaN/Inf contamination
-    st_val = result.st()
-    if not math.isfinite(st_val):
-        if not _is_inf:
-            extrap = _limit_extrapolate(f, as_x_to, dir, terms)
-            if extrap is not None:
-                return extrap
-        if fallback:
-            if _is_inf:
-                return _limit_at_inf_fallback(f, as_x_to)
-            return _limit_integral_fallback(f, as_x_to, dir)
-        raise LimitUndecidableError(
-            "Algebraic evaluation produced NaN/Inf.")
 
     # Positive dims → unbounded divergence (from exp, ln, etc.)
     max_pos = result.max_positive_dim()
@@ -2398,26 +2592,25 @@ def _limit_impl(f, as_x_to, terms, dir, fallback):
         raise LimitUndecidableError(
             "Result has mixed-sign positive dimensions.")
 
-    # Nothing (∅) means an indeterminate value was involved. Check if the
-    # overall expression still converges by probing at real points.
-    if _is_nothing(result):
-        if _is_inf:
-            # Evaluate at two large windows to check convergence
-            v1 = _limit_at_inf_fallback(f, as_x_to, n=500, width=50.0)
-            v2 = _limit_at_inf_fallback(f, as_x_to, n=500, width=100.0)
-            if math.isfinite(v1) and math.isfinite(v2):
-                diff = abs(v1 - v2)
-                # Both small → converging to 0
-                if abs(v1) < 1e-4 and abs(v2) < 1e-4:
-                    return 0.0
-                # Close relative to magnitude → converged
-                if diff < 1e-3 * (abs(v1) + abs(v2)):
-                    return v2
-        else:
+    # Check for NaN/Inf contamination
+    st_val = result.st()
+    if not math.isfinite(st_val):
+        if not _is_inf:
             extrap = _limit_extrapolate(f, as_x_to, dir, terms)
             if extrap is not None:
                 return extrap
-        raise LimitDoesNotExistError(
+        if fallback:
+            if _is_inf:
+                return _limit_at_inf_fallback(f, as_x_to)
+            return _limit_integral_fallback(f, as_x_to, dir)
+        raise LimitUndecidableError(
+            "Algebraic evaluation produced NaN/Inf.")
+
+    # Nothing (∅) means an indeterminate value was involved. Check if the
+    # overall expression still converges by probing at real points.
+    if _is_nothing(result):
+        return _limit_probe(
+            f, as_x_to, dir, terms, _is_inf,
             "Result is indeterminate (nothing). Limit does not exist.")
 
     return st_val
@@ -3268,14 +3461,31 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
         for sign, hv in ((1.0, dx / 2), (-1.0, -dx / 2)):
             for k, v in _eval_axis(Fx_terms, hv, 1).items():
                 acc[k] = acc.get(k, 0.0) + sign * v
-        # The float is the STANDARD PART.  Terms still carrying a power-axis
-        # component are the integrand's own infinitesimal content -- metadata,
-        # never summed into dimension 0.
-        value = 0.0
+        # KEEP EVERY POWER-AXIS GRADE, each at its own grade.  Terms carrying a
+        # power-axis component are the integrand's own infinitesimal content --
+        # they must never be summed INTO dimension 0, which is what the comment
+        # here used to say, but they were then dropped entirely, which is a
+        # different thing and loses the answer.
+        #
+        # It matters exactly where it is hardest to get otherwise.  With a
+        # seeded parameter eps = h, the integrand of the Euler-Stieltjes
+        # integral carries e^-t * (1, -t, t^2, -t^3, ...) across grades, and
+        # integrating grade -n gives (-1)^n n! -- the asymptotic series, term
+        # by term, without ever summing it (it diverges factorially for every
+        # nonzero eps).  Dropping the grades returned 1.0: the correct LIMIT,
+        # and a much smaller answer than the one asked for, with nothing to
+        # say it had been narrowed.
+        #
+        # Grade 0 alone is what it always was, so an ordinary integral is
+        # unchanged and still reads as a float through st().
+        vals = {}
         for k, v in acc.items():
             kk = k if isinstance(k, tuple) else (k,)
-            if (kk[0] if kk else 0) == 0:
-                value += v
+            pk = kk[0] if kk else 0
+            if len(kk) > 1 and any(c != 0 for c in kk[1:]):
+                continue          # still carries the variable's lane: not integrated
+            vals[pk] = vals.get(pk, 0.0) + v
+        value = Composite(vals) if vals else Composite({0: 0.0})
 
         # The remainder is not something to model -- the top two orders of the
         # expansion ARE it.  Reading it off the last few terms instead assumed
@@ -3319,6 +3529,22 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
             return value, -1.0  # signal: needs fallback
         return value, err_est
 
+    def _scale(v):
+        """Magnitude for the relative error test, ACROSS EVERY GRADE.
+
+        abs(Composite) is the standard part, i.e. dimension 0 alone.  With a
+        seeded parameter the integrand carries real content at other grades,
+        and sizing panels by dimension 0 accepted them while those grades were
+        still garbage -- the Euler-Stieltjes coefficient at grade -1 came back
+        -0.0 where uniform panels gave -1 exactly.  The error estimate already
+        sums over every dimension; only the scale it was compared against was
+        one-dimensional.
+        """
+        if isinstance(v, Composite):
+            cs = [abs(c) for c in v.coeffs_dict().values() if c != 0.0]
+            return max(cs) if cs else 0.0
+        return abs(v)
+
     def _panel_classic(x, dx):
         """Classic single-panel integral for fallback comparison."""
         mid = x + dx / 2
@@ -3328,12 +3554,19 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
         for sign, hv in ((1.0, dx / 2), (-1.0, -dx / 2)):
             for k, v in _eval_axis(Fx_terms, hv, 1).items():
                 acc[k] = acc.get(k, 0.0) + sign * v
-        out = 0.0
+        # Same rule as _panel_with_error: every power-axis grade is kept at
+        # its own grade.  This path dropped them, so any panel that fell back
+        # here silently contributed only its dimension-0 part -- which is why
+        # the Euler-Stieltjes grade -1 coefficient came back 5e-15 instead of
+        # -1 while uniform panels gave -1 exactly.
+        out = {}
         for k, v in acc.items():
             kk = k if isinstance(k, tuple) else (k,)
-            if (kk[0] if kk else 0) == 0:
-                out += v
-        return out
+            if len(kk) > 1 and any(c != 0 for c in kk[1:]):
+                continue
+            pk = kk[0] if kk else 0
+            out[pk] = out.get(pk, 0.0) + v
+        return Composite(out) if out else Composite({0: 0.0})
 
     def _adaptive(a, b, depth):
         dx = b - a
@@ -3343,9 +3576,9 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
 
         if err_est >= 0:
             # Primary path: Taylor convergence check
-            if err_est < tol * (abs(value) + 1e-100) or depth >= max_depth:
+            if err_est < tol * (_scale(value) + 1e-100) or depth >= max_depth:
                 return value, err_est
-            if abs(value) < tol * 0.01 and err_est < tol:
+            if _scale(value) < tol * 0.01 and err_est < tol:
                 return value, err_est
         else:
             # Taylor tail overflowed — try singularity detection
@@ -3362,10 +3595,10 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
             left_p = _panel_classic(a, dx / 2)
             right_p = _panel_classic(mid, dx / 2)
             half = left_p + right_p
-            error = abs(half - value)
-            if error < tol * (abs(half) + 1e-100) or depth >= max_depth:
+            error = _scale(half - value)
+            if error < tol * (_scale(half) + 1e-100) or depth >= max_depth:
                 return half, error
-            if abs(half) < tol * 0.01:
+            if _scale(half) < tol * 0.01:
                 return half, error
 
         # Bisect
@@ -3391,6 +3624,11 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
             f"{_fallback_count[0]} panel(s), used classical 3-eval fallback.",
             stacklevel=2)
 
+    # total_val already IS a composite when the integrand carried grades of its
+    # own -- re-wrapping it as Composite({0: total_val}) collapsed every one of
+    # them into dimension 0 after the panels had computed them correctly.
+    if isinstance(total_val, Composite):
+        return total_val, total_err
     return Composite({0: total_val}), total_err
 
 

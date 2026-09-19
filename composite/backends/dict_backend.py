@@ -5,7 +5,8 @@
 
 import numpy as np
 from typing import Tuple
-from .base_backend import CompositeBackend, DIM_DTYPE, dim_cast
+from .base_backend import (CompositeBackend, DIM_DTYPE, dim_cast,
+                            InexactGradeError, _add_exact)
 
 
 class DictData:
@@ -19,6 +20,50 @@ class DictData:
     def __repr__(self):
         parts = [f"|{v}|_{d}" for d, v in sorted(self.terms.items())]
         return "Composite(" + " + ".join(parts) + ")"
+
+
+def _dim_key(d):
+    """Sort key that orders scalars and vectors together, lexicographically.
+
+    sorted() on a mixed list raises -- a tuple and a float are not comparable
+    -- and a scalar d IS the vector (d, 0, ...), so padding makes the order
+    total and agrees with the dominance order the vector backend uses.
+    """
+    return d if isinstance(d, tuple) else (d,)
+
+
+def _dim_add(da, db):
+    """Add two dimensions, scalar or vector, componentwise.
+
+    Plain `+` is right for two scalars and WRONG the moment either side is a
+    tuple: `1 + (0, -1)` raises, and `(0,-1) + (0,1)` CONCATENATES to
+    (0,-1,0,1) rather than adding.  Both happen here in ordinary use -- a
+    scalar-dimension composite meeting one that has been through ln(), which
+    puts a term on the log axis -- and the crash was reached by
+    (h**0.1)*(h**0.2) on this backend.
+
+    A scalar d is the vector (d, 0, 0, ...), so the shorter side is padded
+    with zeros and the result is trimmed back to a scalar when nothing but
+    the power component survives, keeping scalar-only arithmetic on exactly
+    the keys it had before.
+    """
+    ta, tb = isinstance(da, tuple), isinstance(db, tuple)
+    if not ta and not tb:
+        out, ok = _add_exact(float(da), float(db))
+        if not ok:
+            raise InexactGradeError(
+                f"grade {da!r} + {db!r} is not exact in float64 (got {out!r}); "
+                f"the product would carry an identifier one ulp from the one "
+                f"it should share")
+        return out
+    va = da if ta else (da,)
+    vb = db if tb else (db,)
+    n = max(len(va), len(vb))
+    out = tuple((va[i] if i < len(va) else 0) + (vb[i] if i < len(vb) else 0)
+                for i in range(n))
+    while len(out) > 1 and out[-1] == 0:
+        out = out[:-1]
+    return out[0] if len(out) == 1 else out
 
 
 class DictBackend(CompositeBackend):
@@ -75,13 +120,30 @@ class DictBackend(CompositeBackend):
         if not data.terms:
             return (np.array([], dtype=DIM_DTYPE),
                     np.array([], dtype=np.float64))
-        sorted_items = sorted(data.terms.items())
-        dims = np.array([d for d, _ in sorted_items], dtype=DIM_DTYPE)
+        sorted_items = sorted(data.terms.items(), key=lambda kv: _dim_key(kv[0]))
+        keys = [d for d, _ in sorted_items]
         vals = np.array([v for _, v in sorted_items], dtype=np.float64)
-        return dims, vals
+        # A VECTOR dimension must stay a tuple.  np.array on tuple keys builds
+        # a 2-D float array, so each dimension came back as a length-n ARRAY
+        # and dim_cast's float() raised "only length-1 arrays can be converted
+        # to Python scalars" -- reached by (h**0.1)*(h**0.2) on this backend,
+        # one layer behind the convolve crash.  An object array keeps the
+        # tuples whole; scalar-only data takes the float path exactly as before.
+        if any(isinstance(d, tuple) for d in keys):
+            dims = np.empty(len(keys), dtype=object)
+            for i, d in enumerate(keys):
+                dims[i] = d
+            return dims, vals
+        return np.array(keys, dtype=DIM_DTYPE), vals
 
     def active_dims(self, data: DictData) -> np.ndarray:
-        return np.array(sorted(data.terms.keys()), dtype=DIM_DTYPE)
+        keys = sorted(data.terms.keys(), key=_dim_key)
+        if any(isinstance(d, tuple) for d in keys):
+            out = np.empty(len(keys), dtype=object)
+            for i, d in enumerate(keys):
+                out[i] = d
+            return out
+        return np.array(keys, dtype=DIM_DTYPE)
 
     # FIXED: add — do NOT delete zero-sum dimensions.
     # Canon rule: 1-1 = |0|₀ (zero at dimension 0, dimension retained).
@@ -102,7 +164,7 @@ class DictBackend(CompositeBackend):
         result = {}
         for d_a, v_a in a.terms.items():
             for d_b, v_b in b.terms.items():
-                d_out = d_a + d_b
+                d_out = _dim_add(d_a, d_b)
                 result[d_out] = result.get(d_out, 0.0) + v_a * v_b
         return DictData(result)
 
