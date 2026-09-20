@@ -249,6 +249,55 @@ def _on_ray(rs, eps):
     return sorted(out, key=abs)
 
 
+_PERSIST = 0.05      # how far an on-ray root may move between orders
+
+
+def _blocking(b, L, M, eps, rs):
+    """On-ray roots that PERSIST at the order below -- the ones that mean
+    something.
+
+    A Pade denominator ALWAYS has roots.  That is not the same as the Borel
+    transform having singularities, and reading the roots alone refused two
+    sums that nothing was blocking:
+
+      * an ENTIRE transform.  sum eps^n has Borel transform e^u, singular
+        nowhere, but Pade approximants to exp have poles, and at odd order one
+        lands on the positive axis -- +4.644 at [3/3], +7.293 at [5/5].  They
+        RECEDE with order (3.464, 4.644, 6.047, 7.293, 8.672); a real
+        singularity converges.
+      * a FROISSART DOUBLET.  Relative noise of 1e-11 on clean coefficients
+        puts a near-cancelling pole/zero pair at -0.819/+0.825, and the
+        positive half blocked a sum that [5/5] gets to 6.9e-13.
+
+    Both are caught by asking whether the root is still there one order down.
+    Measured distance to the nearest root at L-1, relative to |z|:
+
+        Stieltjes, genuine pole      0.000
+        sqrt branch point, genuine   0.002
+        entire transform [3/3]       0.51
+        entire transform [5/5]       0.31
+        Froissart doublet [8/8]      0.66
+        Froissart doublet [10/10]    0.40
+
+    Real singularities sit still; artefacts do not.
+    """
+    on = _on_ray(rs, eps)
+    if not on or L < 2 or len(b) < 2 * (L - 1) + 1:
+        return on
+    try:
+        rs2 = poles(pade(b, L - 1, M - 1)[1])
+    except (ArithmeticError, ValueError):
+        return on
+    if not rs2:
+        return []
+    keep = []
+    for z in on:
+        d = min(abs(r - z) for r in rs2)
+        if d <= _PERSIST * max(1.0, abs(z)):
+            keep.append(z)
+    return keep
+
+
 def resum(c, eps, L=None, M=None, upper=float('inf')):
     """Borel-Pade sum of sum c_n eps^n.
 
@@ -269,7 +318,24 @@ def resum(c, eps, L=None, M=None, upper=float('inf')):
         L, M = k, k
     P, Q = pade(b, L, M)
 
-    blocked = _on_ray(poles(Q), eps)
+    on = _on_ray(poles(Q), eps)
+    if on and not _blocking(b, L, M, eps, poles(Q)):
+        # A root on the path that does NOT persist one order down is an
+        # artefact of the approximant, not a singularity of the transform --
+        # a receding Pade pole of an entire function, or a Froissart doublet
+        # thrown by noise.  The sum is fine; it is the STRAIGHT PATH that is
+        # unusable, because quadrature cannot cross a zero of Q whether or not
+        # that zero means anything.  So route around it and take the median,
+        # which is what the contour is for.  Measured:
+        #
+        #   entire transform [3/3]  straight -3.3e+39   median 1.99746 (want 2)
+        #   entire transform [5/5]  straight -3.0e+18   median 1.99999
+        #   Froissart [8/8]         refused             median err 8.2e-08
+        #   Froissart [10/10]       refused             median err 9.4e-11
+        med, _amb = resum_median(c, eps, L, M, upper=upper)
+        return Composite(med.real), (P, Q)
+
+    blocked = _blocking(b, L, M, eps, poles(Q))
     if blocked:
         u0 = blocked[0].real / eps
         raise NotImplementedError(
@@ -538,8 +604,9 @@ def flat_term(c, eps, L=None, M=None):
             f"[{L}/{M}]: {detail.get('why')}.  The flat term's size is that "
             f"residue, so it cannot be quoted yet.")
     # Which singularity is ON the ray -- not necessarily the nearest one.
-    P, Q = pade(borel(c), L, M)
-    onray = _on_ray(poles(Q), eps)
+    b = borel(c)
+    P, Q = pade(b, L, M)
+    onray = _blocking(b, L, M, eps, poles(Q))
     if not onray:
         return None, 0.0                    # nothing on the integration ray
     zr = onray[0]

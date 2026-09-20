@@ -42,7 +42,8 @@ from composite.composite_lib import Composite, R, ZERO
 from composite.resummation import (borel, pade, polydiv, poly, degree, poles,
                                    dpoly, borel_singularity, flat_term, resum,
                                    classify_singularity, SingularityKind,
-                                   _balance, resum_lateral, resum_median)
+                                   _balance, resum_lateral, resum_median,
+                                   _on_ray, _blocking, poles as _poles)
 from test_dimension_scales import Suite, head
 
 cl.MAX_ACTIVE_DIMS = 10 ** 9
@@ -697,11 +698,88 @@ def r11_lateral(t):
            ok, msg)
 
 
+# =============================================================================
+def r12_negative_controls(t):
+    head("R12  negative controls -- three ways for the layer to be WRONG")
+    import random
+
+    # (1) A CONVERGENT SERIES.  sum eps^n = 1/(1-eps), Borel transform e^u,
+    # entire -- singular NOWHERE.  A Pade denominator always has roots, and
+    # the approximants to exp put one on the positive axis at odd order
+    # (+4.644 at [3/3], +7.293 at [5/5]).  Reading roots alone, the layer
+    # refused a sum nothing was blocking.
+    conv = [1.0] * 24
+    zs = [abs(_poles(pade(borel(conv), L, L)[1])[0]) for L in (2, 3, 4, 5, 6)]
+    t.true("R12.01 an entire transform's Pade poles RECEDE: "
+           + ", ".join(f"{z:.3f}" for z in zs)
+           + " -- a real singularity converges instead",
+           all(zs[i + 1] > zs[i] for i in range(len(zs) - 1)), f"{zs}")
+    errs = []
+    for L in (2, 3, 4, 5, 6):
+        v, _ = resum(conv, 0.5, L, L)
+        errs.append(abs(float(v) - 2.0))
+        t.true(f"R12.1{L} [{L}/{L}] sums to {float(v):.15g}, err {errs[-1]:.1e} "
+               f"(want 2.0) -- no order refuses", errs[-1] < 0.2, f"{float(v)}")
+    t.true(f"R12.19 and it converges: {errs[0]:.1e} -> {errs[-1]:.1e}",
+           errs[-1] < errs[0] / 100, f"{errs}")
+
+    # (2) A SINGULARITY OFF THE RAY.  B(u) = 1/(1+u^2): poles at +-i, ninety
+    # degrees from the Laplace path.  Must sum, must not refuse, must claim no
+    # ambiguity.
+    off = [0.0] * 26
+    for k in range(13):
+        if 2 * k < 26:
+            off[2 * k] = float(math.factorial(2 * k)) * ((-1) ** k)
+    # truth by a completely separate route: the defining integral
+    ref = {1.0: 0.6214496242358132, 0.5: 0.7980419771883682,
+           0.25: 0.9167702720981078}          # mpmath.quad, 50 dps
+    for eps, want in sorted(ref.items()):
+        v, _ = resum(off, eps, 8, 8)
+        t.close(f"R12.2{int(100 * eps)} eps={eps}: {float(v):.15f} vs the "
+                f"defining integral", float(v), want, tol=1e-12)
+    kind, z0, res, det = classify_singularity(off, 8, 8)
+    t.close("R12.28 and the singularity is found at +i, exactly", abs(z0), 1.0,
+            tol=1e-12)
+    t.true(f"R12.29 nothing on the ray, so flat_term claims no ambiguity: "
+           f"{flat_term(off, 1.0, 8, 8)}", flat_term(off, 1.0, 8, 8) == (None, 0.0),
+           f"{flat_term(off, 1.0, 8, 8)}")
+
+    # (3) A FROISSART DOUBLET.  Relative noise on clean coefficients throws a
+    # near-cancelling pole/zero pair; at 1e-11 it lands at -0.819/+0.825 and
+    # the positive half blocked a sum good to 6.9e-13.
+    for noise, tol in ((1e-14, 1e-12), (1e-11, 1e-6), (1e-8, 1e-3)):
+        rng = random.Random(7)
+        noisy = [c * (1 + noise * rng.uniform(-1, 1)) for c in STIELTJES]
+        on = _on_ray(_poles(pade(borel(noisy), 8, 8)[1]), 1.0)
+        v, _ = resum(noisy, 10, 10)[0] if False else resum(noisy, 1.0, 10, 10)
+        e = abs(float(v) - TARGET)
+        t.true(f"R12.3 noise {noise:g}: {len(on)} spurious root(s) on the ray, "
+               f"and [10/10] still sums to {float(v):.12f}, err {e:.1e}",
+               e < tol, f"err {e:.2e}")
+
+    # THE DISCRIMINATOR.  A root that does not persist one order down is an
+    # artefact; one that does is a singularity.  Relative distance to the
+    # nearest root at L-1:
+    #     Stieltjes genuine 0.000   sqrt branch point 0.002
+    #     entire [3/3] 0.51         Froissart [8/8] 0.66
+    b = borel(STIELTJES)
+    t.true("R12.40 a GENUINE on-ray pole still blocks: Stieltjes at eps=-1",
+           len(_blocking(b, 8, 8, -1.0, _poles(pade(b, 8, 8)[1]))) == 1,
+           "should block")
+    bc = borel(conv)
+    t.true("R12.41 an ARTEFACT does not: the entire transform at [3/3]",
+           _blocking(bc, 3, 3, 0.5, _poles(pade(bc, 3, 3)[1])) == [],
+           "should not block")
+    ok, msg = _refuses(resum, STIELTJES, -1.0, 8, 8, word="BLOCKED")
+    t.true("R12.42 and the genuine case still refuses by name: " + msg, ok, msg)
+
+
 def run_all():
     t = Suite()
     for fn in (r1_polynomials, r2_borel, r3_pade, r4_value, r5_flat,
                r6_end_to_end, r7_branch_point, r8_stirling,
-               r9_pole_string, r10_painleve, r11_lateral):
+               r9_pole_string, r10_painleve, r11_lateral,
+               r12_negative_controls):
         try:
             fn(t)
         except Exception as e:
