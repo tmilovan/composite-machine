@@ -41,10 +41,11 @@ sys.path.insert(0, _HERE)
 
 import composite.composite_lib as cl
 from composite.composite_lib import Composite, R, ZERO
+from composite.resummation import borel, SingularityKind
 from composite.transseries import (Transseries, flat, sector, ts_exp, ts_st,
                                    is_infinitesimal, is_infinite,
                                    resum_sector, sector_coefficients,
-                                   ts_d, ts_ln)
+                                   ts_d, ts_ln, from_series, action_from_growth)
 from test_dimension_scales import Suite, head
 
 cl.MAX_ACTIVE_DIMS = 10 ** 9
@@ -359,10 +360,157 @@ def t6_closure(t):
            _refuses(ts_ln, flat(1) + Transseries.lift(R(1))), "should refuse")
 
 
+# =============================================================================
+# Ai'(z)/Ai(z) from mpmath 1.3.0 at 50 decimal digits -- an independent oracle
+# that shares no code with anything here.  Pinned so the suite does not need
+# the dependency; checked against live mpmath as well when it is importable.
+AIRY_REF = {2.0: -1.5201633881848287, 3.0: -1.807422974977254,
+            5.0: -2.283586660845399, 8.0: -2.858866034197276}
+
+STIELTJES = [(-1) ** n * math.factorial(n) for n in range(24)]
+
+
+def _stirling_series(nt=24):
+    """Binet's series, Bernoulli numbers from one composite division."""
+    q = ZERO / (cl.exp(ZERO, terms=nt) - R(1))
+    B = {-int(k): v * math.factorial(-int(k))
+         for k, v in q.coeffs_dict().items() if 0 <= -int(k) <= nt}
+    a = [B[2 * n] / (2 * n * (2 * n - 1)) for n in range(1, nt // 2 + 1)]
+    c = [0.0] * (2 * len(a))
+    for n, v in enumerate(a, 1):
+        c[2 * n - 1] = v
+    return c
+
+
+def _p1_even():
+    """Painleve I's coefficients laid on even indices (a lacunary series)."""
+    a = _p1()
+    c = [0.0] * (2 * len(a))
+    for k, v in enumerate(a):
+        if 2 * k < len(c):
+            c[2 * k] = v
+    return c
+
+
+def _airy_riccati(N=30):
+    """Airy's asymptotic series, derived from the ODE rather than typed in.
+
+    y'' = z y.  Put y = exp(int S dz), giving the RICCATI equation S' + S^2 = z,
+    and expand S = sum c_k z^((1-3k)/2):
+
+        S'  contributes c_k (1-3k)/2 * z^((-1-3k)/2)
+        S^2 contributes (sum_{i+j=m} c_i c_j) z^((2-3m)/2)
+
+    The powers meet at m = k+1, so
+
+        c_k (1-3k)/2 + 2 c_0 c_{k+1} + sum_{i=1..k} c_i c_{k+1-i} = 0
+
+    and that sum over i is a convolution -- which is composite multiplication.
+    c_0 = -1 selects the decaying branch, so S is Ai'/Ai.
+    """
+    c = [-1.0]
+    for k in range(N):
+        S = Composite({-i: v for i, v in enumerate(c)})
+        conv = (S * S).coeffs_dict().get(-(k + 1), 0.0)
+        c.append(-(c[k] * (1 - 3 * k) / 2.0 + conv) / (2 * c[0]))
+    return c
+
+
+def t7_from_series(t):
+    head("T7  from_series -- the PROBLEM builds the object, not a person")
+
+    # (a) A resolved pole: the whole transseries comes out, flat term included.
+    T, info = from_series(STIELTJES, 8, 8)
+    t.true(f"T7.01 Euler-Stieltjes classified {info['kind']}, action "
+           f"{info['action']:.12f}", info["kind"] == SingularityKind.POLE
+           and abs(info["action"] - 1.0) < 1e-12, f"{info}")
+    t.true(f"T7.02 both sectors built from the coefficient list alone: "
+           f"{sorted(T.sectors)}", sorted(T.sectors) == [0, 1],
+           f"{sorted(T.sectors)}")
+    t.close(f"T7.03 sector 1 is (pi/h)exp(-1/h) -- pi DISCOVERED, not typed: "
+            f"{T.sectors[1]}", info["stokes"], math.pi, tol=1e-12)
+    for hv, want in ((1.0, math.pi / math.e), (0.5, math.pi / 0.5 * math.exp(-2))):
+        t.close(f"T7.04 flat_part({hv}) = {T.flat_part(hv):.15f}",
+                T.flat_part(hv), want, tol=1e-12 * want)
+
+    # (b) AIRY.  The series is derived from y'' = z y by composite convolution;
+    # the machinery is then asked to find the SECOND solution, which it has
+    # never been told about.  Bi ~ e^{+zeta} and Ai ~ e^{-zeta} with
+    # zeta = (2/3)z^(3/2), so they differ by e^{-2*zeta} = e^{-(4/3)/w} in the
+    # expansion variable w = z^(-3/2).  The action must come out 4/3.
+    c = _airy_riccati()
+    t.close("T7.10 the derived series starts -1, -1/4, 5/32 (Riccati, by "
+            "composite convolution)", c[1], -0.25, tol=1e-15)
+    t.close("T7.11 and its third coefficient", c[2], 5.0 / 32.0, tol=1e-15)
+    T2, i2 = from_series(c, 10, 10)
+    t.true(f"T7.12 Airy's action found WITHOUT being told Bi exists: "
+           f"{i2['action']:.8f} vs 4/3 = {4/3:.8f} (err "
+           f"{abs(i2['action'] - 4/3):.1e}) -- that is exp(-2*zeta), the gap "
+           f"to the other solution", abs(i2["action"] - 4 / 3) < 5e-3,
+           f"{i2['action']}")
+    t.true(f"T7.13 classified {i2['kind']} and the Stokes coefficient is "
+           f"REFUSED ({i2['stokes']}) -- a branch point has no residue",
+           i2["kind"] == SingularityKind.CUT and i2["stokes"] is None, f"{i2}")
+    # beta -> 0 from the coefficients alone: a LOGARITHMIC branch point
+    b = borel(c)
+    A = 4.0 / 3.0
+    sl = [(math.log(abs(b[k]) * A ** k) - math.log(abs(b[k - 4]) * A ** (k - 4)))
+          / (math.log(k) - math.log(k - 4)) for k in (16, 20, 24)]
+    t.true("T7.14 beta from the coefficients = "
+           + ", ".join(f"{x + 1:+.4f}" for x in sl)
+           + " -> 0: a LOGARITHMIC branch point", all(0 < x + 1 < 0.05 for x in sl),
+           f"{sl}")
+
+    # (c) the value, against mpmath -- no shared code with any of this
+    for z, ref in sorted(AIRY_REF.items()):
+        w = z ** -1.5
+        got = T2.evaluate(w / i2["action"], L=8, M=8) * math.sqrt(z)
+        terms = [abs(c[k] * z ** ((1 - 3 * k) / 2.0)) for k in range(len(c))]
+        bn = min(range(1, len(terms)), key=lambda j: terms[j])
+        tr = sum(c[k] * z ** ((1 - 3 * k) / 2.0) for k in range(bn + 1))
+        t.true(f"T7.2{int(z)} Ai'/Ai at z={z}: {got:.15f} vs mpmath "
+               f"{ref:.15f}, err {abs(got - ref):.1e}  (optimal truncation "
+               f"{abs(tr - ref):.1e} at k*={bn})",
+               abs(got - ref) < 1e-10, f"{got} vs {ref}")
+    try:
+        import mpmath as mp
+        mp.mp.dps = 50
+        live = float(mp.airyai(3, 1) / mp.airyai(3))
+        t.close("T7.29 and the pinned reference matches live mpmath", live,
+                AIRY_REF[3.0], tol=1e-15)
+    except ImportError:
+        t.true("T7.29 live mpmath unavailable; pinned references used", True, "")
+
+    # (d) the action estimator, across every geometry we have
+    cut = [math.factorial(n) * ((-1) ** n * math.factorial(2 * n)
+                                / (4.0 ** n * math.factorial(n) ** 2))
+           for n in range(26)]
+    stir = _stirling_series()
+    p1c = _p1_even()
+    cases = [("Euler-Stieltjes", STIELTJES, 8, 1.0, 1e-12),
+             ("sqrt branch cut", cut, 8, 1.0, 1e-3),
+             ("Airy (Riccati)", c, 10, 4 / 3, 5e-3),
+             ("Painleve I", p1c, 8, 0.8 * math.sqrt(2 * math.sqrt(6)), 1e-6),
+             ("Stirling/Binet", stir, 8, 2 * math.pi, 1e-2)]
+    for lbl, cs, L, truth, tol in cases:
+        _, i = from_series(cs, L, L)
+        t.true(f"T7.3 {lbl:<16} action {i['action']:.8f} vs {truth:.8f} "
+               f"(err {abs(i['action'] - truth):.1e}; Pade alone gave "
+               f"{i['action_pade']:.6f})", abs(i["action"] - truth) < tol,
+               f"{i['action']} vs {truth}")
+    # and the estimator must survive a LACUNARY series
+    for lbl, cs in (("even (Painleve I)", p1c), ("odd (Stirling)", stir)):
+        g = action_from_growth(cs)
+        t.true(f"T7.4 stride detected on an {lbl} series -> {g!r}; reading "
+               f"consecutive pairs would hit a zero every step",
+               g is not None, f"action_from_growth returned {g!r}")
+
+
 def run_all():
     t = Suite()
     for fn in (t1_ordering, t2_sector_arithmetic, t3_against_the_oracle,
-               t4_the_bridge, t5_separability, t6_closure):
+               t4_the_bridge, t5_separability, t6_closure,
+               t7_from_series):
         try:
             fn(t)
         except Exception as e:

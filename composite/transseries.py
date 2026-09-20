@@ -67,7 +67,8 @@ import math
 from .composite_lib import (Composite, R, ZERO, exp as _c_exp, ln as _c_ln,
                              _r1 as _apply_r1)
 from .backends.dict_backend import _dim_key
-from .resummation import resum, resum_median
+from .resummation import (resum, resum_median, classify_singularity,
+                          SingularityKind)
 
 # Enough coefficients for a [2/2].  Below this there is nothing for Pade to
 # approximate and the series is summed as written.
@@ -411,6 +412,108 @@ class Transseries:
 
 
 # =============================================================================
+def action_from_growth(coeffs, skip=4):
+    """The action read off the COEFFICIENT RATIO, with one Richardson step.
+
+    c_n = n! b_n and b_n ~ n^(beta-1) A^-n, so |c_{n+1}/c_n| -> (n+1)/A and
+    the estimate A_n = n/ratio falls as A + const/n.  One Richardson step
+    removes the 1/n.
+
+    This is the better estimator AT A BRANCH POINT, where Pade only ever lays
+    another link of a chain and its leading root creeps in from outside.
+    Measured:
+
+        series            Pade |z0|            growth + Richardson   truth
+        Airy (Riccati)    1.3508  (1.3% high)  1.33397  (5e-4)       4/3
+        Painleve I        1.8425  (4% high)    1.770724 (3e-5)       1.770691
+
+    At a genuine POLE the comparison reverses -- Pade reproduces it exactly
+    (Euler-Stieltjes: z0 = -1.000000000000 at every order) -- so from_series
+    uses Pade for a pole and this for a cut.
+    """
+    nz = [n for n, v in enumerate(coeffs) if v != 0.0]
+    if len(nz) < 4:
+        return None
+    # STRIDE.  A lacunary series -- Painleve I's is even, Stirling's odd -- has
+    # a zero in every consecutive pair, and reading ratios pairwise skips the
+    # whole series.  With coefficients only at n, n+s, n+2s, the ratio over one
+    # stride is |c_{n+s}/c_n| ~ (n/A)^s.
+    gaps = {nz[i + 1] - nz[i] for i in range(len(nz) - 1)}
+    if len(gaps) != 1:
+        return None
+    step = gaps.pop()
+    est = []
+    for i in range(len(nz) - 1):
+        n = nz[i]
+        if n < skip:
+            continue
+        r = abs(coeffs[nz[i + 1]] / coeffs[n])
+        if r > 0.0:
+            est.append((n, n / r ** (1.0 / step)))
+    if len(est) < 2:
+        return None
+    (n1, a1), (n0, a0) = est[-1], est[-2]
+    # A_n = A + c/n sampled at n1 and n0 = n1 - step
+    return a1 + (n1 - step) * (a1 - a0) / step
+
+
+def from_series(coeffs, L=None, M=None, action=None):
+    """Build a Transseries FROM a divergent series -- the constructive direction.
+
+    Everywhere else the bridge runs one way: a sector goes in, a number comes
+    back.  This is the other way.  Given only the coefficients of a divergent
+    asymptotic series it locates the Borel singularity, reads the ACTION off
+    its distance, rescales the variable into units of that action so the
+    sectors are integers, and returns a transseries with sector 0 filled and
+    the exponent of sector 1 fixed -- exp(-1/h) is then exp(-A/w) in the
+    original variable.
+
+    THE COEFFICIENT OF SECTOR 1 IS ONLY SET WHEN THE SINGULARITY IS A RESOLVED
+    POLE, because that is the only case where a residue exists to size it.
+    For a branch point the exponent is still determined -- it is the action --
+    and the coefficient is left unset rather than invented.  `info["stokes"]`
+    is None there, and the caller can measure it from the lateral gap instead.
+
+    Nothing here derives exp(-1/h) from the coefficients: the algebra HOLDS
+    the flat term, composite.resummation FINDS it.  What this function does is
+    put the two together, so a problem -- rather than a person -- builds the
+    object.
+
+    Returns (Transseries, info) with info carrying kind, z0, action, stokes
+    and the classifier's detail.
+    """
+    kind, z0, res, det = classify_singularity(coeffs, L, M)
+    raw = Composite({-k: v for k, v in enumerate(coeffs) if v != 0.0})
+    if z0 is None:
+        return (Transseries({0: raw}),
+                {"kind": kind, "z0": None, "action": None, "stokes": None,
+                 "detail": det})
+
+    if action is not None:
+        A = float(action)
+    elif kind == SingularityKind.POLE:
+        A = abs(z0)                       # Pade reproduces a pole exactly
+    else:
+        A = action_from_growth(coeffs) or abs(z0)   # see action_from_growth
+    if not (A > 0):
+        raise ValueError(f"action must be positive; got {A!r} from z0={z0!r}")
+
+    # h = w / A, so that the flat term exp(-A/w) becomes exp(-1/h) and the
+    # sector indices are integers -- see the module docstring on units.
+    sectors = {0: Composite({-k: v * A ** k
+                             for k, v in enumerate(coeffs) if v != 0.0})}
+    stokes = None
+    if kind == SingularityKind.POLE and res is not None:
+        # The one-instanton size the residue gives: pi*|Res|*exp(-A/w)/w,
+        # and w = A*h, so the prefactor is (pi*|Res|/A) * h^-1.
+        stokes = math.pi * abs(res) / A
+        sectors[1] = Composite({1.0: stokes})
+    return (Transseries(sectors),
+            {"kind": kind, "z0": z0, "action": A, "stokes": stokes,
+             "action_pade": abs(z0), "action_growth": action_from_growth(coeffs),
+             "detail": det})
+
+
 def sector(n, c=1.0):
     """The transseries c*exp(-n/h)."""
     return Transseries({int(n): c if isinstance(c, Composite) else Composite(c)})

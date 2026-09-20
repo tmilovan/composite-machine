@@ -18,3 +18,12 @@ from composite.resummation import (
     SingularityKind,
     poly, polydiv, degree, dpoly,   # the polynomial helpers underneath
 )
+
+from composite.transseries import (
+    Transseries,        # a sparse map sector -> Composite; sector n is exp(-n/h)
+    from_series,        # build one FROM a divergent series: the problem does it
+    action_from_growth, # the action from the coefficient ratio, stride-aware
+    resum_sector,       # the bridge: a sector's series -> a number
+    flat, sector, ts_exp, ts_ln, ts_d, ts_st,
+    is_infinitesimal, is_infinite,
+)
