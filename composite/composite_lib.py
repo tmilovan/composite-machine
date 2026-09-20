@@ -2094,6 +2094,14 @@ def _maclaurin_odd(x, coeffs, terms):
 
 def atan(x, terms=15):
     """Arctangent for composite numbers."""
+    # WITHOUT THIS the series stops at the function's own default,
+    # whatever depth the caller asked for.  _derivative_scope raises
+    # _min_terms so a 24th derivative can be taken; atan/asin/acos read
+    # `terms` raw, capped at grade -15 for terms=15, 25 and 40 alike,
+    # and returned EXACTLY 0.0 for every order past it -- a silent zero
+    # where atan^(16)(0.4) is -7.7e+10.  sin, cos, exp, ln, sqrt all
+    # call this on their first line.
+    terms = _effective_terms(terms)
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
@@ -2127,10 +2135,24 @@ def atan(x, terms=15):
     _c = _min_complete(deriv)
     if _c is not None:
         out._complete = _c + 1
+        # TRUNCATE to what is complete, as sqrt does.  Recording the bound and
+        # then handing back the orders past it means the caller reads a
+        # coefficient that is a partial sum wearing the shape of a finished
+        # one: at the default depth atan's order 16 moved by 5.0 once the
+        # series could actually be deepened.
+        out = _truncate_order(out, out._complete)
     return out
 
 def asin(x, terms=15):
     """Arcsine for composite numbers."""
+    # WITHOUT THIS the series stops at the function's own default,
+    # whatever depth the caller asked for.  _derivative_scope raises
+    # _min_terms so a 24th derivative can be taken; atan/asin/acos read
+    # `terms` raw, capped at grade -15 for terms=15, 25 and 40 alike,
+    # and returned EXACTLY 0.0 for every order past it -- a silent zero
+    # where atan^(16)(0.4) is -7.7e+10.  sin, cos, exp, ln, sqrt all
+    # call this on their first line.
+    terms = _effective_terms(terms)
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
@@ -2165,10 +2187,21 @@ def asin(x, terms=15):
     _c = _min_complete(deriv)
     if _c is not None:
         out._complete = _c + 1
+        # As in atan: truncate to what is complete rather than hand back
+        # partial sums past the bound.  acos is asin, so it follows.
+        out = _truncate_order(out, out._complete)
     return out
 
 def acos(x, terms=15):
     """Arccosine for composite numbers."""
+    # WITHOUT THIS the series stops at the function's own default,
+    # whatever depth the caller asked for.  _derivative_scope raises
+    # _min_terms so a 24th derivative can be taken; atan/asin/acos read
+    # `terms` raw, capped at grade -15 for terms=15, 25 and 40 alike,
+    # and returned EXACTLY 0.0 for every order past it -- a silent zero
+    # where atan^(16)(0.4) is -7.7e+10.  sin, cos, exp, ln, sqrt all
+    # call this on their first line.
+    terms = _effective_terms(terms)
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
