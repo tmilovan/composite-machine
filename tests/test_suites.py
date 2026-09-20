@@ -27,13 +27,15 @@ SUITES = [
     "tests/test_identities.py",
     "tests/test_vector_dimensions.py",
     "tests/test_multivar_extended.py",
+    "tests/test_zero_coercion.py",
     "tests/test_resummation.py",
-    # RED ON PURPOSE.  11 of its 34 checks assert what the library must do at a
-    # singularity and does not yet: a fractional power of a sum with positive
-    # grade, exp outside the value group, sin/cos of an unbounded argument, and
-    # st() returning 0.0 where no standard part exists.  It is the
-    # specification, so it fails until the specification is met -- not a
-    # regression, and not to be silenced by loosening the assertions.
+    "tests/test_transseries.py",
+    # Written RED: 11 of its checks asserted what the library must do at a
+    # singularity and did not -- a fractional power of a sum with positive
+    # grade, exp outside the value group, sin/cos of an unbounded argument,
+    # st() where no standard part exists.  The specification was then met, and
+    # it is green.  If it goes red again that is a regression in the refusals,
+    # not a loose assertion to tighten.
     "tests/test_singularity_handling.py",
     "tests/turing_completeness/test_turing_completeness.py",
     "tests/turing_completeness/test_indicator_polinomial_step_test.py",

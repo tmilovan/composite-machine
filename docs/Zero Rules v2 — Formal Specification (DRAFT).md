@@ -108,17 +108,30 @@ from itself leaves an infinitesimal, adding a zero must deposit one too.
 (§0, Principle 2). The system has a multiplicative identity (R3) and no
 additive one; the asymmetry is deliberate.
 
-**Consequence for accumulators.** A summation that has not yet added a term
-holds *nothing*, not zero. Seeding one with `Composite({0: 0.0})` asserts that
-a zero exists there, and that assertion costs one `h`:
+**A written zero is an EXPRESSED zero.** `c + 0`, `c * 0`, `sum([c, c])` — the
+scalar was written, so it is `0_0` and R1 converts it. An expressed zero *is*
+an infinitesimal; that is the content of the system, not a cost it imposes.
 
-```python
-total = Composite({})        # correct — nothing yet
-total = Composite({0: 0.0})  # wrong — asserts a zero, adds an h
-```
+The distinction §0 draws is between a zero and an **absence**, not between a
+zero and a zero that arrived from data. A masked entry holding `0.0` holds
+zero; a quadrature node at `0.0` is a node at zero; a coefficient that is
+`0.0` is a coefficient that is zero. What is *absent* is a term that was never
+put there — `d.get(k)` returning nothing, an accumulator with nothing added
+yet — and the idiom for that is `Composite({})`, never a written `0`.
 
-The same applies to `x + 0` with a Python literal anywhere in library or user
-code: the scalar is lifted to `0_0` and contributes an infinitesimal.
+This was briefly changed, so that a bare scalar zero coerced to `∅`. It was
+reverted for two reasons. The premise was wrong: the event R1 records is the
+*expression* of the zero, and writing it is that event. And the consequence
+was worse than the problem — a keyboard-reachable additive identity makes this
+a conventional ring with an extra symbol attached, and two zeros obeying
+different laws is worse than one obeying one.
+
+The bug that motivated it was never in the rule. `d.get(k, 0.0)` for a Padé
+coefficient that did not exist *manufactured* a zero the mathematics never
+expressed, and a Borel integral returned 3224 for a value of 0.697. The fix is
+`d.get(k)` and skip the absent term.
+
+---
 
 **R5 — products retain the dimensions they construct.** The dimensions of a
 product are the Minkowski sum of the operands' dimension sets, and

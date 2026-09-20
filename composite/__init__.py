@@ -9,8 +9,12 @@ from composite.resummation import (
     borel,              # b_n = c_n / n!
     pade,               # [L/M] by extended Euclid on convolve/deconvolve
     resum,              # Borel-Pade sum of a divergent asymptotic series
+    resum_lateral,     # Borel sum with the contour swung off a blocked ray
+    resum_median,      # both laterals: the value, and the flat term between them
     borel_singularity,  # where the Borel transform blows up, and its residue
     flat_term,          # size of the exponentially small ambiguity
     poles,              # roots of the Pade denominator
+    classify_singularity,  # pole, branch point, or not yet resolved -- and why
+    SingularityKind,
     poly, polydiv, degree, dpoly,   # the polynomial helpers underneath
 )

@@ -154,6 +154,9 @@ def _r1(c):
     if not _is_wholly_zero(c):
         return c
     dims, vals = c._backend.to_arrays(c._data)
+    if len(dims) == 0:
+        return c                       # NOTHING has no dimension to convert
+    _warn_zero_operand()
     dims = dims.copy()
     vals = vals.copy()
     # to_arrays is sorted ascending, so [0] is the lowest dimension.
@@ -173,38 +176,94 @@ def _r1(c):
                            c._backend, demote=False)
 
 
-_ZERO_SEED_MSG = (
-    "bare Python 0 used with `{op}` on a Composite. A Python zero meeting a "
-    "Composite ALWAYS converts to the composite zero |1|_-1 (R1) -- that is the "
-    "rule and it is what just happened. If you meant an accumulator that has not "
-    "added a term yet, that is NOTHING, not zero (R6): use Composite({{}}) or seed "
-    "with the first term. `acc = 0` leaves the dimension-0 value correct while "
-    "injecting |1|_-1 into every derivative -- 321 instead of 257 for a "
-    "5th-degree polynomial. Write R(0) or ZERO to silence this when the "
-    "composite zero is what you want."
+def _scalar_operand(other):
+    """A Python or numpy scalar entering an operation as the other operand.
+
+    A WRITTEN ZERO IS AN EXPRESSED ZERO: |0|_0, which R1 converts.  That is
+    not a cost the system imposes on the unwary -- it IS the system.  An
+    expressed zero is an infinitesimal, and `1 - 1 != 0` is the same statement.
+
+    This was briefly changed so that a bare scalar zero produced NOTHING, on
+    the argument that a zero arriving from data has no event behind it.  The
+    argument was wrong on both counts.  §0 already draws the line: NOTHING is
+    the ABSENCE of a term, and a zero that was written is not absent -- the
+    event R1 records is the EXPRESSION of the zero, and writing it is that
+    event.  Worse, making a keyboard-reachable zero into an additive identity
+    turns this back into a conventional ring with an extra symbol attached,
+    and two zeros obeying different laws is worse than one obeying one.
+
+    The bug that motivated the change was never here.  `d.get(k, 0.0)`
+    MANUFACTURED a zero for a Pade coefficient that did not exist -- it
+    expressed a zero the mathematics never expressed -- and the lateral Borel
+    integral returned 3224 where the answer is 0.697.  The fix is `.get(k)`
+    and skip the absent term, which is what the warning below has always said.
+    """
+    if other == 0:
+        return Composite({0: 0.0})
+    return Composite(float(other))
+
+
+_ZERO_OPERAND_MSG = (
+    "a zero operand converted: |0|_d -> |1|_(d-1) (R1). That is the rule and "
+    "it is correct -- an expressed zero IS an infinitesimal, which is the same "
+    "statement as 1 - 1 != 0. It is reported because the dimension-0 value "
+    "stays right while every derivative moves, which is the worst failure "
+    "shape there is. Three ways to arrive here: a written zero (`c + 0`, "
+    "`acc = 0`) -- correct, and Composite(0) or ZERO silences it; a zero that "
+    "was MANUFACTURED for something absent (`d.get(k, 0.0)` for a coefficient "
+    "that does not exist) -- a bug, use `d.get(k)` and skip, or Composite({}) "
+    "for an accumulator, and it returned 3224 for a value of 0.697 once; or a "
+    "computation that cancelled to all-zero -- correct, and nothing announced "
+    "it before this warning existed."
 )
 
 
-def _warn_zero_seed(other, op):
-    """R6 made audible.  The SEMANTICS are not in question here.
+def _warn_zero_operand():
+    """R1 made audible, once, at the only place a zero actually converts.
 
-    A Python 0 meeting a Composite converts to |1|_-1.  That is R1, it is
-    deliberate, and it is why `0 * t` is a perfectly good way to write the zero
-    component of a path -- this repo's own curve tests do exactly that.
-
-    What is missing is visibility.  `acc = 0` is the most natural seed anyone
-    writes, and it silently asks for the composite zero instead of an empty
-    accumulator.  The dimension-0 value stays correct, so the result looks
-    right; only the derivatives are wrong.  That is the worst failure shape
-    there is, so it gets a warning.
-
-    A WARNING, not an error: `0 * t` is legitimate, and raising also broke the
-    exp(-1/x^2) limits by firing inside the limit machinery where the exception
-    became a nan.  Nothing about the arithmetic changes.
+    This used to be two warnings.  A bare Python 0 became |0|_0 and then
+    converted here anyway, so `c + 0` fired both the seed warning and this
+    one, while `c / 0` fired neither -- the seed warning was never wired into
+    __truediv__.  _r1 is the single point every route passes through, so the
+    message lives here and covers all three: written, manufactured, cancelled.
     """
-    if type(other) in (int, float) and other == 0:
-        import warnings
-        warnings.warn(_ZERO_SEED_MSG.format(op=op), stacklevel=3)
+    import warnings
+    warnings.warn(_ZERO_OPERAND_MSG, stacklevel=5)
+
+
+def is_nothing(x):
+    """True for NOTHING -- no term at any dimension.  The classical zero.
+
+    This is what a bare Python 0 becomes when it enters an operation, and it
+    is an additive identity and a multiplicative annihilator.  It is NOT a
+    zero at a dimension and does not convert under R1.
+    """
+    return isinstance(x, Composite) and not x.coeffs_dict()
+
+
+def is_vanishing(x):
+    """True for a zero that HAS a dimension -- one that converts under R1.
+
+    `c - c`, `Composite({0: 0.0})`, `L - L`.  These are the values for which
+    `x == 0` is False, because a dimension existed and was annihilated, and
+    the trace of that event is what `1 - 1 != 0` is a claim about.
+    """
+    return (isinstance(x, Composite) and bool(x.coeffs_dict())
+            and _is_wholly_zero(x))
+
+
+def is_zero(x):
+    """True when x carries no value: NOTHING, or a zero at some dimension.
+
+    USE THIS RATHER THAN `x == 0`.  `x == 0` compares against NOTHING, so it
+    is True for NOTHING and False for a dimensioned zero -- which is R1 and R6
+    working exactly as specified, and which surprises every reader once.
+    is_zero() asks the question people actually mean; is_vanishing()
+    distinguishes the case that still carries a dimension.
+    """
+    if isinstance(x, (int, float)):
+        return x == 0
+    return is_nothing(x) or is_vanishing(x)
 
 
 class Composite:
@@ -440,9 +499,8 @@ class Composite:
     def __add__(self, other):
         """Addition never shifts dimensions (R4).  A zero OPERAND converts (R1);
         a zero TERM does not (R2)."""
-        _warn_zero_seed(other, "+")
         if isinstance(other, (int, float)):
-            other = Composite({0: 0.0}) if other == 0 else Composite(float(other))
+            other = _scalar_operand(other)
         if not isinstance(other, Composite):
             return NotImplemented
         a, b = _operands(self, other)
@@ -459,9 +517,8 @@ class Composite:
         it exists and holds zero.  No special case is needed -- |0|_a - |0|_a
         giving 0**(a+1) follows from R1 plus this rule, not from a branch here.
         """
-        _warn_zero_seed(other, "-")
         if isinstance(other, (int, float)):
-            other = Composite({0: 0.0}) if other == 0 else Composite(float(other))
+            other = _scalar_operand(other)
         if not isinstance(other, Composite):
             return NotImplemented
         a, b = _operands(self, other)
@@ -470,8 +527,7 @@ class Composite:
                                complete=_min_complete(self, other))
 
     def __rsub__(self, other):
-        _warn_zero_seed(other, "-")
-        left = Composite({0: 0.0}) if other == 0 else Composite(float(other))
+        left = _scalar_operand(other)
         return left.__sub__(self)
 
     def __neg__(self):
@@ -485,7 +541,6 @@ class Composite:
         = |5|_-1 -- the value is translated, not annihilated.  Multiplying by
         |1|_0 is the identity (R3).
         """
-        _warn_zero_seed(other, "*")
         if isinstance(other, (int, float)):
             if other == 0:
                 other = Composite({0: 0.0})
@@ -589,7 +644,7 @@ class Composite:
     def __rtruediv__(self, other):
         # other / self -- the operands are reversed, so no unit-divisor
         # short-circuit applies here.
-        left = Composite({0: 0.0}) if other == 0 else Composite(float(other))
+        left = _scalar_operand(other)
         return left.__truediv__(self)
 
     def __abs__(self):
