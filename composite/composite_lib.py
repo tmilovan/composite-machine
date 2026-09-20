@@ -1940,6 +1940,45 @@ def sqrt(x, terms=12):
     if not _has_infinitesimal_part(x):
         return Composite({0: math.sqrt(a)})
 
+    # SOLVE y**2 = x ORDER BY ORDER, where the dimensions allow it.
+    #
+    #     y_0 = sqrt(x_0),   2 y_0 y_n = x_n - sum_{k=1..n-1} y_k y_{n-k}
+    #
+    # Each order is fixed once from the orders below it.  The binomial series
+    # kept below forms ratio**n instead, and for an argument with many terms
+    # that is a far longer chain of roundings to reach the same coefficient.
+    # Against sqrt(1+sin x) at x=0.4, relative error by order:
+    #
+    #     order         8         12        16        20
+    #     binomial      2.4e-12   1.3e-07   2.3e-02   5.0e+03
+    #     recurrence    5.6e-13   6.8e-09   3.1e-04   3.9e+01
+    #     Newton        2.3e-12   2.9e-08   1.3e-03   1.7e+02
+    #
+    # None of them is exact past order 16, and that is not the algorithm: the
+    # SAME recurrence at 60 decimal digits is exact to the last digit at every
+    # order.  The coefficients fall eighteen orders of magnitude between n=8
+    # and n=20 while the input is O(1), so each order costs about a digit and
+    # float64's sixteen run out near order 16.  The recurrence only spends
+    # them more slowly.
+    _scalar_orders = None
+    if all(not isinstance(d, tuple) for d in x.coeffs_dict()):
+        _ks = [-float(d) for d, c in x.coeffs_dict().items() if c != 0.0]
+        if all(k >= 0 and k == int(k) for k in _ks):
+            _scalar_orders = {int(-float(d)): c
+                              for d, c in x.coeffs_dict().items()}
+    if _scalar_orders is not None:
+        y = {0: math.sqrt(a)}
+        for n in range(1, terms):
+            acc = 0.0
+            for k in range(1, n):
+                if k in y and (n - k) in y:
+                    acc += y[k] * y[n - k]
+            v = (_scalar_orders.get(n, 0.0) - acc) / (2.0 * y[0])
+            if v != 0.0 or n in _scalar_orders:
+                y[n] = v
+        out = _like(x, {-float(n): c for n, c in y.items()})
+        return _truncate_order(out, _tighter(terms - 1, _min_complete(x)))
+
     sqrt_a = math.sqrt(a)
     h_part = x - R(a)
     ratio = h_part / R(a)

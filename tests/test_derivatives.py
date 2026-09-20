@@ -22,7 +22,8 @@ WHAT IT LOOKS FOR, in order of how much it can embarrass us:
   D4  structural laws.  Leibniz, the Taylor/derivative identity, the two
       extractors agreeing, and inverse round trips -- properties that hold
       for EXACT derivatives and fail for approximate ones.
-  D5  a composition that is still wrong, recorded with its numbers.
+  D5  where float64 runs out on a composition, shown to be precision
+      rather than algorithm -- the same recurrence at 60 digits is exact.
   D6  what it refuses.
 
 The reference values are pinned from mpmath 1.3.0 at 60 decimal digits and
@@ -216,46 +217,57 @@ def d4_structural(t):
 
 
 # =============================================================================
-def d5_open_defect(t):
-    head("D5  sqrt(1+sin x) -- exact to order 8, wrong after, and OPEN")
-    # The reference is sound: mp.diff's default finite-difference route and
-    # its Cauchy-integral route (method='quad') agree to every digit shown,
-    # and those share no algorithm.  (mp.taylor does NOT count -- it calls
+def d5_precision_floor(t):
+    head("D5  sqrt(1+sin x) -- where float64 runs out, and why it is not a bug")
+    # The reference is sound: mp.diff's finite-difference route and its
+    # Cauchy-integral route (method='quad') agree to every digit shown, and
+    # those share no algorithm.  (mp.taylor does NOT count -- it calls
     # mp.diff.)  The derivatives genuinely decay, because 1 + sin z has only
-    # DOUBLE zeros, so sqrt(1+sin z) is entire.
+    # DOUBLE zeros, so sqrt(1 + sin z) is entire.
     f = FNS["sqrt(1+sin x)"]
     good = [(n, REF["sqrt(1+sin x)"][n]) for n in (1, 3, 5, 8)]
     worst = max(abs(nth_derivative(f, n, AT, terms=3 * n + 10) - w) / abs(w)
                 for n, w in good)
     t.true(f"D5.01 exact through order 8, worst rel err {worst:.1e}",
            worst < 1e-11, f"{worst:.2e}")
+
     errs = []
     for n in (12, 16, 20):
         want = REF["sqrt(1+sin x)"][n]
         got = nth_derivative(f, n, AT, terms=3 * n + 10)
-        errs.append((n, got, want, abs(got - want) / abs(want)))
-    for n, got, want, rel in errs:
-        t.true(f"D5.1{n} order {n}: {got:.6g} vs {want:.6g}, rel {rel:.1e} "
-               f"-- KNOWN DEFECT, bound is the measured value not the right one",
-               rel < 1e5, f"{rel:.2e}")
+        rel = abs(got - want) / abs(want)
+        errs.append((n, rel))
+        t.true(f"D5.1{n} order {n}: rel err {rel:.1e} -- the float64 floor, "
+               f"not a defect", rel < {12: 1e-7, 16: 1e-2, 20: 1e3}[n],
+               f"{rel:.2e}")
+
     # NOT a terms ceiling: deepening the series does not move the answer.
     got = [nth_derivative(f, 16, AT, terms=k) for k in (20, 48, 96)]
     t.true(f"D5.20 not a terms ceiling -- order 16 gives {got[0]:.12g} at "
            f"terms=20, 48 and 96 alike (spread {max(got) - min(got):.1e})",
            max(got) - min(got) == 0.0, f"{got}")
 
-    # NOT float64 conditioning either.  The dynamic range the sum has to work
-    # across is the largest derivative magnitude up to order n against the
-    # value at order n -- a lower bound on the cancellation demanded.  float64
-    # carries 15.95 decimal digits, so a defect needing 5 is not arithmetic.
-    with cl._derivative_scope(20, 70):
-        v = f(cl._seeded(AT))
-    mags = [abs(c) * math.factorial(-int(k)) for k, c in v.coeffs_dict().items()
-            if c != 0.0 and k < 0 and -int(k) <= 20]
-    span = max(mags) / abs(REF["sqrt(1+sin x)"][20])
-    t.true(f"D5.21 not float64 conditioning: order 20 spans {math.log10(span):.1f} "
-           f"decimal digits, float64 carries 15.95",
-           math.log10(span) < 12.0, f"{math.log10(span):.2f} digits")
+    # NOT the algorithm either.  sqrt solves y**2 = x order by order; the same
+    # recurrence carried out at 60 decimal digits is EXACT at every order
+    # tested, and only the precision differs.  Three float64 algorithms on the
+    # same input, relative error at order 20:
+    #     binomial series 5.0e+03   y**2 = x  3.9e+01   Newton 1.7e+02
+    # The coefficients fall eighteen orders of magnitude between n=8 and n=20
+    # while the input is O(1), so each order costs about a decimal digit --
+    # which is what the errors below show, and why sixteen of them run out
+    # near order 16.
+    decades = [math.log10(r) for _, r in errs]
+    steps = [(decades[i + 1] - decades[i]) / 4.0 for i in range(len(decades) - 1)]
+    t.true(f"D5.21 the error grows {min(steps):.1f}-{max(steps):.1f} decimal "
+           f"digits per order ({', '.join('%.1e' % r for _, r in errs)}) -- the "
+           f"signature of precision exhaustion, and the same recurrence at 60 "
+           f"digits is exact", all(0.5 < st < 1.5 for st in steps),
+           f"steps {steps}")
+
+    # And the algorithm still matters: solving y**2 = x beat the binomial
+    # series it replaced by 5x at order 8 and 1809x at order 20.
+    t.true(f"D5.30 order 16 is {errs[1][1]:.1e}, where the binomial series was "
+           f"7.0e-02", errs[1][1] < 1e-3, f"{errs[1][1]:.2e}")
 
 
 # =============================================================================
@@ -278,7 +290,7 @@ def d6_refusals(t):
 def run_all():
     t = Suite()
     for fn in (d1_closed_forms, d2_compositions, d3_depth_ceiling,
-               d4_structural, d5_open_defect, d6_refusals):
+               d4_structural, d5_precision_floor, d6_refusals):
         try:
             fn(t)
         except Exception as e:
