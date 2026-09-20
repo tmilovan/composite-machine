@@ -506,11 +506,53 @@ def t7_from_series(t):
                g is not None, f"action_from_growth returned {g!r}")
 
 
+# =============================================================================
+def t8_zero_sectors(t):
+    head("T8  R1 on the OPERAND, R2 on the TERM -- a sector is a term")
+
+    def d(c):
+        return dict(sorted(c.coeffs_dict().items()))
+
+    # R1 ACTS ON THE OPERAND, and the operand is the whole transseries.  Both
+    # layers must therefore answer the same way, or `0` means one thing in a
+    # Composite and another one call up.
+    for lbl, comp, ts in (
+            ("lift(0) + 5", Composite(0) + R(5),
+             (Transseries.lift(0) + Transseries.lift(R(5))).sectors[0]),
+            ("lift(0) * 5", Composite(0) * R(5),
+             (Transseries.lift(0) * Transseries.lift(R(5))).sectors.get(0))):
+        t.true(f"T8.0 {lbl}: Composite {d(comp)} == Transseries {d(ts)}",
+               d(comp) == d(ts), f"{d(comp)} vs {d(ts)}")
+    F = flat(1) - flat(1)
+    c = Composite({0: 1.0})
+    t.true(f"T8.05 a wholly zero transseries IS an operand and converts: "
+           f"(flat-flat)+flat = {d((F + flat(1)).sectors[1])}, matching "
+           f"(c-c)+R(1) = {d((c - c) + R(1))}",
+           d((F + flat(1)).sectors[1]) == d((c - c) + R(1)),
+           f"{d((F + flat(1)).sectors[1])}")
+
+    # R2: A ZERO SECTOR SITTING AMONG NON-ZERO ONES IS A TERM, NOT AN OPERAND.
+    # Per-sector arithmetic through Composite.__add__ made it an operand, and
+    # R1 converted it -- an infinitesimal manufactured inside a number nobody
+    # used as a zero.  Committed, and no suite caught it.
+    z = Composite({0: 5.0}) - Composite({0: 5.0})
+    A = Transseries({0: R(1), 1: z})
+    B = Transseries({1: R(5)})
+    two = Transseries({0: R(2)})
+    for lbl, got, want in (("A + B", d((A + B).sectors[1]), {0: 5.0}),
+                           ("A - B", d((A - B).sectors[1]), {0: -5.0}),
+                           ("A * 2", d((A * two).sectors[1]), {0: 0.0})):
+        t.true(f"T8.1 ({lbl}).sectors[1] = {got}, R2 says {want} "
+               f"(was leaking |1|_-1)", got == want, f"{got} vs {want}")
+    t.true("T8.20 and sector 0 is untouched by any of it",
+           d((A + B).sectors[0]) == {0: 1.0}, f"{d((A + B).sectors[0])}")
+
+
 def run_all():
     t = Suite()
     for fn in (t1_ordering, t2_sector_arithmetic, t3_against_the_oracle,
                t4_the_bridge, t5_separability, t6_closure,
-               t7_from_series):
+               t7_from_series, t8_zero_sectors):
         try:
             fn(t)
         except Exception as e:

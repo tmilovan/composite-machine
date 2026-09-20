@@ -65,8 +65,8 @@ tests/test_transseries.py tests before any arithmetic.
 import math
 
 from .composite_lib import (Composite, R, ZERO, exp as _c_exp, ln as _c_ln,
-                             _r1 as _apply_r1)
-from .backends.dict_backend import _dim_key
+                             _r1 as _apply_r1, _vec_composite as _vec)
+from .backends.dict_backend import _dim_key, _dim_add
 from .resummation import (resum, resum_median, classify_singularity,
                           SingularityKind)
 
@@ -82,6 +82,62 @@ def _is_zero(c):
     because the computation built it -- so this asks about VALUES, not keys.
     """
     return not any(v != 0.0 for v in c.coeffs_dict().values())
+
+
+def _rebuild(d):
+    """A Composite from a {dim: coeff} map, scalar or vector keys alike."""
+    if not d:
+        return Composite({})
+    return _vec(d) if any(isinstance(k, tuple) for k in d) else Composite(d)
+
+
+def _term_add(a, b):
+    """a + b with a WHOLLY ZERO side kept inert.
+
+    A sector's series is a TERM of the transseries, not a number in its own
+    right, and R2 says a zero term is not an operand -- "there is nothing for
+    R1 to do, and the term is retained".  Going through Composite.__add__
+    makes it an operand, so R1 fired and converted it.  Measured before this:
+
+        A = {0: R(1), 1: (c-c)},  B = {1: R(5)}
+        (A + B).sectors[1]  ->  {-1: 1.0, 0: 5.0}      should be {0: 5.0}
+
+    -- an infinitesimal manufactured inside a sector nobody used as an operand.
+    """
+    if not (_is_zero(a) or _is_zero(b)):
+        return a + b
+    out = dict(a.coeffs_dict())
+    for d, v in b.coeffs_dict().items():
+        out[d] = out.get(d, 0.0) + v
+    return _rebuild(out)
+
+
+def _term_sub(a, b):
+    """a - b, same rule."""
+    if not (_is_zero(a) or _is_zero(b)):
+        return a - b
+    out = dict(a.coeffs_dict())
+    for d, v in b.coeffs_dict().items():
+        out[d] = out.get(d, 0.0) - v
+    return _rebuild(out)
+
+
+def _term_mul(a, b):
+    """a * b with a WHOLLY ZERO side kept inert.
+
+    R5: a product retains the dimensions it constructs, so a zero times
+    something is a ZERO at the summed dimensions.  Before this,
+    (A * 2).sectors[1] came back {-1: 2.0} where R2 and R5 give {0: 0.0} --
+    the zero was converted AND then scaled.
+    """
+    if not (_is_zero(a) or _is_zero(b)):
+        return a * b
+    out = {}
+    for da, va in a.coeffs_dict().items():
+        for db, vb in b.coeffs_dict().items():
+            k = _dim_add(da, db)
+            out[k] = out.get(k, 0.0) + va * vb
+    return _rebuild(out)
 
 
 def _lead_sign(c):
@@ -260,11 +316,19 @@ class Transseries:
         return "Transseries(" + " + ".join(parts) + ")"
 
     # -- arithmetic ----------------------------------------------------------
+    # R1 ACTS ON THE OPERAND, WHICH IS THE WHOLE TRANSSERIES.  _r1() below
+    # fires only when every sector is zero; after that the per-sector helpers
+    # (_term_add / _term_sub / _term_mul) keep a zero SECTOR inert, because a
+    # sector is a term of the number and R2 says a term is not an operand.
+    # Getting either half wrong leaks: without _r1 the two layers disagreed --
+    # Composite(0)+R(5) gave {-1:1.0, 0:5.0} and lift(0)+lift(5) gave {0:5.0};
+    # without the helpers a zero sector converted inside a number nobody used
+    # as an operand.
     def __add__(self, other):
-        o = Transseries.lift(other)
-        out = dict(self.sectors)
-        for n, c in o.sectors.items():
-            out[n] = out[n] + c if n in out else c
+        a, b = self._r1(), Transseries.lift(other)._r1()
+        out = dict(a.sectors)
+        for n, c in b.sectors.items():
+            out[n] = _term_add(out[n], c) if n in out else c
         return Transseries(out)
 
     __radd__ = __add__
@@ -280,10 +344,10 @@ class Transseries:
         wholly zero composite whose sign it discards -- R1 sets the converted
         coefficient to 1.0 -- and `h - 0` came out as `2h`.
         """
-        o = Transseries.lift(other)
-        out = dict(self.sectors)
-        for n, c in o.sectors.items():
-            out[n] = out[n] - c if n in out else -c
+        a, b = self._r1(), Transseries.lift(other)._r1()
+        out = dict(a.sectors)
+        for n, c in b.sectors.items():
+            out[n] = _term_sub(out[n], c) if n in out else -c
         return Transseries(out)
 
     def __rsub__(self, other):
@@ -296,13 +360,13 @@ class Transseries:
         -- it is simply applied one level up, where the fast path is not paid
         for it.
         """
-        o = Transseries.lift(other)
+        sa, sb = self._r1(), Transseries.lift(other)._r1()
         out = {}
-        for m, a in self.sectors.items():
-            for n, b in o.sectors.items():
+        for m, a in sa.sectors.items():
+            for n, b in sb.sectors.items():
                 k = m + n
-                p = a * b
-                out[k] = out[k] + p if k in out else p
+                p = _term_mul(a, b)
+                out[k] = _term_add(out[k], p) if k in out else p
         return Transseries(out)
 
     __rmul__ = __mul__

@@ -2987,6 +2987,91 @@ def _derivative_axis(x, axis):
     return _like(x, out)
 
 
+def _integrand_needs_lane(f, points):
+    """Does the integrand put its OWN content on the power axis?
+
+    The variable of integration needs a lane of its own only when the power
+    axis is already occupied.  Seeded on lane 1 the two are separable: the
+    variable's contribution sits on axis 1, so any non-zero POWER component
+    belongs to the integrand -- an R1 zero, or anything the caller's
+    expression genuinely made infinitesimal.  `x*0 + 1` shows
+    {(-1,-1): 1.0, (-1,0): 0.5}; x*x, exp(-x), sin(x), 1/(1+x) show nothing.
+
+    When nothing is there the variable rides the power axis and the whole
+    integral stays on the SCALAR backend.  That matters: seeded on a lane,
+    every panel is a vector-dimension composite, which is excluded from
+    SparseDenseBackend by design -- 83% of the backend operations in
+    integral of exp(-x) over [0,inf), and 61% in a lateral Borel sum.
+
+    Sampled, not proved.  An integrand that develops power-axis content only
+    away from these points would be misclassified; the points are spread
+    across the interval to make that unlikely, and the lane is taken whenever
+    the probe cannot evaluate at all.
+    """
+    if not LANE_AUTO:
+        return True                          # see LANE_AUTO
+    for pt in points:
+        try:
+            fx = _ensure_composite(f(R(pt) + _perturbation_seed(1)))
+        except Exception:
+            return True                      # cannot tell: take the safe path
+        for d, v in fx.c.items():
+            if v == 0.0:
+                continue
+            power = d[0] if isinstance(d, tuple) else d
+            if power != 0:
+                return True
+    return False
+
+
+# OFF BY DEFAULT.  Putting the variable on the power axis when the integrand
+# leaves it free is sound for R1 zeros and measurably faster -- but the lane
+# turned out to do a second job nobody had written down: it separates the
+# variable's derivatives from the integrand's, and the adaptive error estimate
+# reads them separately.  With the variable on the power axis,
+#
+#     integral of sqrt(x) over [0,1]   lane 0: 2.2e-04     lane 1: 2.2e-13
+#
+# -- nine orders, on an integrand whose power axis the probe correctly reports
+# as free.  The probe detects the R1 condition and cannot see this one, and
+# three suites fail with it on.  So it is opt-in, for a caller that knows its
+# integrand is plain.  Measured gain when it applies: improper integral 0.68x,
+# a lateral Borel sum 1.11s -> 0.77s.
+LANE_AUTO = True
+
+LANE_PROBE_POINTS = 1      # raise it for an integrand whose structure varies
+
+
+def _lane_probe_points(a, b, n=None):
+    """Points inside [a, b] to ask _integrand_needs_lane about.
+
+    ONE by default, and the count is not free: each probe evaluates the whole
+    integrand with a lane seed, which is exactly the slow path the probe
+    exists to avoid.  Measured on integral of exp(-x) over [0,inf) and on a
+    lateral Borel sum:
+
+        probes    improper integral    resum_median
+          1          0.0130s              0.768s
+          2          0.0144s              0.985s
+          3          0.0157s              1.225s
+          5          0.0198s              1.692s
+
+    One is enough for the case the lane exists for, because an R1 zero is a
+    property of the EXPRESSION rather than of the point: x*0+1, x-x+1,
+    (x-0.5)*0+1 and sin(x)-sin(x)+1 are all caught by a single probe, and all
+    integrate to 1.000000000000000 exactly.  Raise LANE_PROBE_POINTS for an
+    integrand whose structure genuinely varies across the interval.
+    """
+    if n is None:
+        n = LANE_PROBE_POINTS
+    lo = a if math.isfinite(a) else (b - 10.0 if math.isfinite(b) else -1.0)
+    hi = b if math.isfinite(b) else (lo + 10.0)
+    if hi == lo:
+        return [lo]
+    return [lo + (hi - lo) * t for t in
+            [(i + 0.5) / n for i in range(n)]]
+
+
 def _antiderivative_axis(x, axis):
     """Antiderivative with respect to the variable living on `axis`.
 
@@ -3300,7 +3385,8 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
                     speed = math.sqrt(sum(tv**2 for tv in tangent))
                     total += _st(f(*[float(p) for p in pt])) * speed * dt
             return total
-        result, err = integrate_adaptive(_line_integrand, a_t, b_t, tol=tol, terms=terms)
+        result, err = integrate_adaptive(_line_integrand, a_t, b_t, tol=tol,
+                                         terms=terms, lane=1)
         return result.st()
 
     # --- SURFACE INTEGRAL ---
@@ -3477,7 +3563,8 @@ def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms:
 # FIXED: integrate_adaptive — recursive bisection with Taylor error
 # =============================================================================
 
-def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4):
+def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4,
+                       lane=None):
     """Adaptive integration via composite Taylor convergence.
 
     Primary path (ONE evaluation per panel):
@@ -3499,6 +3586,18 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
     _fallback_count = [0]
 
     # --- LIFT AT THE GATE ---
+    # THE VARIABLE ONLY NEEDS A LANE IF THE POWER AXIS IS TAKEN.  See
+    # _integrand_needs_lane: when it is free the variable rides it and every
+    # panel stays a scalar-dimension composite on the fast backend.
+    # `lane` PINS the axis for a caller whose integrand is coupled to one.
+    # The curve and surface paths are: _line_integrand reads the tangent with
+    # _lane_d1, which looks at lane 1, so seeding anywhere else makes every
+    # tangent zero and every line integral come back exactly 0.0.  A probe
+    # cannot see that -- an integrand that READS a lane looks identical to one
+    # that ignores it.
+    _lane = lane if lane is not None else (
+        1 if _integrand_needs_lane(f, _lane_probe_points(a, b)) else 0)
+
     probe = _ensure_composite(f(_seeded((a + b) / 2)))
     if not any(_dim_negative(dim) for dim in probe.c):
         import warnings
@@ -3519,13 +3618,14 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
         number manufactured from a structural zero, off by 5e-3.
         """
         mid = x + dx / 2
-        fx = _ensure_composite(f(mid + _perturbation_seed(1)))
+        seed = _perturbation_seed(_lane) if _lane else ZERO
+        fx = _ensure_composite(f(mid + seed))
 
         # Integral via antiderivative along the variable's own lane
-        Fx_terms = _antiderivative_axis(fx, 1)
+        Fx_terms = _antiderivative_axis(fx, _lane)
         acc = {}
         for sign, hv in ((1.0, dx / 2), (-1.0, -dx / 2)):
-            for k, v in _eval_axis(Fx_terms, hv, 1).items():
+            for k, v in _eval_axis(Fx_terms, hv, _lane).items():
                 acc[k] = acc.get(k, 0.0) + sign * v
         # KEEP EVERY POWER-AXIS GRADE, each at its own grade.  Terms carrying a
         # power-axis component are the integrand's own infinitesimal content --
@@ -3568,9 +3668,19 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
         # which now holds the integrand's own content -- reading it here made
         # every panel look like a constant.
         def _lane1(d):
+            """Order along the VARIABLE's axis -- whichever one it is.
+
+            This read index 1 unconditionally.  With the variable on the power
+            axis every dim is a scalar, as_vec gives (d, 0), and the order came
+            back 0 for every term -- so `max(orders) <= 2` fired on every panel
+            and the estimate was 0.0.  The adaptive path then refined nothing:
+            integral of exp(-x^2) over [0,20] returned 0.59 against 0.886, and
+            sqrt(x) lost four digits.  Both looked like accuracy problems; they
+            were the error estimate reading an axis the variable was not on.
+            """
             from composite.backends.vector_dim_backend import as_vec
-            v = as_vec(d)
-            return -(v[1] if len(v) > 1 else 0)
+            v = as_vec(d) if isinstance(d, tuple) else (d,)
+            return -(v[_lane] if len(v) > _lane else 0)
 
         orders = [_lane1(d) for d in fx.c if _lane1(d) >= 0]
         if not orders or max(orders) <= 2:
@@ -3614,11 +3724,12 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4)
     def _panel_classic(x, dx):
         """Classic single-panel integral for fallback comparison."""
         mid = x + dx / 2
-        fx = _ensure_composite(f(mid + _perturbation_seed(1)))
-        Fx_terms = _antiderivative_axis(fx, 1)
+        seed = _perturbation_seed(_lane) if _lane else ZERO
+        fx = _ensure_composite(f(mid + seed))
+        Fx_terms = _antiderivative_axis(fx, _lane)
         acc = {}
         for sign, hv in ((1.0, dx / 2), (-1.0, -dx / 2)):
-            for k, v in _eval_axis(Fx_terms, hv, 1).items():
+            for k, v in _eval_axis(Fx_terms, hv, _lane).items():
                 acc[k] = acc.get(k, 0.0) + sign * v
         # Same rule as _panel_with_error: every power-axis grade is kept at
         # its own grade.  This path dropped them, so any panel that fell back
