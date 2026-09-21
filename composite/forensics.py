@@ -183,6 +183,11 @@ class Audit:
         if self.exception is not None:
             return REFUSED
         if self.value == 0.0 and self.error_bound > 0.0:
+            # Defensive and, as it stands, redundant: `predicted` already
+            # returns inf here and kappa is nan, so `floor` falls back to EPS
+            # and the generic test below fires anyway.  Mutation testing
+            # confirms removing this branch changes no result.  Kept because
+            # it states the intent at the point where the intent applies.
             return UNSTABLE          # everything cancelled; no digits survive
         p = self.predicted
         if not math.isnan(p) and p > _BLAME * max(self.floor, EPS):

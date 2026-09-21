@@ -31,10 +31,15 @@ WHAT IT LOOKS FOR, in order of how much it can embarrass us:
       answer is None.  Returning a confident number for exp(z) would make
       every other result in this file worthless.
 
-  S5  the four failure modes that were actually hit while building this, each
+  S5  the failure modes that were actually hit while building this, each
       of which produced a WRONG answer rather than an error:
         - Froissart doublets: spurious poles with residue at the rounding
-          floor.  3 of 7 exponents were wrong before they were filtered.
+          floor, which cost 4 of 7 exponents before any filtering.  Mutation
+          testing showed that the residue filter added for them is inert --
+          removing it changes nothing on either route, because persistence
+          and the radius filter reject the doublets first.  S5.01/02 pin the
+          ANSWER on a doublet-prone series; no test credits the residue
+          filter, because no test can.
         - symmetric singularities: tan has poles at both +-pi/2, and
           clustering on a median over candidates lands near zero and rejects
           both.
@@ -166,22 +171,29 @@ def s2_ode_blowup(t):
 
 def s3_combinatorics(t):
     head("S3  analytic combinatorics: growth constants and amplitudes")
-    #  name, coefficients, z0, beta, amplitude C in a_n ~ C n^(-beta-1) z0^-n
+    #  name, coefficients, z0, beta, amplitude C, beta tolerance.
+    #  Each tolerance is the accuracy that case actually delivers, not one
+    #  number loose enough to cover the worst.  A single 1e-8 was slack enough
+    #  to pass with a square rather than overdetermined least-squares fit,
+    #  which is 90x worse on Motzkin -- the per-case bound is what makes the
+    #  fit load-bearing.  Catalan is the least accurate of the six at 3.2e-12
+    #  and is the reason a single tight bound does not work either.
     CASES = [
-        ("Catalan", catalan(32), 0.25, 0.5, INV_SQRT_PI),
-        ("central binomial", central_binomial(32), 0.25, -0.5, INV_SQRT_PI),
-        ("Motzkin", motzkin(32), 1 / 3, 0.5, math.sqrt(3) * 3 / (2 * math.sqrt(math.pi))),
-        ("large Schroeder", schroeder(32), 3 - 2 * math.sqrt(2), 0.5, None),
-        ("Fibonacci", fibonacci(32), PHI_INV, -1.0, None),
-        ("derangements D_n/n!", derangement_ratio(32), 1.0, -1.0, None),
+        ("Catalan", catalan(32), 0.25, 0.5, INV_SQRT_PI, 1e-11),
+        ("central binomial", central_binomial(32), 0.25, -0.5, INV_SQRT_PI, 1e-14),
+        ("Motzkin", motzkin(32), 1 / 3, 0.5,
+         math.sqrt(3) * 3 / (2 * math.sqrt(math.pi)), 1e-12),
+        ("large Schroeder", schroeder(32), 3 - 2 * math.sqrt(2), 0.5, None, 1e-12),
+        ("Fibonacci", fibonacci(32), PHI_INV, -1.0, None, 1e-14),
+        ("derangements D_n/n!", derangement_ratio(32), 1.0, -1.0, None, 1e-13),
     ]
-    for name, c, z0, beta, amp in CASES:
+    for name, c, z0, beta, amp, btol in CASES:
         s = analyse(c)
         if s is None:
             t.true("S3 %s found" % name, False, "returned None")
             continue
         t.close("S3 %-19s z0" % name, s.location, z0, tol=1e-9)
-        t.close("S3 %-19s beta" % name, s.exponent, beta, tol=1e-8)
+        t.close("S3 %-19s beta" % name, s.exponent, beta, tol=btol)
         if amp is not None:
             got = coefficient_asymptotics(c, s)[0]
             rel = abs(got - amp) / abs(amp)
@@ -236,11 +248,15 @@ def s5_failure_modes(t):
     s = analyse(binomial_series(g, xc, 32))
     t.close("S5.01 doublet-prone series still exact (z0)", s.location, xc, tol=1e-10)
     t.close("S5.02 doublet-prone series still exact (beta)", s.exponent, -g, tol=1e-9)
-    #  a spurious root nearer than the true one
+    #  A spurious root nearer than the true one.  What rejects it is the
+    #  radius FILTER, not the ordering: mutation testing showed that replacing
+    #  the radius-ordered search with nearest-first leaves every test green,
+    #  while removing the filter fails them.  The filter is the guard.
     s = analyse(catalan(32))
     t.true("S5.03 Catalan is not answered at the origin",
            abs(s.location - 0.25) < 1e-9,
-           "got z0 = %.12g (a nearest-first rule returned 2.5e-12)" % s.location)
+           "got z0 = %.12g (clustering with no radius filter returned 2.5e-12)"
+           % s.location)
     #  the radius of convergence is what rejects it, and must itself be right
     t.close("S5.04 radius of convergence, Catalan", radius(catalan(32)), 0.25, tol=0.1)
     t.close("S5.05 radius of convergence, Fibonacci", radius(fibonacci(32)),

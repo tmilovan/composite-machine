@@ -346,6 +346,28 @@ def x6_correlated_rounding(t):
             t.true("X6 %-12s at %-8.0e stays near the rounding floor"
                    % (label, x), a.predicted <= 100 * EPS,
                    "predicted %.3e = %.1f eps" % (a.predicted, a.predicted / EPS))
+    # The affine SIGN is load-bearing only when two operands share an
+    # ancestor -- otherwise their noise symbols are disjoint and sum(|v|) is
+    # the same either way.  Every case above goes through _DIV, so breaking
+    # _SUB's sign left the whole suite green.  This builds the case that
+    # separates them: u is used twice, and its rounding must cancel exactly.
+    def shared_ancestor(x):
+        u = F.exp(x)
+        return (u + 1) - (u - 1)          # = 2, exactly, for any u
+
+    def separate_calls(x):
+        return (F.exp(x) + 1) - (F.exp(x) - 1)   # two calls, two symbols
+
+    a_shared = audit(shared_ancestor, 0.5, name="(u+1)-(u-1)")
+    a_apart = audit(separate_calls, 0.5, name="two exp calls")
+    t.close("X6.10 shared-ancestor subtraction cancels its rounding",
+            a_shared.predicted, 5.881e-16, tol=1e-18)
+    t.true("X6.11 and is tighter than the uncorrelated spelling",
+           a_shared.predicted < a_apart.predicted * 0.7,
+           "shared %.4e  vs separate %.4e  (adding instead of subtracting "
+           "gives %.4e)" % (a_shared.predicted, a_apart.predicted, 9.542e-16))
+    t.close("X6.12 both spellings still compute 2", a_shared.value, 2.0, tol=1e-15)
+
     # The naive spellings at the same points must NOT be excused.
     for label, fn, x in (("exp(x)-1", expm1_naive, 1e-10),
                          ("ln(1+x)", log1p_naive, 1e-10)):
@@ -373,6 +395,56 @@ def x7_absorption(t):
     t.true("X7.04 and the bound covers the real error", a.predicted >= obs,
            "predicted %.3e  observed %.3e  (a magnitude metric predicted %.3e)"
            % (a.predicted, obs, EPS))
+
+
+def x7b_findings_are_recorded(t):
+    head("X7b  the findings themselves, not just the verdict they drive")
+    # Disabling cancellation detection outright left every verdict green,
+    # because verdicts come from the error bound.  The ledger is a separate
+    # claim -- it names the line -- and needs its own assertions.
+    a = audit(versine_naive, 1e-5, name="(1-cos x)/x^2")
+    cancels = a.of_kind("cancellation")
+    t.true("X7b.01 a cancellation finding was recorded", len(cancels) == 1,
+           "found %d cancellation, %d absorption"
+           % (len(cancels), len(a.of_kind("absorption"))))
+    f = cancels[0]
+    t.exact("X7b.02 it is the subtraction", f.op, "-")
+    t.close("X7b.03 amplification is (|a|+|b|)/|a-b|", f.amp, 4.0e10, tol=2e9)
+    t.close("X7b.04 ~10.6 digits lost there", f.digits, 10.60, tol=0.05)
+    t.true("X7b.05 attributed to this file",
+           os.path.basename(f.file) == "test_forensics.py", "got %s" % f.where)
+    t.true("X7b.06 and to the line that wrote it",
+           "1 - F.cos(x)" in f.src, "source: %r" % f.src)
+    t.true("X7b.07 culprit points at it", a.culprit is f,
+           "culprit %r" % (a.culprit,))
+    t.true("X7b.08 advice names the location", f.where in a.advice, a.advice)
+    # a stable spelling must record nothing
+    b = audit(versine_stable, 1e-5, name="2 sin^2(x/2)/x^2")
+    t.true("X7b.09 the stable spelling records no cancellation",
+           len(b.of_kind("cancellation")) == 0,
+           "found %d" % len(b.of_kind("cancellation")))
+
+
+def x10_elementary_slopes(t):
+    head("X10  the elementary-function derivatives the bound is built on")
+    # Replacing _slope with a constant 1.0 left every other test green: the
+    # slope only bites when its ARGUMENT already carries error.  These cases
+    # have a closed-form answer for the whole bound.
+    #
+    #   f(x) = exp(sqrt x):  sqrt contributes eps*sqrt(x) absolute, exp's
+    #   slope is exp(sqrt x), and one final rounding adds eps.  So the
+    #   relative bound is exactly eps * (1 + sqrt(x)).
+    for at in (100.0, 400.0, 2500.0):
+        a = audit(lambda x: F.exp(F.sqrt(x)), at, name="exp(sqrt x)")
+        want = EPS * (1.0 + math.sqrt(at))
+        t.close("X10 exp(sqrt x) bound at %-7g = eps(1+sqrt x)" % at,
+                a.predicted, want, tol=want * 1e-9)
+    #   and it must actually grow with the derivative, not sit at the floor
+    lo = audit(lambda x: F.exp(F.sqrt(x)), 100.0).predicted
+    hi = audit(lambda x: F.exp(F.sqrt(x)), 2500.0).predicted
+    t.true("X10.05 the bound scales with the slope, not a constant",
+           hi > 4 * lo, "at 100: %.4e   at 2500: %.4e   (a constant slope of "
+           "1.0 gives %.4e for both)" % (lo, hi, EPS))
 
 
 def x8_propagation_rules(t):
@@ -433,7 +505,8 @@ def run_all():
     t = Suite()
     for fn in (x1_verdicts, x2_bound_holds, x3_kappa_closed_form,
                x4_kappa_predicts_response, x5_expressed_zero,
-               x6_correlated_rounding, x7_absorption, x8_propagation_rules,
+               x6_correlated_rounding, x7_absorption, x7b_findings_are_recorded,
+               x10_elementary_slopes, x8_propagation_rules,
                x9_refusals_and_robustness):
         try:
             fn(t)

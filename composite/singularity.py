@@ -40,10 +40,18 @@ METHOD.  Two independent routes, and their agreement is the confidence.
 WHAT MAKES IT UNRELIABLE, and what is done about it.
 
   Froissart doublets.  A spurious pole from a numerator zero landing on a
-  denominator root.  It moves with the approximant order and carries a residue
-  at the rounding floor.  Both are filtered: candidates must persist across
-  orders and carry a residue above `MIN_RESIDUE`.  Without the filter this
-  returned 3 of 7 known exponents; with it, 7 of 7 to 1e-16.
+  denominator root, moving with the order and carrying a residue at the
+  rounding floor.  They cost 4 of 7 known exponents in an early version that
+  had neither of the two filters below, and `MIN_RESIDUE` was added to reject
+  them by residue.
+
+  It turned out not to be what fixes it.  With persistence and the radius
+  filter in place, mutation testing shows `MIN_RESIDUE` never fires: removing
+  it changes no result on either route, and across Catalan, Fibonacci and a
+  binomial series not one of 62 candidates falls below the threshold.  It is
+  retained as defence in depth and documented as inert, rather than credited
+  with a fix that persistence and the radius actually make.  What rejects a
+  bad candidate is those two, below.
 
   Symmetric singularities.  tan has poles at both +-pi/2, so clustering on a
   median over all candidates lands near zero and rejects both.  Clustering is
@@ -70,6 +78,7 @@ __all__ = [
 ]
 
 MIN_RESIDUE = 1e-8      # below this a candidate is a doublet, not a singularity
+                        # (load-bearing on the Pade route; inert on the primary one)
 _CLUSTER = 1e-5         # relative width of the agreement cluster
 _NEED = 3               # approximant orders that must agree
 
