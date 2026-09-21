@@ -163,12 +163,39 @@ class DenseSeriesBackend(CompositeBackend):
     # ---- arithmetic -------------------------------------------------------
 
     def _align(self, a: DenseData, b: DenseData):
-        """Both operands on one step, or None if the lattices do not share one."""
-        if a.step == b.step:
-            return a, b
-        step = _common_step(a.step, b.step)
+        """Both operands on one LATTICE, or None if they do not share one.
+
+        An equal step is not the same lattice.  Two frames with step 1.0 at
+        offsets 0 and -11.5 are half a step out of phase and no index holds
+        both, but this returned them unchanged whenever their steps matched,
+        and add() then placed each term at the nearest slot:
+
+            ia = int(round((0 - (-11.5)) / 1.0)) = round(11.5) = 12
+            dimension = -11.5 + 12 = 0.5
+
+        so R(1) - sqrt(...) put the 1 at grade 0.5 instead of 0, silently
+        moving a term half a grade.  That is how T(M) for a black hole came
+        back leading at |0.0795775|_0.5 rather than |0.0795775|_0: sqrt lands
+        on half-integer grades and the scalar it is subtracted from does not.
+
+        The phase has to be checked too, and a mismatch refined away: if the
+        offsets differ by a half step the common lattice is step/2.
+        """
+        step = a.step if a.step == b.step else _common_step(a.step, b.step)
         if step is None:
             return None
+        delta = abs(a.offset - b.offset)
+        k = delta / step
+        if abs(k - round(k)) > 1e-9:
+            rem = delta % step
+            if rem > step / 2.0:              # nearer the far edge
+                rem = step - rem
+            step = _common_step(step, rem)
+            if step is None:
+                return None
+            k = delta / step
+            if abs(k - round(k)) > 1e-9:
+                return None
         return self._resample(a, step), self._resample(b, step)
 
     def _resample(self, d: DenseData, step: float) -> DenseData:
@@ -243,7 +270,21 @@ class DenseSeriesBackend(CompositeBackend):
         lead_v = float(b.vals[lead_k])
         bv = b.vals[:lead_k + 1][::-1]             # descending powers
         terms = max(len(a.vals) + len(b.vals), 50)
-        rem = a.vals[::-1].astype(np.float64).copy()   # descending
+        # EXTEND the remainder before dividing.  A non-terminating quotient
+        # continues BELOW the dividend's lowest expressed grade -- 1/(1+h) is
+        # the geometric series 1 - h + h**2 - ... and none of those terms exist
+        # in the dividend, which is just |1|_0.  The loop below stops at
+        # `i >= len(rem)`, so with rem no longer than the dividend it emitted
+        # ONE coefficient and returned |1|_0, silently dropping the rest.  The
+        # sparse backend does not hit this because its remainder GROWS: each
+        # step adds b.dims + q_dim as new dimensions.  Here the frame is fixed,
+        # so the room has to be made up front.
+        rem = a.vals[::-1].astype(np.float64)
+        if len(rem) < terms:
+            rem = np.concatenate(
+                [rem, np.zeros(terms - len(rem), dtype=np.float64)])
+        else:
+            rem = rem.copy()                          # descending
         q = np.zeros(terms, dtype=np.float64)
         for i in range(terms):
             if i >= len(rem):

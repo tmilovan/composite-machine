@@ -68,6 +68,55 @@ that those dimensions cancelled too.
 Lowest-first is forced by the object being a zero: converting highest-first
 would yield `1_2`, an infinity, which a zero is not.
 
+### When R1 fires, and why it is always an identity
+
+R1 needs the composite to be wholly zero — nothing left at any grade. For a
+quantity carrying infinitesimal structure that is a strong condition, and it
+picks out a specific kind of cancellation.
+
+If `x` and `y` are different quantities that happen to agree at a point, then
+seeded with an infinitesimal they disagree *near* it: the first derivative that
+does not match appears as a nonzero coefficient at some negative grade. The
+difference has a tail, R2 governs it, and **R1 never fires**. If `x` and `y`
+agree in a neighbourhood — the same quantity, or equal by law or symmetry —
+every derivative matches and the difference is zero at every grade.
+
+So R1 fires exactly on the cases where the cancellation is an *identity*, and
+never on the ones where it is a coincidence:
+
+```
+x**2 - 9  at 3     ->  0_0 + 6_-1 + 1_-2     coincidence: a tail, R2, no R1
+c - v      (v = c) ->  0_0                   identity: nothing below, R1 fires
+```
+
+This is not a tendency; it follows from what "wholly zero" means. It holds
+whenever the computation carries infinitesimal structure. Evaluate two
+different functions at a bare point with no seed and a coincidental
+cancellation also gives `0_0` — but there is no local information in that
+computation to distinguish it with.
+
+**The consequence to be aware of.** A physics run found this in five places —
+the Dirac quantum-number identity `n - (j+1/2)`, charge conservation `k.J`,
+the massless photon `c - v`, a supersymmetric vacuum sum, and a remnant at
+exactly `M = 1`. In each, R1 fired on an identity and the residue `1_(d-1)`
+was larger than the real structure around it: the photon's gap came out `h`
+against an infinitesimal-mass gap of `h**2/2`, and the longitudinal term of
+`k.J` came out 1, 0.25 or 0.01 depending on how the mass was scaled.
+
+R1 is correct as specified and stays as specified. What the caller must know is
+that an identity has to be written as `NOTHING` deliberately, because the
+algebra cannot tell an identity from a cancellation it merely has no structure
+below — those are the same object. Seeding the quantity (`M = 1 + h` rather
+than `M = 1`) removes the cancellation entirely and is the better fix where it
+applies.
+
+**A narrower warning is available if the current one is noisy.** The R1 warning
+fires on every conversion, including legitimate ones. The dangerous case is
+distinguishable: a cancellation where **both operands carried infinitesimal
+structure** and still went to zero at every grade is an identity, while two
+bare scalars cancelling is not. Nothing depends on this today; it is recorded
+so the option is not rediscovered from scratch.
+
 **R2 — a zero term is inert and is kept.** *(a consequence of R1, not a
 separate rule)*
 

@@ -624,7 +624,7 @@ class Composite:
         # back with NO x-dependence at all.  The geometric series treats the
         # whole infinitesimal part as one object and has no such ordering, so
         # use it when the divisor genuinely spans more than one axis.
-        if _spans_multiple_axes(b) and b.st() != 0.0:
+        if _spans_multiple_axes(b) and _expandable_about_st(b):
             return a * _reciprocal(b, terms=_effective_terms(15))
 
         result = a._backend.deconvolve(a._data, b._data)
@@ -792,12 +792,34 @@ class Composite:
     # -------------------------------------------------------------------------
 
     def __eq__(self, other):
+        """Identity, not magnitude.  An expressed zero is part of the number.
+
+        This used to return `_compare(self, other) == 0`, which is the tie case
+        of the dominance ORDER.  That order reads an absent dimension and a
+        zero coefficient alike -- `read_dim` returns 0.0 for both -- so
+
+            (1 + ZERO) - ZERO   ==   R(1)        was True
+
+        even though the left side carries a cancelled infinitesimal at grade -1
+        and the right side never had one.  R2 retains that term deliberately;
+        equality then threw it away, which is the one thing a provenance-
+        preserving arithmetic must not do.
+
+        R1 is still applied first, so the two spellings of a zero remain ONE
+        number: |0|_d and |1|_(d-1) compare equal, as they always did.
+
+        The cost, stated because it is real: `==` is no longer the tie case of
+        `<` and `>`.  Two composites can have identical magnitude at every
+        scale -- neither dominates -- and still be unequal.  Code shaped
+        `if x == y: ... elif x < y: ...` takes a different branch than before.
+        Z7 pins that as a property rather than leaving it to be discovered.
+        """
         if isinstance(other, (int, float)):
             other = Composite(other)
-        result = _compare(self, other)
-        if isinstance(result, float) and math.isnan(result):
-            return False
-        return result == 0
+        if not isinstance(other, Composite):
+            return NotImplemented
+        a, b = _operands(self, other)
+        return a.coeffs_dict() == b.coeffs_dict()
 
     def __lt__(self, other):
         if isinstance(other, (int, float)):
@@ -820,12 +842,19 @@ class Composite:
         return _compare(self, other) >= 0
 
     def __ne__(self, other):
-        if isinstance(other, (int, float)):
-            other = Composite(other)
-        result = _compare(self, other)
-        if isinstance(result, float) and math.isnan(result):
-            return True
-        return result != 0
+        """Strictly the negation of __eq__.
+
+        This had its own _compare call, so when __eq__ moved from magnitude to
+        identity this kept answering the old question: `a == b` was False and
+        `a != b` was False at the same time, for the very case the change
+        exists to catch.  Python does not derive __ne__ when __eq__ is
+        overridden on a class that already defines it, so it has to delegate
+        explicitly.
+        """
+        result = self.__eq__(other)
+        if result is NotImplemented:
+            return result
+        return not result
 
 def _compare(a, b):
     """Lexicographic comparison by dimension (highest first).
@@ -1528,7 +1557,21 @@ def sin(x, terms=12):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
         return Composite({})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
     if _has_positive_dims(x):
         return _bounded_at_inf(math.sin, x)
     a = x.st()
@@ -1572,7 +1615,21 @@ def cos(x, terms=12):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
-        return Composite({})
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
+        return Composite({0: 1.0})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
     if _has_positive_dims(x):
         return _bounded_at_inf(math.cos, x)
     a = x.st()
@@ -1620,7 +1677,21 @@ def exp(x, terms=15):
         return Composite({0: math.exp(float(x))})
 
     if _is_nothing(x):
-        return Composite({})
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
+        return Composite({0: 1.0})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
 
     if LOG_SCALE and (getattr(x._backend, "VECTOR_DIMS", False)
                       or _carries_vector(x)):
@@ -1779,7 +1850,21 @@ def ln(x, terms=15):
         x = Composite({0: float(x)})
 
     if _is_nothing(x):
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
         return Composite({})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
 
     if LOG_SCALE and (getattr(x._backend, "VECTOR_DIMS", False)
                       or _carries_vector(x)):
@@ -1900,7 +1985,21 @@ def sqrt(x, terms=12):
         x = Composite({0: float(x)})
 
     if _is_nothing(x):
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
         return Composite({})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
 
     # Dimensions HALVE under a square root:  sqrt(|c|_d) = |sqrt(c)|_(d/2).
     #
@@ -2009,7 +2108,21 @@ def tan(x, terms=12):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
         return Composite({})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
     _s, _c = sin(x, terms), cos(x, terms)
     return _truncate_order(_s / _c, _tighter(_shared_order(_s, _c),
                                              _min_complete(_s, _c, x)))
@@ -2017,6 +2130,28 @@ def tan(x, terms=12):
 # =============================================================================
 # INVERSE TRIGONOMETRIC FUNCTIONS
 # =============================================================================
+
+def _expandable_about_st(c):
+    """True when c has a standard part and it is not zero.
+
+    _reciprocal expands 1/(s + u) about the standard part s, so it needs one.
+    This test was written inline as `b.st() != 0.0`, which does not ANSWER the
+    question when the divisor is unbounded -- it raises.  Any divisor spanning
+    two axes with no standard part therefore crashed the division itself:
+    ln(h) + h is dominated by ln(h) and has no standard part, yet
+    h / (ln(h) + h) is an ordinary infinitesimal and perfectly representable.
+    Measured before this: all twelve divisions by ln(h) + h raised
+    StandardPartUndefinedError from inside __truediv__.
+
+    Falling through to deconvolve is the right answer here rather than a
+    fallback: the reciprocal series is what needs the expansion point, and
+    without one there is nothing for it to do.
+    """
+    try:
+        return c.st() != 0.0
+    except StandardPartUndefinedError:
+        return False
+
 
 def _spans_multiple_axes(x):
     """True when x's non-standard terms live on more than one basis axis.
@@ -2144,7 +2279,21 @@ def atan(x, terms=15):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
         return Composite({})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
     if _has_positive_dims(x):
         return _bounded_at_inf(math.atan, x)
     a = x.st()
@@ -2195,7 +2344,21 @@ def asin(x, terms=15):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
         return Composite({})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
     if _has_positive_dims(x):
         return _bounded_at_inf(math.asin, x)
     a = x.st()
@@ -2244,7 +2407,21 @@ def acos(x, terms=15):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
-        return Composite({})
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
+        return Composite({0: math.pi / 2})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
     return R(math.pi / 2) - asin(x, terms)
 
 # =============================================================================
@@ -2256,7 +2433,21 @@ def sinh(x, terms=15):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
         return Composite({})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
     return (exp(x, terms) - exp(-x, terms)) / 2
 
 def cosh(x, terms=15):
@@ -2264,7 +2455,21 @@ def cosh(x, terms=15):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
-        return Composite({})
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
+        return Composite({0: 1.0})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
     return (exp(x, terms) + exp(-x, terms)) / 2
 
 def tanh(x, terms=15):
@@ -2272,7 +2477,21 @@ def tanh(x, terms=15):
     if isinstance(x, (int, float)):
         x = Composite({0: float(x)})
     if _is_nothing(x):
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
         return Composite({})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
     if _has_positive_dims(x):
         return _bounded_at_inf(math.tanh, x)
     _s, _c = sinh(x, terms), cosh(x, terms)
@@ -2306,7 +2525,21 @@ def erf(x, terms=15):
     if isinstance(x, (int, float)):
         return Composite({0: math.erf(float(x))})
     if _is_nothing(x):
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
         return Composite({})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
     if _has_positive_dims(x):
         return _bounded_at_inf(math.erf, x)
     a = x.st()
@@ -2324,7 +2557,21 @@ def erfc(x, terms=15):
     if isinstance(x, (int, float)):
         return Composite({0: math.erfc(float(x))})
     if _is_nothing(x):
-        return Composite({})
+        # R6: adding nothing is a no-op, so f(nothing) is whatever term
+        # of the series does NOT carry x -- the constant, if there is
+        # one.  Returning Composite({}) unconditionally made exp(nothing)
+        # nothing, when 1 + nothing + nothing + ... is 1.  Going the other
+        # way and dropping this branch is worse: the scalar fast path
+        # below reads st(nothing) as 0 and returns Composite({0: f(0)}),
+        # an EXPRESSED zero, which R1 then converts -- that is where
+        # acos(nothing) picked up a spurious |-1|_-1.
+        return Composite({0: 1.0})
+    # R1 on the ARGUMENT.  Arithmetic runs its operands through
+    # _operands, which ends in _r1; these did not, so a cancellation
+    # arrived here as |0|_0 instead of |1|_-1 and the infinitesimal was
+    # discarded.  sqrt(1 - (Z*alpha)**2) at Z*alpha = 1 returned 0
+    # rather than |1|_-0.5 -- the half grade IS the branch point.
+    x = _r1(x)
     if _has_positive_dims(x):
         return _bounded_at_inf(math.erfc, x)
     a = x.st()

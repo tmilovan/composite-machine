@@ -142,6 +142,29 @@ class SparseData:
         self._dims = np.concatenate([np.arange(o, o + len(v), dtype=DIM_DTYPE)
                                      for o, v in self.runs])
         self._vals = np.concatenate([v for _, v in self.runs])
+        # SORT.  _merge_runs partitions runs by the fractional part of their
+        # offset, because a run at 0,1,2 and a run at 0.5,1.5 interleave and
+        # cannot share one dense array.  It then emits them grouped by lattice,
+        # so concatenating run by run gives a flat form in lattice order, not
+        # in dimension order:
+        #
+        #     (1 + h) * (1 - sqrt(h))  ->  dims [-1.5, -0.5, -1.0, 0.0]
+        #
+        # create_from_terms documents that the flat form is sorted, and
+        # deconvolve relies on it -- it reads the leading term as
+        # b.dims[nonzero][-1].  Given that order it took -0.5 as the leading
+        # grade instead of 0.0 and returned a series in POSITIVE grades:
+        # h / ((1+h)(1-sqrt h) - 1) came back as |1|_16.5 + |1|_16 + ...
+        # instead of -h**0.5 - h + h**2 + ...
+        #
+        # _runs_from_flat already guards the other direction ("unsorted and/or
+        # duplicated" -> argsort); this is the same guard on the way out.  It
+        # only fires when runs really do span more than one lattice, which
+        # needs a half-integer grade to arise at all.
+        if len(self._dims) > 1 and np.any(np.diff(self._dims) < 0):
+            order = np.argsort(self._dims, kind="mergesort")
+            self._dims = self._dims[order]
+            self._vals = self._vals[order]
 
     @property
     def dims(self):
@@ -573,8 +596,36 @@ class SparseDenseBackend(CompositeBackend):
 
         q_dims = np.array(q_dims, dtype=DIM_DTYPE)
         q_vals = np.array(q_vals, dtype=np.float64)
-        order = np.argsort(q_dims)
-        return SparseData(q_dims[order], q_vals[order])
+
+        # MERGE, not just sort.  create_from_terms documents that its callers
+        # hand over sorted and UNIQUE dimensions, and this sorted but never
+        # deduplicated.  Dropping r_dim from the remainder above stops the loop
+        # repeating a grade on the NEXT iteration, but every iteration adds
+        # b.dims + q_dim back in, so a dropped grade can be reintroduced later,
+        # become the maximum again, and be emitted a second time.  Integer
+        # grades rarely expose it; fractional ones do, because b.dims + q_dim
+        # then interleaves with the remainder instead of landing on grades that
+        # are already occupied.
+        #
+        # The quotient is sum(q_val * x**q_dim), so two entries at one grade
+        # are one coefficient and must be added.  Left unmerged they reached
+        # coeffs_dict(), which builds a dict and therefore keeps only the LAST
+        # of them -- silently discarding the other.  Measured on h / dT with an
+        # inert |0|_0 and a half-integer series: 50 entries at 46 distinct
+        # grades, and grade -1.5 held [-1.607142857142857, 1.4285714285714286]
+        # of which the dict reported only the second.
+        # Sorted first, so any duplicates are ADJACENT and one diff pass
+        # detects them.  np.unique on every quotient costs ~4% on simple
+        # divisions, which is not worth paying for a case that needs
+        # fractional grades to appear at all.
+        order = np.argsort(q_dims, kind="stable")
+        q_dims, q_vals = q_dims[order], q_vals[order]
+        if len(q_dims) > 1 and np.any(np.diff(q_dims) == 0):
+            uniq, inverse = np.unique(q_dims, return_inverse=True)
+            merged = np.zeros(len(uniq), dtype=np.float64)
+            np.add.at(merged, inverse, q_vals)
+            return SparseData(uniq.astype(DIM_DTYPE), merged)
+        return SparseData(q_dims, q_vals)
 
     def _map_vals(self, data: SparseData, fn) -> SparseData:
         return SparseData(runs=[(o, fn(v)) for o, v in data.runs])

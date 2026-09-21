@@ -29,6 +29,7 @@ SUITES = [
     "tests/test_multivar_extended.py",
     "tests/test_derivatives.py",
     "tests/test_zero_coercion.py",
+    "tests/test_backend_agreement.py",
     "tests/test_resummation.py",
     "tests/test_transseries.py",
     "tests/test_forensics.py",

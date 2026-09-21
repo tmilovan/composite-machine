@@ -563,11 +563,23 @@ def test_nothing_propagation():
         "ZERO + \u2205 = ZERO",
         (ZERO + nothing).coeff(-1), 1.0)
 
-    # Nested: sin(nothing) — nothing has no positive dims, treated as sin(0)
-    # Nothing in, nothing out — all transcendentals propagate ∅
+    # Nothing in, nothing out -- but only for the functions whose EVERY term
+    # carries the argument.  R6 says adding nothing is a no-op, so a series
+    # keeps whatever term does not carry x: exp and cos keep their 1, acos
+    # keeps pi/2, and sin/tan/atan/sqrt/ln keep nothing because they have no
+    # such term.  See Z9 in test_zero_coercion.py.
     suite.assert_nothing("sin(\u2205) = \u2205", sin(nothing))
-    suite.assert_nothing("cos(\u2205) = \u2205", cos(nothing))
-    suite.assert_nothing("exp(\u2205) = \u2205", exp(nothing))
+    # CHANGED.  These asserted cos(nothing) = nothing and exp(nothing) =
+    # nothing, which contradicted R6: adding nothing is a no-op, so
+    # exp(nothing) = 1 + nothing + nothing + ... = 1, and likewise cos.  Both
+    # functions were returning Composite({}) from a short-circuit that fired
+    # before the series was ever formed.  Only the terms that CARRY the
+    # argument vanish; a constant term does not.  sin and sqrt below still
+    # give nothing, because every term of theirs carries x.
+    suite.assert_eq("cos(\u2205) = 1, the term that does not carry x",
+                    cos(nothing).st(), 1.0)
+    suite.assert_eq("exp(\u2205) = 1, the term that does not carry x",
+                    exp(nothing).st(), 1.0)
     suite.assert_nothing("ln(\u2205) = \u2205", ln(nothing))
     suite.assert_nothing("tan(\u2205) = \u2205", tan(nothing))
     suite.assert_nothing("atan(\u2205) = \u2205", atan(nothing))

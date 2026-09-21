@@ -4,12 +4,19 @@
 
 ### New release (September 2026)
 
-After months of experimenting, learning (finding about Levi Civita fields etc.), building and testing different implementations, here is the new release that contains the accumulated findings.
+After months of experimenting, learning (finding about Levi Civita fields etc.), building and testing different implementations, here is the new release that contains the accumulated findings. This release contains results of trying out different approaches and results of numeruos experiments. The more experimental stuff still relies to exteranal support, oracles etc. (as it should), the more tested features are tending to become more and more self reliant with additional iterations (eg, derivations and integrals.).
+
+What it tries to achieve:
+
+- thinning the reliance on external libraries, trying to express as much as we can through composite tooling
+- performance enhancements
+- isolation end elimination of trucation errors
+- add the more depth, rech and precision to the toolkit by adding the transseries support for initial experimentation (can of worms)
 
 What it adds:
 
 - refinements to zero handling edge cases
-- adds float dimensions so we can finally take a square roots on composites with exact precision and remain composite
+- adds float dimensions, so we can finally take a square roots on composites with exact precision and remain composite
 - adds experimental support for vector dimensions which enables taking log of an
 composite number
 - tons of edge case bugfixes (especially for integration)
