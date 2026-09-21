@@ -31,6 +31,8 @@ SUITES = [
     "tests/test_zero_coercion.py",
     "tests/test_resummation.py",
     "tests/test_transseries.py",
+    "tests/test_forensics.py",
+    "tests/test_singularity.py",
     # Written RED: 11 of its checks asserted what the library must do at a
     # singularity and did not -- a fractional power of a sum with positive
     # grade, exp outside the value group, sin/cos of an unbounded argument,
