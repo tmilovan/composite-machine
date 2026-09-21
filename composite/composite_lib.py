@@ -430,6 +430,12 @@ class Composite:
 
         def fmt_coeff(c):
             c = float(c)
+            # int(nan) raises ValueError and int(inf) raises OverflowError, and
+            # `c == int(c)` evaluates the int FIRST -- so printing a composite
+            # that had picked up a NaN crashed instead of showing it, which is
+            # the one moment you most want to look at the number.
+            if not math.isfinite(c):
+                return "nan" if math.isnan(c) else ("inf" if c > 0 else "-inf")
             if c == int(c):
                 return str(int(c))
             return f"{c:.6g}"
@@ -739,9 +745,62 @@ class Composite:
         return max(dim_cast(d) for d in pos)
 
     def coeffs_dict(self):
-        """Return {dim: coeff} dict for all non-zero dimensions."""
+        """Every term the arithmetic produced -- NOT every term vouched for.
+
+        A product of two truncated series reaches deeper than either operand is
+        known to, because the terms below that depth are the convolution
+        missing everything the operands cut away.  Measured:
+
+            exp(h, terms=5) * exp(h, terms=5)
+                complete_order 4, but nine terms down to grade -8
+                grade 4  0.666666666667   exp(2h) 0.666666666667   ok
+                grade 5  0.25             exp(2h) 0.266666666667   WRONG
+
+        `complete_order` says where the guarantee stops and `complete_coeffs`
+        returns only that part.  The terms past it are kept deliberately rather
+        than dropped in __mul__: _truncate_order reads `active_dims`, which the
+        sparse-dense backend documents as a BOUNDARY operation that "must not
+        be used inside add, convolve, scalar_multiply or negate -- that round
+        trip is what this representation exists to remove".  Calling it on
+        every product cost 2x on the suite (101s against 55s) and broke two
+        resummation checks.  So the leak is reported, not hidden.
+        """
         dims, vals = self._backend.to_arrays(self._data)
         return {dim_cast(d): float(v) for d, v in zip(dims, vals)}
+
+    @property
+    def complete_order(self):
+        """Highest order this composite vouches for, or None if unbounded.
+
+        None means no series truncation is recorded -- a literal, a polynomial
+        built term by term, or an exact result.  It does NOT mean "complete to
+        every order"; it means nothing here has claimed otherwise.
+        """
+        return self._complete
+
+    def complete_coeffs(self):
+        """Only the terms within `complete_order`.
+
+        Use this wherever a wrong coefficient would be worse than a missing
+        one.  With complete_order None every term is returned, because nothing
+        has claimed a limit.
+        """
+        d = self.coeffs_dict()
+        if self._complete is None:
+            return d
+        return {k: v for k, v in d.items() if _dim_order(k) <= self._complete}
+
+    def leaked_coeffs(self):
+        """The terms BEYOND `complete_order` -- present, and not vouched for.
+
+        Empty whenever the composite is within its bound.  Non-empty is not an
+        error: it is the arithmetic reporting that it produced more than it can
+        stand behind.
+        """
+        if self._complete is None:
+            return {}
+        return {k: v for k, v in self.coeffs_dict().items()
+                if _dim_order(k) > self._complete}
 
     # -------------------------------------------------------------------------
     # Simplified integration operators (dimensional shifts)

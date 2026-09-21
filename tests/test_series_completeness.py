@@ -170,7 +170,56 @@ def main():
               f"{(f'{rel:.1e}' if bad is not None else '-'):>12}"
               f"{'   INCOMPLETE' if bad is not None else ''}")
 
-    total = len(build_cases()) + len(build_compositions())
+    # ---- the leak is REPORTED, not removed ---------------------------------
+    print("\n  THE LEAK, AND HOW IT IS SURFACED")
+    print("  A product of two truncated series reaches deeper than either")
+    print("  operand is known to: those terms are the convolution missing")
+    print("  everything the operands cut away.  They are NOT dropped in")
+    print("  __mul__ -- _truncate_order reads active_dims, which sparse-dense")
+    print("  documents as a boundary operation that must not be used inside")
+    print("  convolve, and doing it cost 2x on the suite (101s vs 55s) and")
+    print("  broke two resummation checks.  So the composite reports its own")
+    print("  bound instead: complete_order, complete_coeffs, leaked_coeffs.\n")
+    extra = 0
+    def _check(tag, cond, detail=""):
+        nonlocal extra
+        extra += 1
+        print(f"  {'OK  ' if cond else 'FAIL'} {tag}" + (f"   {detail}" if detail else ""))
+        if not cond:
+            failures.append((tag, detail or "false"))
+
+    h = cl.Composite({-1: 1.0})
+    p = cl.exp(h, terms=5) * cl.exp(h, terms=5)
+    _check("L1 the product records its bound", p.complete_order == 4,
+           f"complete_order={p.complete_order}")
+    _check("L2 and carries terms past it", len(p.coeffs_dict()) > len(p.complete_coeffs()),
+           f"{len(p.coeffs_dict())} terms, {len(p.complete_coeffs())} within bound")
+    _check("L3 complete_coeffs stops at the bound",
+           all(cl._dim_order(k) <= 4 for k in p.complete_coeffs()),
+           f"grades {sorted(p.complete_coeffs())}")
+    _check("L4 leaked_coeffs is exactly the rest",
+           set(p.complete_coeffs()) | set(p.leaked_coeffs()) == set(p.coeffs_dict())
+           and not (set(p.complete_coeffs()) & set(p.leaked_coeffs())),
+           f"leaked grades {sorted(p.leaked_coeffs())}")
+    # every vouched term is exact; every leaked one is not.  That is the point.
+    ok_in = all(abs(v - 2.0 ** int(-k) / math.factorial(int(-k))) < 1e-12
+                for k, v in p.complete_coeffs().items())
+    bad_out = all(abs(v - 2.0 ** int(-k) / math.factorial(int(-k))) > 1e-9
+                  for k, v in p.leaked_coeffs().items())
+    _check("L5 every term within the bound is exact vs exp(2h)", ok_in)
+    _check("L6 and every term past it is wrong -- the bound is real", bad_out,
+           "grade 5 gives 0.25 where exp(2h) has 0.266666...")
+    # a series that has not been multiplied is within its own bound
+    e = cl.exp(h, terms=5)
+    _check("L7 an untouched series leaks nothing", e.leaked_coeffs() == {},
+           f"complete_order={e.complete_order}, {len(e.coeffs_dict())} terms")
+    # something that never claimed a bound reports none
+    _check("L8 a literal claims no bound", cl.R(2).complete_order is None)
+    _check("L9 and so leaks nothing", cl.R(2).leaked_coeffs() == {})
+    _check("L10 with no bound, complete_coeffs returns everything",
+           cl.R(2).complete_coeffs() == cl.R(2).coeffs_dict())
+
+    total = len(build_cases()) + len(build_compositions()) + extra
     print("\n" + "=" * 68)
     if failures:
         print(f"RESULTS: {total - len(failures)}/{total} passed")
