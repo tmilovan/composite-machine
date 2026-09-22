@@ -505,21 +505,28 @@ def run_extended_tests(t: TestRunner):
     # EX09: 1/(1+x²) around x=0 has radius 1
     t.check("EX09 R[1/(1+x²)] at x=0",
             convergence_radius(lambda x: 1 / (1 + x**2), at=0),
-            1.0, tol=0.15)
+            1.0, tol=1e-12)   # ratio test lands EXACTLY here: measured err 0.0
 
     # EX10: 1/(1-x) around x=0 has radius 1
     t.check("EX10 R[1/(1-x)] at x=0",
             convergence_radius(lambda x: 1 / (1 - x + R(1e-15)), at=0),
-            1.0, tol=0.15)
+            1.0, tol=1e-12)   # measured err 1.3e-15 -- machine precision
 
     # EX11: exp(x) has infinite radius
     r11 = convergence_radius(lambda x: exp(x), at=0)
+    # convergence_radius returns inf for exp, so min(r11, 100) is EXACTLY 100.
+    # tol=1 admitted anything in [99, 101] for a value that cannot vary.
     t.check("EX11 R[eˣ] at x=0 (should be large)",
-            min(r11, 100), 100, tol=1)
+            min(r11, 100), 100, tol=1e-12)
 
     # EX12: ln(x) around x=1 has radius 1
     t.check("EX12 R[ln(x)] at x=1",
             convergence_radius(lambda x: ln(x), at=1),
+            # The ratio test converges SLOWLY on a logarithmic singularity:
+            # measured 1.0924553224553226, err 9.2e-02, at the order this runs.
+            # The bound is that measurement, not a derivation -- the other three
+            # radii here land at 0.0 and 1.3e-15, so this one is the method's
+            # real limit on this function, and it is worth seeing.
             1.0, tol=0.15)
 
     # -------------------------------------------------------------------------

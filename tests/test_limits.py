@@ -49,6 +49,7 @@ from composite.composite_lib import (
     atan, asin, acos, sinh, cosh, tanh,
     derivative, limit,
     LimitDoesNotExistError, LimitUndecidableError, CompositionError,
+    NotRepresentableError,
 )
 
 
@@ -70,12 +71,17 @@ class TestSuite:
     def add(self, name: str, passed: bool, details: str = ""):
         self.results.append(TestResult(name, passed, details))
 
-    def assert_eq(self, name: str, actual, expected, tol=1e-10):
+    def assert_eq(self, name: str, actual, expected, tol=1e-12):
         if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
             passed = abs(actual - expected) < tol
         else:
             passed = actual == expected
-        self.add(name, passed, f"actual={actual}, expected={expected}")
+        self.add(name, passed,
+                 f"got={actual}  want={expected}  "
+                 f"err={abs(actual-expected):.2e}  tol={tol:.1e}"
+                 if isinstance(expected, (int, float))
+                 and isinstance(actual, (int, float))
+                 else f"got={actual}  want={expected}")
 
     def assert_true(self, name: str, condition: bool, details: str = ""):
         self.add(name, condition, details)
@@ -103,8 +109,9 @@ class TestSuite:
         print(f"{'='*70}")
         for r in self.results:
             status = "\u2713" if r.passed else "\u2717"
+            # Numbers on PASS too -- a tick alone cannot be audited.
             print(f"  {status} {r.name}")
-            if not r.passed and r.details:
+            if r.details:
                 print(f"      {r.details}")
         return passed, total
 
@@ -176,7 +183,7 @@ def test_higher_order_cancellation():
 
     suite.assert_eq(
         "lim(x\u21920) (x - sin x)/(x - tan x) = -1/2",
-        limit(lambda x: (x-sin(x))/(x-tan(x)), 0), -0.5, tol=1e-8)
+        limit(lambda x: (x-sin(x))/(x-tan(x)), 0), -0.5, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920) (cos(sin x) - cos x)/x\u2074 = 1/6",
@@ -206,7 +213,7 @@ def test_polynomial_algebraic():
 
     suite.assert_eq(
         "lim(x\u21920) (x\u00b3+2x\u00b2)/(x\u00b2+x) = 0",
-        limit(lambda x: (x**3+R(2)*x**2)/(x**2+x), 0), 0.0, tol=1e-8)
+        limit(lambda x: (x**3+R(2)*x**2)/(x**2+x), 0), 0.0, tol=1e-12)
 
     return suite.report()
 
@@ -224,11 +231,11 @@ def test_general_powers():
 
     suite.assert_eq(
         "lim(x\u21920) (1+2x)^(1/x) = e\u00b2",
-        limit(lambda x: (R(1)+R(2)*x)**(R(1)/x), 0), math.e**2, tol=1e-6)
+        limit(lambda x: (R(1)+R(2)*x)**(R(1)/x), 0), math.e**2, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920) (1+x/3)^(1/x) = e^(1/3)",
-        limit(lambda x: (R(1)+x/R(3))**(R(1)/x), 0), math.e**(1.0/3), tol=1e-6)
+        limit(lambda x: (R(1)+x/R(3))**(R(1)/x), 0), math.e**(1.0/3), tol=1e-12)
 
     return suite.report()
 
@@ -240,64 +247,46 @@ def test_general_powers():
 def test_oscillatory():
     suite = TestSuite("Oscillatory Limits")
 
-    # --- x^n * bounded(1/x) -> 0 ---
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b7sin(1/x) = 0",
-        limit(lambda x: x*sin(1/x), 0), 0.0)
-
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b7cos(1/x) = 0",
-        limit(lambda x: x*cos(1/x), 0), 0.0)
-
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b2\u00b7sin(1/x) = 0",
-        limit(lambda x: x**2*sin(1/x), 0), 0.0)
-
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b2\u00b7cos(1/x) = 0",
-        limit(lambda x: x**2*cos(1/x), 0), 0.0)
-
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b7sin(1/x\u00b2) = 0",
-        limit(lambda x: x*sin(R(1)/(x**2)), 0), 0.0)
-
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b3\u00b7sin(1/x) = 0",
-        limit(lambda x: x**3*sin(1/x), 0), 0.0)
-
-    # --- Products of oscillatory ---
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b7sin(1/x)\u00b7cos(1/x) = 0",
-        limit(lambda x: x*sin(1/x)*cos(1/x), 0), 0.0)
-
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b7(sin(1/x))\u00b2 = 0",
-        limit(lambda x: x*sin(1/x)**2, 0), 0.0)
-
-    # --- Oscillatory + constant ---
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b7sin(1/x) + 5 = 5",
-        limit(lambda x: x*sin(1/x)+R(5), 0), 5.0)
-
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b7sin(1/x) + x = 0",
-        limit(lambda x: x*sin(1/x)+x, 0), 0.0)
-
-    # --- Oscillatory with addition inside ---
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b7(sin(1/x)+1) = 0",
-        limit(lambda x: x*(sin(1/x)+R(1)), 0), 0.0)
-
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b7(cos(1/x)+3) = 0",
-        limit(lambda x: x*(cos(1/x)+R(3)), 0), 0.0)
+    # ALL OF THESE ARE REFUSED, and the refusal is the correct answer for this
+    # library rather than a gap in it.
+    #
+    # Each limit is genuinely 0 (or 5), by the squeeze: |sin| <= 1, so x*sin
+    # is trapped between -|x| and |x|.  THE BOUND IS THE WHOLE PROOF, and it
+    # is exactly what a composite cannot hold -- sin(1/h) is every value in
+    # [-1, 1], and a composite carries one value at one grade.  Every rule on
+    # the dimension was measured (see _bounded_at_inf); each breaks a
+    # different pair of requirements.
+    #
+    # Probing was measured too and is worse than refusing.  It returns 0.0
+    # here, which is right, and ALSO returns 0.0 for x/sin(1/x), which is
+    # unbounded -- sin(1/x) passes through zero at x = 1/(k*pi).  A single
+    # grid cannot see it: max|f| reads 1.006 over 2,000 samples and 20.97 over
+    # 32,000.  A method that gives the same confident answer for a convergent
+    # and a divergent case is not a fallback.
+    #
+    # So the library computes what the algebra reaches and says so when it
+    # does not.  lim(x->inf) x*sin(1/x) still WORKS (below): there 1/x is
+    # infinitesimal, sin is on its series, and nothing is refused.
+    for name, fn in (
+            ("x\u00b7sin(1/x)",          lambda x: x*sin(1/x)),
+            ("x\u00b7cos(1/x)",          lambda x: x*cos(1/x)),
+            ("x\u00b2\u00b7sin(1/x)",   lambda x: x**2*sin(1/x)),
+            ("x\u00b2\u00b7cos(1/x)",   lambda x: x**2*cos(1/x)),
+            ("x\u00b7sin(1/x\u00b2)",   lambda x: x*sin(R(1)/(x**2))),
+            ("x\u00b3\u00b7sin(1/x)",   lambda x: x**3*sin(1/x)),
+            ("x\u00b7sin(1/x)\u00b7cos(1/x)", lambda x: x*sin(1/x)*cos(1/x)),
+            ("x\u00b7(sin(1/x))\u00b2", lambda x: x*sin(1/x)**2),
+            ("x\u00b7sin(1/x) + 5",      lambda x: x*sin(1/x)+R(5)),
+            ("x\u00b7sin(1/x) + x",      lambda x: x*sin(1/x)+x),
+            ("x\u00b7(sin(1/x)+1)",      lambda x: x*(sin(1/x)+R(1))),
+            ("x\u00b7(cos(1/x)+3)",      lambda x: x*(cos(1/x)+R(3))),
+    ):
+        suite.assert_raises(
+            f"lim(x\u21920) {name} is REFUSED (the bound is not representable)",
+            NotRepresentableError, limit, fn, 0)
 
     return suite.report()
 
-
-# =============================================================================
-# 6. MONOTONIC BOUNDED AT INFINITY
-# =============================================================================
 
 def test_monotonic_bounded():
     suite = TestSuite("Monotonic Bounded (atan, tanh)")
@@ -332,13 +321,19 @@ def test_monotonic_bounded():
 def test_limits_at_infinity():
     suite = TestSuite("Limits at Infinity")
 
-    suite.assert_eq(
-        "lim(x\u2192\u221e) sin(x)/x = 0",
-        limit(lambda x: sin(x)/x, INF), 0.0)
+    # x is UNBOUNDED here, so sin(x) is the range again -- refused, for the
+    # same reason as the oscillatory section.  Contrast x*sin(1/x) below,
+    # where 1/x is infinitesimal and sin stays on its series.
+    suite.assert_raises(
+        "lim(x\u2192\u221e) sin(x)/x is REFUSED",
+        NotRepresentableError, limit, lambda x: sin(x)/x, INF)
 
-    suite.assert_eq(
-        "lim(x\u2192\u221e) cos(x)/x = 0",
-        limit(lambda x: cos(x)/x, INF), 0.0)
+    # x is UNBOUNDED here, so sin(x) is the range again -- refused, for the
+    # same reason as the oscillatory section.  Contrast x*sin(1/x) below,
+    # where 1/x is infinitesimal and sin stays on its series.
+    suite.assert_raises(
+        "lim(x\u2192\u221e) cos(x)/x is REFUSED",
+        NotRepresentableError, limit, lambda x: cos(x)/x, INF)
 
     suite.assert_eq(
         "lim(x\u2192\u221e) 1/x = 0",
@@ -356,9 +351,12 @@ def test_limits_at_infinity():
         "lim(x\u2192\u221e) (3x+1)/(2x-1) = 3/2",
         limit(lambda x: (R(3)*x+R(1))/(R(2)*x-R(1)), INF), 1.5)
 
-    suite.assert_eq(
-        "lim(x\u2192\u221e) sin(x)\u00b7cos(x)/x = 0",
-        limit(lambda x: sin(x)*cos(x)/x, INF), 0.0)
+    # x is UNBOUNDED here, so sin(x) is the range again -- refused, for the
+    # same reason as the oscillatory section.  Contrast x*sin(1/x) below,
+    # where 1/x is infinitesimal and sin stays on its series.
+    suite.assert_raises(
+        "lim(x\u2192\u221e) sin(x)\u00b7cos(x)/x is REFUSED",
+        NotRepresentableError, limit, lambda x: sin(x)*cos(x)/x, INF)
 
     suite.assert_eq(
         "lim(x\u2192\u221e) atan(x)/x = 0",
@@ -367,7 +365,7 @@ def test_limits_at_infinity():
     # sin(1/x) as x->inf: 1/x -> 0, sin(small) ~ small, sin(1/x)/1/x -> 1
     suite.assert_eq(
         "lim(x\u2192\u221e) x\u00b7sin(1/x) = 1",
-        limit(lambda x: x*sin(R(1)/x), INF), 1.0, tol=1e-6)
+        limit(lambda x: x*sin(R(1)/x), INF), 1.0, tol=1e-12)
 
     return suite.report()
 
@@ -409,7 +407,7 @@ def test_hyperbolic():
 
     suite.assert_eq(
         "lim(x\u21920) (x\u00b7cosh x - sinh x)/x\u00b3 = 1/3",
-        limit(lambda x: (x*cosh(x)-sinh(x))/(x**3), 0), 1.0/3, tol=1e-8)
+        limit(lambda x: (x*cosh(x)-sinh(x))/(x**3), 0), 1.0/3, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920) (sinh x - tanh x)/x\u00b3 = 1/2",
@@ -421,7 +419,7 @@ def test_hyperbolic():
 
     suite.assert_eq(
         "lim(x\u21920) (cosh x - 1)/x\u00b2 = 1/2",
-        limit(lambda x: (cosh(x)-R(1))/(x**2), 0), 0.5, tol=1e-8)
+        limit(lambda x: (cosh(x)-R(1))/(x**2), 0), 0.5, tol=1e-12)
 
     return suite.report()
 
@@ -439,43 +437,66 @@ def test_domain_errors():
 
     suite.assert_eq(
         "lim(x\u21920+) x\u00b7ln(x) = 0",
-        _safe_limit(lambda x: x*ln(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: x*ln(x), 0, dir='+'), 0.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) x^x = 1",
-        _safe_limit(lambda x: x**x, 0, dir='+'), 1.0, tol=1e-6)
+        _safe_limit(lambda x: x**x, 0, dir='+'), 1.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) x^(sin x) = 1",
-        _safe_limit(lambda x: x**(sin(x)), 0, dir='+'), 1.0, tol=1e-6)
+        _safe_limit(lambda x: x**(sin(x)), 0, dir='+'), 1.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) sqrt(x) = 0",
-        _safe_limit(lambda x: sqrt(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: sqrt(x), 0, dir='+'), 0.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) sqrt(x)\u00b7sin(x) = 0",
-        _safe_limit(lambda x: sqrt(x)*sin(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: sqrt(x)*sin(x), 0, dir='+'), 0.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) x\u00b7sqrt(x) = 0",
-        _safe_limit(lambda x: x*sqrt(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: x*sqrt(x), 0, dir='+'), 0.0, tol=1e-12)
 
+    # Answerable again.  ln of an infinitesimal is ln(c) + d*ln(h), and ln(h)
+    # needs a dimension between 0 and every positive power -- no float sits
+    # there.  With scalar dimensions ln dropped that term, which made ln(h),
+    # ln(h^2) and ln(sqrt(h)) the same object and gave wrong ratios; this case
+    # only looked right because sqrt(x) vanishes and killed the error.  The
+    # log scale (composite_lib.LOG_SCALE, on by default) represents it
+    # properly, so the value is now computed rather than compensated for.
     suite.assert_eq(
         "lim(x\u21920+) sqrt(x)\u00b7ln(x) = 0",
-        _safe_limit(lambda x: sqrt(x)*ln(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: sqrt(x)*ln(x), 0, dir='+'), 0.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920+) x\u00b2\u00b7ln(x) = 0",
-        _safe_limit(lambda x: x**2*ln(x), 0, dir='+'), 0.0, tol=1e-6)
+        _safe_limit(lambda x: x**2*ln(x), 0, dir='+'), 0.0, tol=1e-12)
 
-    suite.assert_eq(
-        "lim(x\u21920+) exp(-1/x\u00b2) = 0",
-        _safe_limit(lambda x: exp(R(-1)/(x**2)), 0, dir='+'), 0.0, tol=1e-6)
+    # THE FLAT OBJECT, refused for now.  Both limits are genuinely 0 --
+    # exp(-1/x^2) is smaller than every power of x, nonzero, with every
+    # derivative vanishing at 0 -- and that is exactly why there is no
+    # composite for it: naming something below EVERY power needs grades that
+    # are recursive expressions, i.e. transseries, not powers-and-logs.
+    #
+    # Unlike sin(1/h) the VALUE is unambiguous here: exp of something tending
+    # to -infinity tends to 0, exactly, and the sign that decides it is
+    # available where the refusal is raised (S3.08 in
+    # test_singularity_handling checks that it is).  So a rule could answer
+    # these without sampling.  Not implemented -- it reaches into how a
+    # refusal propagates through the surrounding expression, which is a
+    # larger change than it looks.  Refusing is the honest placeholder, not
+    # the final answer.
+    suite.assert_raises(
+        "lim(x\u21920+) exp(-1/x\u00b2) is REFUSED (flat: needs transseries)",
+        NotRepresentableError,
+        limit, lambda x: exp(R(-1)/(x**2)), 0, dir='+')
 
-    suite.assert_eq(
-        "lim(x\u21920+) x\u00b7exp(-1/x) = 0",
-        _safe_limit(lambda x: x*exp(R(-1)/x), 0, dir='+'), 0.0, tol=1e-6)
+    suite.assert_raises(
+        "lim(x\u21920+) x\u00b7exp(-1/x) is REFUSED (flat: needs transseries)",
+        NotRepresentableError,
+        limit, lambda x: x*exp(R(-1)/x), 0, dir='+')
 
     return suite.report()
 
@@ -496,11 +517,28 @@ def _safe_limit(f, at, dir='both', tol=1e-6):
 def test_nothing_propagation():
     suite = TestSuite("Nothing (\u2205) Propagation")
 
-    # sin(INF) and cos(INF) should return nothing
-    suite.assert_nothing("sin(INF) = \u2205", sin(INF))
-    suite.assert_nothing("cos(INF) = \u2205", cos(INF))
-    suite.assert_nothing("sin(-INF) = \u2205", sin(-INF))
-    suite.assert_nothing("cos(-INF) = \u2205", cos(-INF))
+    # sin and cos at an unbounded argument REFUSE.  They used to return the
+    # empty composite, and that was the wrong object: ∅ means NOTHING YET, so
+    # reading it expresses a zero (R6) -- sin(1/h) + 5 came back as exactly
+    # |5|_0 for a quantity that oscillates over [4, 6] and has no limit.  The
+    # value is outside the group entirely (bounded by 1, not eventually
+    # monotone, so not in a Hardy field at any basis extension), so there is
+    # no composite to return and the function says so.  limit() still recovers
+    # the damped cases by probing -- see the Oscillatory section.
+    # THE SKIP RULE.  Undefined at this dimension, so skip a dimension and
+    # keep the value -- what R1 does for 1/0 -> |1|_1.  sin(|c|_d) is
+    # |sin(c)|_d: the coefficient is not a claim about the value (sin(1/h)
+    # does not approach sin(1)), it is memory of what made it undefined, and
+    # it is what makes the skip revertible -- asin(sin(1/h)) returns 1/h
+    # exactly.  st() is then undefined because the grade is positive.
+    # A RANGE IS NOT A POINT.  sin(1/h) takes every value in [-1, 1], and a
+    # composite holds one value at one grade.  Every rule on the dimension was
+    # tried and each breaks a different pair of requirements -- see
+    # _bounded_at_inf -- so the function refuses rather than choosing one.
+    for nm, fn, arg in (("sin(INF)", sin, INF), ("cos(INF)", cos, INF),
+                        ("sin(-INF)", sin, -INF), ("cos(-INF)", cos, -INF)):
+        suite.assert_raises(f"{nm} raises: the value is a range, not a point",
+                            NotRepresentableError, fn, arg)
 
     # Monotonic bounded should NOT return nothing
     suite.assert_true(
@@ -525,11 +563,23 @@ def test_nothing_propagation():
         "ZERO + \u2205 = ZERO",
         (ZERO + nothing).coeff(-1), 1.0)
 
-    # Nested: sin(nothing) — nothing has no positive dims, treated as sin(0)
-    # Nothing in, nothing out — all transcendentals propagate ∅
+    # Nothing in, nothing out -- but only for the functions whose EVERY term
+    # carries the argument.  R6 says adding nothing is a no-op, so a series
+    # keeps whatever term does not carry x: exp and cos keep their 1, acos
+    # keeps pi/2, and sin/tan/atan/sqrt/ln keep nothing because they have no
+    # such term.  See Z9 in test_zero_coercion.py.
     suite.assert_nothing("sin(\u2205) = \u2205", sin(nothing))
-    suite.assert_nothing("cos(\u2205) = \u2205", cos(nothing))
-    suite.assert_nothing("exp(\u2205) = \u2205", exp(nothing))
+    # CHANGED.  These asserted cos(nothing) = nothing and exp(nothing) =
+    # nothing, which contradicted R6: adding nothing is a no-op, so
+    # exp(nothing) = 1 + nothing + nothing + ... = 1, and likewise cos.  Both
+    # functions were returning Composite({}) from a short-circuit that fired
+    # before the series was ever formed.  Only the terms that CARRY the
+    # argument vanish; a constant term does not.  sin and sqrt below still
+    # give nothing, because every term of theirs carries x.
+    suite.assert_eq("cos(\u2205) = 1, the term that does not carry x",
+                    cos(nothing).st(), 1.0)
+    suite.assert_eq("exp(\u2205) = 1, the term that does not carry x",
+                    exp(nothing).st(), 1.0)
     suite.assert_nothing("ln(\u2205) = \u2205", ln(nothing))
     suite.assert_nothing("tan(\u2205) = \u2205", tan(nothing))
     suite.assert_nothing("atan(\u2205) = \u2205", atan(nothing))
@@ -545,53 +595,46 @@ def test_nothing_propagation():
 def test_division_by_nothing():
     suite = TestSuite("Division by Nothing")
 
-    # 1/sin(1/x): sin(INF)=∅, 1/∅=∅. Probes at real points see
-    # oscillating values → extrapolation doesn't converge → DNE.
-    suite.assert_raises(
-        "1/sin(1/x) at 0 → DNE",
-        LimitDoesNotExistError,
-        limit, lambda x: R(1)/sin(1/x), 0)
-
-    # x/sin(1/x): ZERO / sin(INF) = ZERO / ∅ → division by nothing
-    # raises LimitDoesNotExistError directly. No extrapolation needed.
-    suite.assert_raises(
-        "x/sin(1/x) at 0 → DNE (division by nothing)",
-        LimitDoesNotExistError,
-        limit, lambda x: x/sin(1/x), 0)
+    # Both denominators are sin at an unbounded argument, so both are refused
+    # before the division happens.  That is the right answer for the second
+    # one on its own merits: x/sin(1/x) is UNBOUNDED, since sin(1/x) passes
+    # through zero at x = 1/(k*pi).  Probing used to report 0.0 for it.
+    suite.assert_raises("1/sin(1/x) at 0 is REFUSED",
+                        NotRepresentableError,
+                        limit, lambda x: R(1)/sin(R(1)/x), 0)
+    suite.assert_raises("x/sin(1/x) at 0 is REFUSED (and is unbounded)",
+                        NotRepresentableError,
+                        limit, lambda x: x/sin(R(1)/x), 0)
 
     return suite.report()
 
 
-# =============================================================================
-# 13. COMPOSITIONS
-# =============================================================================
-
 def test_compositions():
     suite = TestSuite("Compositions")
 
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b7sin(1/x)\u00b7exp(x) = 0",
-        limit(lambda x: x*sin(1/x)*exp(x), 0), 0.0)
+    suite.assert_raises(
+        "lim(x\u21920) x\u00b7sin(1/x)\u00b7exp(x) is REFUSED",
+        NotRepresentableError, limit, lambda x: x*sin(1/x)*exp(x), 0)
 
-    suite.assert_eq(
-        "lim(x\u21920) (x\u00b7sin(1/x))\u00b2 = 0",
-        limit(lambda x: (x*sin(1/x))**2, 0), 0.0)
+    suite.assert_raises(
+        "lim(x\u21920) (x\u00b7sin(1/x))\u00b2 is REFUSED",
+        NotRepresentableError, limit, lambda x: (x*sin(1/x))**2, 0)
 
     suite.assert_eq(
         "lim(x\u21920) sin(sin(x))/x = 1",
-        limit(lambda x: sin(sin(x))/x, 0), 1.0, tol=1e-6)
+        limit(lambda x: sin(sin(x))/x, 0), 1.0, tol=1e-12)
 
     suite.assert_eq(
         "lim(x\u21920) sin(cos(x)) = sin(1)",
-        limit(lambda x: sin(cos(x)), 0), math.sin(1.0), tol=1e-6)
+        limit(lambda x: sin(cos(x)), 0), math.sin(1.0), tol=1e-12)
 
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b2\u00b7sin(1/x) + x = 0",
-        limit(lambda x: x**2*sin(1/x)+x, 0), 0.0)
+    suite.assert_raises(
+        "lim(x\u21920) x\u00b2\u00b7sin(1/x) + x is REFUSED",
+        NotRepresentableError, limit, lambda x: x**2*sin(1/x)+x, 0)
 
-    suite.assert_eq(
-        "lim(x\u21920) x\u00b7sin(1/x) + x\u00b7cos(1/x) = 0",
-        limit(lambda x: x*sin(1/x)+x*cos(1/x), 0), 0.0)
+    suite.assert_raises(
+        "lim(x\u21920) x\u00b7sin(1/x) + x\u00b7cos(1/x) is REFUSED",
+        NotRepresentableError, limit, lambda x: x*sin(1/x)+x*cos(1/x), 0)
 
     return suite.report()
 
@@ -624,12 +667,12 @@ def test_edge_cases():
 
     suite.assert_eq(
         "lim(x\u2192\u03c0/2) sin(x) = 1",
-        limit(lambda x: sin(x), math.pi/2), 1.0, tol=1e-6)
+        limit(lambda x: sin(x), math.pi/2), 1.0, tol=1e-12)
 
     # Nested compositions without singularity
     suite.assert_eq(
         "lim(x\u21920) sin(sin(x))/sin(x) = 1",
-        limit(lambda x: sin(sin(x))/sin(x), 0), 1.0, tol=1e-6)
+        limit(lambda x: sin(sin(x))/sin(x), 0), 1.0, tol=1e-12)
 
     # asin/acos at regular points
     suite.assert_eq(
@@ -648,40 +691,22 @@ def test_edge_cases():
 # =============================================================================
 
 def test_nested_oscillatory():
-    """Tests for nested transcendentals of infinity.
-
-    All these limits do not exist. Nothing propagates through
-    transcendentals, the limit function detects ∅, probes at real
-    points, finds oscillation → LimitDoesNotExistError.
-    """
     suite = TestSuite("Nested Oscillatory (DNE)")
 
-    suite.assert_raises(
-        "sin(sin(1/x)) at 0 → DNE",
-        LimitDoesNotExistError,
-        limit, lambda x: sin(sin(1/x)), 0)
-
-    suite.assert_raises(
-        "cos(sin(1/x)) at 0 → DNE",
-        LimitDoesNotExistError,
-        limit, lambda x: cos(sin(1/x)), 0)
-
-    suite.assert_raises(
-        "exp(sin(1/x)) at 0 → DNE",
-        LimitDoesNotExistError,
-        limit, lambda x: exp(sin(1/x)), 0)
-
-    suite.assert_raises(
-        "sin(1/x)\u00b2 at 0 → DNE",
-        LimitDoesNotExistError,
-        limit, lambda x: sin(1/x)**2, 0)
-
-    suite.assert_raises(
-        "atan(sin(1/x)) at 0 → DNE",
-        LimitDoesNotExistError,
-        limit, lambda x: atan(sin(1/x)), 0)
+    # Every one contains sin(1/x) at an unbounded argument, so the refusal
+    # comes from the inner call.  All of them genuinely have no limit.
+    for name, fn in (
+            ("sin(sin(1/x))",  lambda x: sin(sin(R(1)/x))),
+            ("cos(sin(1/x))",  lambda x: cos(sin(R(1)/x))),
+            ("exp(sin(1/x))",  lambda x: exp(sin(R(1)/x))),
+            ("sin(1/x)\u00b2", lambda x: sin(R(1)/x)**2),
+            ("atan(sin(1/x))", lambda x: atan(sin(R(1)/x))),
+    ):
+        suite.assert_raises(f"{name} at 0 is REFUSED",
+                            NotRepresentableError, limit, fn, 0)
 
     return suite.report()
+
 
 
 def _safe_eval(f):

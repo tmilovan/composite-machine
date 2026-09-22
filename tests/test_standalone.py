@@ -349,12 +349,17 @@ class TestSuite:
     def add(self, name: str, passed: bool, details: str = ""):
         self.results.append(TestResult(name, passed, details))
 
-    def assert_eq(self, name: str, actual, expected, tol=1e-10):
+    def assert_eq(self, name: str, actual, expected, tol=1e-12):
         if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
             passed = abs(actual - expected) < tol
         else:
             passed = actual == expected
-        self.add(name, passed, f"actual={actual}, expected={expected}")
+        self.add(name, passed,
+                 f"got={actual}  want={expected}  "
+                 f"err={abs(actual-expected):.2e}  tol={tol:.1e}"
+                 if isinstance(expected, (int, float))
+                 and isinstance(actual, (int, float))
+                 else f"got={actual}  want={expected}")
 
     def assert_true(self, name: str, condition: bool, details: str = ""):
         self.add(name, condition, details)
@@ -367,8 +372,9 @@ class TestSuite:
         print(f"{'='*70}")
         for r in self.results:
             status = '\u2713' if r.passed else '\u2717'
+            # Numbers on PASS too -- a tick alone cannot be audited.
             print(f"  {status} {r.name}")
-            if not r.passed and r.details:
+            if r.details:
                 print(f"      {r.details}")
         return passed, total
 
@@ -633,13 +639,13 @@ def test_calculus_limits():
     h = ZERO
     sin_x = sin_composite(h, terms=8)
     limit_sin = (sin_x / h).st()
-    suite.assert_eq("lim(x\u21920) sin(x)/x = 1", limit_sin, 1, tol=1e-6)
+    suite.assert_eq("lim(x\u21920) sin(x)/x = 1", limit_sin, 1, tol=1e-12)
     exp_x = exp_composite(h, terms=10)
     limit_exp = ((exp_x - R(1)) / h).st()
-    suite.assert_eq("lim(x\u21920) (e\u02e3-1)/x = 1", limit_exp, 1, tol=1e-6)
+    suite.assert_eq("lim(x\u21920) (e\u02e3-1)/x = 1", limit_exp, 1, tol=1e-12)
     cos_x = cos_composite(h, terms=8)
     limit_cos = ((R(1) - cos_x) / (h * h)).st()
-    suite.assert_eq("lim(x\u21920) (1-cos(x))/x\u00b2 = 0.5", limit_cos, 0.5, tol=1e-6)
+    suite.assert_eq("lim(x\u21920) (1-cos(x))/x\u00b2 = 0.5", limit_cos, 0.5, tol=1e-12)
     x = R(2) + h
     numer = x**2 - R(4)
     denom = x - R(2)
@@ -647,7 +653,7 @@ def test_calculus_limits():
     suite.assert_eq("lim(x\u21922) (x\u00b2-4)/(x-2) = 4", limit_factor, 4)
     ln_1_plus_h = ln_1_plus_x(h, terms=10)
     limit_ln = (ln_1_plus_h / h).st()
-    suite.assert_eq("lim(x\u21920) ln(1+x)/x = 1", limit_ln, 1, tol=1e-6)
+    suite.assert_eq("lim(x\u21920) ln(1+x)/x = 1", limit_ln, 1, tol=1e-12)
     x = R(1) + h
     numer = x**3 - R(1)
     denom = x - R(1)
@@ -742,7 +748,13 @@ def test_stress():
     x_fft = CompositeFFT.real(2) + h_fft
     result_fft = ((x_fft + h_fft) ** 10 - x_fft ** 10) / h_fft
     suite.assert_eq("Dict and FFT match for x\u00b9\u2070 derivative",
-                    result_dict.st(), result_fft.st(), tol=0.01)
+                    # FFT convolution accumulates rounding across the transform;
+                    # the direct backend does not.  Measured disagreement is
+                    # 1.91e-11 on a value of 5120 -- 3.7e-15 relative, ~17 ulps,
+                    # which is the method and not a defect.  The old bound of
+                    # 0.01 admitted a 1% divergence between two backends that
+                    # compute the same number.
+                    result_dict.st(), result_fft.st(), tol=1e-10)
     # Negative coefficient chains
     neg_result = (R(-5) * ZERO) / ZERO
     suite.assert_eq("(-5 \u00d7 0) / 0 = -5", neg_result.st(), -5)
@@ -838,13 +850,13 @@ def test_multiterm_division():
     x = h
     sin_x = sin_composite(x, terms=5)
     result = sin_x / x
-    suite.assert_eq("sin(x)/x at x→0 = 1", result.st(), 1, tol=1e-6)
+    suite.assert_eq("sin(x)/x at x→0 = 1", result.st(), 1, tol=1e-12)
     # Test: (1 + x) / (1 - x) at x→0 = 1
     x = h
     numer = R(1) + x
     denom = R(1) - x
     result = numer / denom
-    suite.assert_eq("(1+x)/(1-x) at x→0 = 1", result.st(), 1, tol=1e-6)
+    suite.assert_eq("(1+x)/(1-x) at x→0 = 1", result.st(), 1, tol=1e-12)
     # Test: Verify single-term division still works (fast path)
     result_single = R(10) / R(2)
     suite.assert_eq("10 / 2 = 5 (single-term fast path)", result_single.st(), 5)
@@ -863,16 +875,16 @@ def test_transcendental():
     sin_h = sin_composite(h, terms=8)
     cos_h = cos_composite(h, terms=8)
     identity = sin_h * sin_h + cos_h * cos_h
-    suite.assert_eq("sin\u00b2(h) + cos\u00b2(h) = 1", identity.st(), 1, tol=1e-6)
+    suite.assert_eq("sin\u00b2(h) + cos\u00b2(h) = 1", identity.st(), 1, tol=1e-12)
     exp_0 = exp_composite(R(0), terms=10)
     suite.assert_eq("exp(0) = 1", exp_0.st(), 1, tol=1e-10)
     deriv_sin = (sin_composite(h, terms=8) / h).st()
-    suite.assert_eq("d/dx[sin(x)]|\u2080 = cos(0) = 1", deriv_sin, 1, tol=1e-6)
+    suite.assert_eq("d/dx[sin(x)]|\u2080 = cos(0) = 1", deriv_sin, 1, tol=1e-12)
     exp_h = exp_composite(h, terms=10)
     deriv_exp = ((exp_h - R(1)) / h).st()
-    suite.assert_eq("d/dx[e\u02e3]|\u2080 = e\u2070 = 1", deriv_exp, 1, tol=1e-6)
+    suite.assert_eq("d/dx[e\u02e3]|\u2080 = e\u2070 = 1", deriv_exp, 1, tol=1e-12)
     cos_deriv = ((cos_composite(h, terms=8) - R(1)) / h).st()
-    suite.assert_eq("d/dx[cos(x)]|\u2080 = -sin(0) = 0", cos_deriv, 0, tol=1e-6)
+    suite.assert_eq("d/dx[cos(x)]|\u2080 = -sin(0) = 0", cos_deriv, 0, tol=1e-12)
     return suite.report()
 
 
@@ -895,21 +907,28 @@ def test_subtraction_rules():
     suite.assert_eq("R(1)-R(1) is zero", r11.st(), 0)
     suite.assert_eq("R(1)-R(1) stays at dim[0]", r11.coeff(0), 0)
 
+    # Rules 3-6: 0**a - 0**a = 0**(a+1).
+    # Compared as NUMBERS, not as coefficient dicts.  Subtraction leaves the
+    # zero at the dimension where it happened -- ZERO-ZERO is |0|_-1 -- and
+    # that converts to |1|_-2 = ZERO**2 when used as an operand (R1).  The two
+    # are one number with two spellings, so `==` is the right test and
+    # `.c == .c` is not.
+
     # Rule 3: R(0)-R(0) = ZERO-ZERO = 0² = ZERO² (R(0) is ZERO)
     r00 = R(0) - R(0)
-    suite.assert_eq("R(0)-R(0) = ZERO²", r00.c == z2.c, True)
+    suite.assert_eq("R(0)-R(0) = ZERO²", r00 == z2, True)
 
     # Rule 4: ZERO-ZERO = 0² = ZERO² (same as rule 3)
     zz = ZERO - ZERO
-    suite.assert_eq("ZERO-ZERO = ZERO²", zz.c == z2.c, True)
+    suite.assert_eq("ZERO-ZERO = ZERO²", zz == z2, True)
 
     # Rule 5: ZERO²-ZERO² = 0³ = ZERO³
     z2z2 = z2 - z2
-    suite.assert_eq("ZERO²-ZERO² = ZERO³", z2z2.c == z3.c, True)
+    suite.assert_eq("ZERO²-ZERO² = ZERO³", z2z2 == z3, True)
 
     # Rule 6: ZERO³-ZERO³ = 0⁴ = ZERO⁴
     z3z3 = z3 - z3
-    suite.assert_eq("ZERO³-ZERO³ = ZERO⁴", z3z3.c == z4.c, True)
+    suite.assert_eq("ZERO³-ZERO³ = ZERO⁴", z3z3 == z4, True)
 
     # Rule 7: normal subtraction still works
     suite.assert_eq("R(5)-R(3) = 2", (R(5) - R(3)).st(), 2)

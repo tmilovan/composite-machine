@@ -35,7 +35,7 @@ FIXES applied:
   6. Truncation: per-variable MAX_ORDER_PER_VAR after multiply (fixes term explosion)
 
 Usage:
-    from composite_multivar import *
+    from composite.composite_multivar import *
 
     # Two variables
     x = RR(3, var=0, nvars=2)   # x = 3 + hx
@@ -277,7 +277,15 @@ class MC:
                 result[new_dim] = coeff / div_coeff
             return MC(result, nv)
 
-        # Multi-term: reciprocal via geometric series
+        # Multi-term divisor.  The geometric series expands around the real
+        # part, so it needs one; with no real part every term is infinitesimal
+        # and long division is the right tool (as in the scalar library).
+        zero_key = tuple([0] * nv)
+        if b.c.get(zero_key, 0.0) == 0.0:
+            # 7.1: exactly no real part -> the geometric series has nothing to
+            # expand around, so use long division.
+            return _mc_deconvolve(a, b)
+
         return a * _mc_reciprocal(b)
 
     def __rtruediv__(self, other):
@@ -418,6 +426,59 @@ def curl_at(F: List[Callable], at: List[float]):
     return [curl_x, curl_y, curl_z]
 
 
+def _mc_order_key(dim):
+    """A monomial order on tuple dimensions.
+
+    Tuple dimensions carry no natural total order, so one is imposed: total
+    degree first (a dimension sum closer to 0 is less infinitesimal, so it
+    leads), then the tuple itself to break ties.  Any monomial order makes the
+    long division below terminate; this one is chosen to match the scalar
+    behaviour, where the leading term is simply the highest dimension.
+    """
+    return (sum(dim), dim)
+
+
+def _mc_deconvolve(a, b):
+    """Long division A / B for a divisor with NO real part.
+
+    _mc_reciprocal expands 1/B as a geometric series around B's real part, so
+    it cannot run when that part is zero -- which is exactly the case for a
+    limit like (x^2+y^2)/(x^2+y^2) at the origin, where every term of B is
+    infinitesimal.
+
+    This mirrors SparseDenseBackend.deconvolve from the scalar library: cancel
+    the leading term of the remainder against the leading term of the divisor,
+    repeat.  It terminates because every term introduced is strictly smaller
+    than the one removed under _mc_order_key.
+    """
+    nv = a.nvars
+    b_terms = {k: v for k, v in b.c.items() if v != 0.0}
+    if not b_terms:
+        raise ZeroDivisionError("Cannot divide by zero composite")
+
+    lead_dim = max(b_terms, key=_mc_order_key)
+    lead_val = b_terms[lead_dim]
+
+    rem = {k: v for k, v in a.c.items() if v != 0.0}
+    quo = {}
+    max_iter = max(len(a.c) + len(b.c), 50)
+
+    for _ in range(max_iter):
+        if not rem:
+            break
+        r_dim = max(rem, key=_mc_order_key)
+        q_dim = tuple(r_dim[i] - lead_dim[i] for i in range(nv))
+        q_val = rem[r_dim] / lead_val
+        quo[q_dim] = quo.get(q_dim, 0.0) + q_val
+        for d, v in b_terms.items():
+            nd = tuple(d[i] + q_dim[i] for i in range(nv))
+            rem[nd] = rem.get(nd, 0.0) - v * q_val
+            if rem[nd] == 0.0:
+                rem.pop(nd, None)
+
+    return MC(quo, nv)
+
+
 def _mc_reciprocal(b, terms=15):
     """Compute 1/B via geometric series.
 
@@ -431,7 +492,9 @@ def _mc_reciprocal(b, terms=15):
     nv = b.nvars
     zero_key = tuple([0] * nv)
     b0 = b.c.get(zero_key, 0.0)
-    if abs(b0) < 1e-14:
+    if b0 == 0.0:
+        # 7.1: exactly zero.  MC.__truediv__ routes this case to long division
+        # before reaching here, so this is a guard rather than a live path.
         raise ZeroDivisionError("Cannot divide: divisor has zero real part")
     h = b - MC.real(b0, nv)
     neg_ratio = h * (-1.0 / b0)
@@ -482,7 +545,7 @@ def mc_sin(x, terms=12):
     a = x.st()  # scalar part
     zero_key = tuple([0] * x.nvars)
     non_zero = {d: c for d, c in x.c.items()
-                if d != zero_key and abs(c) > 1e-15}
+                if d != zero_key and c != 0.0}
 
     if not non_zero:
         return MC({zero_key: math.sin(a)}, x.nvars)
@@ -517,7 +580,7 @@ def mc_cos(x, terms=12):
     a = x.st()  # scalar part
     zero_key = tuple([0] * x.nvars)
     non_zero = {d: c for d, c in x.c.items()
-                if d != zero_key and abs(c) > 1e-15}
+                if d != zero_key and c != 0.0}
 
     if not non_zero:
         return MC({zero_key: math.cos(a)}, x.nvars)
@@ -552,7 +615,7 @@ def mc_exp(x, terms=15):
     a = x.st()
     zero_key = tuple([0] * x.nvars)
     non_zero = {d: c for d, c in x.c.items()
-                if d != zero_key and abs(c) > 1e-15}
+                if d != zero_key and c != 0.0}
 
     if not non_zero:
         return MC({zero_key: math.exp(a)}, x.nvars)
@@ -724,12 +787,33 @@ def multivar_limit(f, as_vars_to: List[float]):
 
 def double_integral(f, x_range, y_range, tol=1e-8):
     """
-    Compute ∫∫ f(x,y) dy dx by iterated single-variable integration.
-    x_range = (a, b), y_range = (c, d)
+    Compute the double integral of f over x_range = (a, b), y_range = (c, d).
 
-    Uses composite adaptive integration in each variable.
+    DELEGATES to composite_lib.integrate, the library's 2-D entry point.  This
+    was a second, weaker implementation of the same integral:
+
+      - the outer variable was a fixed 20-step midpoint sum, so the integral
+        of x**2 over the unit square came out 2.1e-04 low where integrate()
+        gives 2.1e-06;
+      - it accumulated into `total = 0.0`, and a bare Python zero meeting a
+        composite converts (R1), so every result carried a spurious |1|_-1
+        beside the correct standard part -- right value, polluted derivative.
+
+    Returns a float, matching integrate().  The previous body is kept below as
+    _double_integral_mc; it is no longer called, not removed.
     """
-    from composite_lib import integrate_adaptive, R, ZERO, Composite
+    from composite.composite_lib import integrate
+    return integrate(f, x_range, y_range, tol=tol)
+
+
+def _double_integral_mc(f, x_range, y_range, tol=1e-8):
+    """The former double_integral body. Retained, no longer called.
+
+    Routes through MC rather than Composite, so this is the path to reach for
+    if a two-variable integrand ever needs MC semantics integrate() cannot
+    express.  Carries both defects described in double_integral above.
+    """
+    from composite.composite_lib import integrate_adaptive, R, ZERO, Composite
 
     a, b = x_range
     c, d = y_range
@@ -740,11 +824,16 @@ def double_integral(f, x_range, y_range, tol=1e-8):
             x_mc = RR_const(x_val, nvars=2)
             y_mc = MC({(0,0): y_comp.st(), (0,-1): y_comp.coeff(-1)}, nvars=2)
             result_mc = f(x_mc, y_mc)
-            out = Composite({})
+            # Accumulate in a plain dict and build the Composite ONCE.
+            # `Composite.c` is a property that rebuilds a dict from backend
+            # data on every access, so `out.c[k] = v` wrote into a throwaway
+            # and `out` stayed empty -- every double integral returned 0.0,
+            # including the integral of the constant 1.
+            acc = {}
             for dim, coeff in result_mc.c.items():
                 if dim[0] == 0:
-                    out.c[dim[1]] = out.c.get(dim[1], 0) + coeff
-            return out
+                    acc[dim[1]] = acc.get(dim[1], 0.0) + coeff
+            return Composite(acc)
 
         val, err = integrate_adaptive(g, c, d, tol=tol)
         return val

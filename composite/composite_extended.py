@@ -88,7 +88,12 @@ def _smart_exp(x, terms=15):
 
     if isinstance(x, Composite):
         a = x.st()  # Dimension-0 coefficient
-        non_zero = {d: c for d, c in x.c.items() if d != 0 and abs(c) > 1e-15}
+        # _dim_nonzero, not `d != 0`: a tuple is never equal to an int, so the
+        # VECTOR zero (0, 0) tested non-zero and the standard part was counted
+        # twice.  Same defect as composite_lib.exp had -- this is a
+        # monkey-patched copy of it and did not get the fix.
+        non_zero = {d: c for d, c in x.c.items()
+                    if _clib._dim_nonzero(d) and abs(c) > 1e-15}
 
         if not non_zero:
             # Pure scalar Composite (only dim 0): use math.exp directly
@@ -98,11 +103,16 @@ def _smart_exp(x, terms=15):
         # exp(a) is exact via math.exp
         # exp(h) is Taylor on the SMALL infinitesimal part (converges fast)
         base = math.exp(a)
-        h = Composite(non_zero)
+        # _like, not the bare constructor: Composite({...}) binds whatever
+        # backend is globally ACTIVE, so a vector dimension got handed to numpy
+        # -- "setting an array element with a sequence".  Once the integrator
+        # seeds on a lane, every integrand reaches here with tuple dims.
+        h = _clib._like(x, non_zero)
 
         # Taylor series for exp(h): sum of h^n / n!
-        exp_h = Composite({0: 1.0})  # n=0 term
-        h_power = Composite({0: 1.0})
+        _one = _clib._like(x, {_clib._unit_dim(x): 1.0})
+        exp_h = _one      # n=0 term
+        h_power = _one
         for n in range(1, terms):
             h_power = h_power * h
             exp_h = exp_h + (1.0 / math.factorial(n)) * h_power
@@ -511,7 +521,11 @@ def find_singularities(f, x_range, n_points=100):
         try:
             r = convergence_radius(f, at=x, order=10)
             results.append((x, r))
-        except:
+        except Exception:
+            # `except:` also swallowed KeyboardInterrupt, SystemExit and any
+            # genuine bug, recording each as radius 0.0 -- which the caller
+            # then reads as "a singularity sits here".  An error is not a
+            # mathematical result; at least let control-flow exceptions out.
             results.append((x, 0.0))
 
     return sorted(results, key=lambda p: p[1])
