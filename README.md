@@ -11,7 +11,7 @@ What it tries to achieve:
 - thinning the reliance on external libraries, trying to express as much as we can through composite tooling
 - performance enhancements
 - isolation end elimination of trucation errors
-- add the more depth, rech and precision to the toolkit by adding the transseries support for initial experimentation (can of worms)
+- add more depth, reach and precision to the toolkit by adding the transseries support for initial experimentation (can of worms)
 
 What it adds:
 
