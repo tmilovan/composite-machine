@@ -85,10 +85,12 @@ For the theoretical framing, see the paper.
 
 ## How it compares
 
-The trade-off is breadth vs speed. This covers a lot of operations in one structure, but it's slow.
+Breadth in one structure, at a cost that depends entirely on the shape of the problem.
+The numbers under [Performance](#performance) are measured, not asserted, and they do
+not all point the same way.
 
-- **vs PyTorch/JAX** — They're fast but give you first-order gradients. This gives you all orders, plus limits and integration, but is ~1000x slower.
-- **vs SymPy** — SymPy does symbolic math. This is numerical. SymPy is slow for large expressions. This is slow for everything, but conceptually simpler.
+- **vs PyTorch/JAX** — They give first-order gradients, fast, and vectorised across a batch. This gives every order from one evaluation, plus limits and integration. Neither is a backend here, so no throughput ratio against them is quoted — the measurements below are against NumPy and SymPy, which are what this actually runs on.
+- **vs SymPy** — SymPy is symbolic, this is numerical. On the cases measured this is the faster of the two: 3–70x on indeterminate limits (both exact) and ~6400x on a Taylor expansion to order 8, agreeing to 2.5e-15.
 - **vs mpmath** — mpmath is arbitrary-precision and carries the special-function library this does not (gamma, zeta, Bessel). On derivatives the two agree exactly: the 4th derivative of x⁴eˣ at 1 matches to all 15 digits. The difference is method — mpmath samples and extrapolates, so a limit is only as good as the extrapolation converges. On six harder limits it returned 0.99962 for xˣ as x→0⁺ and −2.7e−8 for x²·ln x, where reading the standard part off the algebra gives both exactly.
 - **vs dual numbers** — Classic dual numbers give you one derivative (epsilon squared is zero). Here epsilon squared is kept, so you get all orders.
 
@@ -204,11 +206,36 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 
 ## Performance
 
-Pure Python, dict-based sparse storage. Roughly 500–1000x slower than PyTorch for simple gradients.
+No single ratio — it depends on what you ask for. Measured on CPython/macOS, float64, one thread,
+NumPy 1.26.4, SymPy 1.14.0.
 
-Fine for research, prototyping, and problems where higher-order derivatives or algebraic limits matter more than throughput.
+**Derivatives.** Tag a number, evaluate `1/(1+x)` once, read all ten derivatives off the result:
 
-One measured exception, from holding only what is occupied: on an explicit PDE over a large domain where the active region stays small, storing only occupied cells runs ~131x faster than the equivalent dense NumPy grid. Absent is not zero, so the support tracks the front on its own.
+| | time | accuracy |
+|---|---|---|
+| composite (dict backend) | **90 µs** | exact, every order |
+| NumPy finite differences | 140 µs | 13 correct digits at order 1, **about 1** by order 10 |
+
+Faster and exact. One evaluation carries every order, while a stencil needs a fresh step size per
+order and has run out of digits by order 10.
+
+A *single* first derivative goes the other way: NumPy does it in **0.2 µs** against **35 µs** here,
+roughly 140x. The crossover is around the third derivative.
+
+**Batches.** NumPy vectorises and this does not — four orders of magnitude per point. Structural.
+
+**Sparse grids.** An explicit PDE whose active front stays at 121 cells: **24x faster** than a
+dense NumPy grid at 200,000 cells, **260x** at 2,000,000. Composite time is flat; the dense grid
+pays for the whole domain whether anything is happening in it or not.
+
+**vs SymPy.** Indeterminate limits: **3–70x faster**, both exact. A Taylor expansion to order 8:
+0.6 ms against 3.7 s, about **6000x**, agreeing to 15 digits.
+
+**Pick the backend.** `use_dense_series()` for calculus — anything with transcendentals builds a
+dense, contiguous series, and it is ~1.6x faster there than the alternatives. `use_dict()` for
+pure-arithmetic jets, where there is no series to lay out (~2x faster on `1/(1+x)`). The default
+`use_sparse_dense()` is the grid backend: several times slower on either kind of jet, and the one
+to keep for sparse supports over a large domain.
 
 A high-performance backend using PyTorch with CUDA and MPS acceleration is available under commercial license. Contact [tmilovan@fwd.hr](mailto:tmilovan@fwd.hr).
 
