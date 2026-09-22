@@ -4,7 +4,7 @@
 
 ### New release (September 2026)
 
-After months of experimenting, learning (finding about Levi Civita fields etc.), building and testing different implementations, here is the new release that contains the accumulated findings. This release contains results of trying out different approaches and results of numeruos experiments. The more experimental stuff still relies to exteranal support, oracles etc. (as it should), the more tested features are tending to become more and more self reliant with additional iterations (eg, derivations and integrals.).
+After months of experimenting, learning (finding about Levi Civita fields etc.), building and testing different implementations, here is the new release that contains the accumulated findings. This release contains results of trying out different approaches and results of numeruos experiments. The more experimental stuff still relies to external support, oracles etc. (as it should), the more tested features are tending to become more and more self reliant with additional iterations (eg, derivations and integrals.).
 
 What it tries to achieve:
 
@@ -32,9 +32,11 @@ The first proper pypy library based on this experimental features has been relea
 
 # Composite Machine
 
-**Automatic calculus via dimensional arithmetic.**
+**Automatic calculus via dimensional arithmetic... and a bit more.**
 
-A data structure and a set of arithmetic rules that give you derivatives, integrals, and limits as a side effect of normal computation. No symbolic engine, no computation graph, no tape. Tag a number, do your math, read the results off the dimensional coefficients.
+A data structure that implements a number system, letting different parts of non-standard (and standard) math work together.
+
+For example, it gives you derivatives, integrals, and limits as a side effect of normal computation. No symbolic engine, no computation graph, no tape. Tag a number, do your math, read the results off the dimensional coefficients.
 
 > *1 − 1 ≠ 0*
 >
@@ -48,7 +50,7 @@ Alpha stage. Research code. The math works, ~~performance doesn't (yet)~~. AGPL-
 
 ## What's this
 
-Numbers are sparse dicts mapping dimensions to coefficients. A dimension is an integer, or a vector over an iterated-logarithm basis when log-scale terms are in play. Dimension 0 is the value. Negative dimensions store derivative info. Multiply dimensions — turns out that's the same thing as the product rule and chain rule, just expressed as data structure operations.
+Numbers are sparse dicts mapping dimensions to coefficients. A dimension is an integer, or a vector over an iterated-logarithm basis when log-scale terms are in play. Dimension 0 is the value. Negative dimensions store derivative info. Multiply dimensions - turns out that's the same thing as the product rule and chain rule, just expressed as data structure operations.
 
 ```python
 from composite.composite_lib import R, ZERO
@@ -56,11 +58,11 @@ from composite.composite_lib import R, ZERO
 x = R(3) + ZERO          # 3 + infinitesimal seed
 result = x ** 4           # just compute normally
 
-result.st()               # 81  — the value, f(3)
-result.d(1)               # 108 — first derivative
-result.d(2)               # 108 — second derivative
-result.d(3)               # 72  — third derivative
-result.d(4)               # 24  — fourth derivative
+result.st()               # 81  - the value, f(3)
+result.d(1)               # 108 - first derivative
+result.d(2)               # 108 - second derivative
+result.d(3)               # 72  - third derivative
+result.d(4)               # 24  - fourth derivative
 ```
 
 One evaluation. All derivatives fall out. No separate differentiation pass.
@@ -71,9 +73,9 @@ One evaluation. All derivatives fall out. No separate differentiation pass.
 
 The derivative computation part builds on well-known work: Clifford's **dual numbers** (1873), Wengert's **forward-mode AD** (1964), Rall's **Taylor arithmetic** (1981), Griewank's framework (2000).
 
-The number system has a separate and older lineage. A sparse map from exponents to coefficients, with non-integer exponents and finitely many terms below any given one, is the shape of the **Levi-Civita field** (Levi-Civita, 1892–1898) — the smallest non-Archimedean ordered field extension of the reals that is real-closed and Cauchy-complete. Letting an exponent be a *vector* ordered lexicographically instead of a single number gives **Hahn series** (Hahn, 1907), which is what the iterated-logarithm basis here amounts to: dimensions valued in an ordered group, compared componentwise. The scale those vectors index — *x*, log *x*, log log *x*, ranked by eventual dominance — is du Bois-Reymond's *Infinitärcalcül* as set out in Hardy's **Orders of Infinity** (1910), and the **Hardy fields** built on it. Expansions that mix powers, exponentials and iterated logs are **transseries** (Écalle, 1992; van der Hoeven, 2006). The infinitesimals themselves are made rigorous by Robinson's **non-standard analysis** (1966), and the surreals (Conway, 1976) contain the Levi-Civita field as a subfield.
+The number system has a separate and older lineage. A sparse map from exponents to coefficients, with non-integer exponents and finitely many terms below any given one, is the shape of the **Levi-Civita field** (Levi-Civita, 1892–1898) - the smallest non-Archimedean ordered field extension of the reals that is real-closed and Cauchy-complete. Letting an exponent be a *vector* ordered lexicographically instead of a single number gives **Hahn series** (Hahn, 1907), which is what the iterated-logarithm basis here amounts to: dimensions valued in an ordered group, compared componentwise. The scale those vectors index - *x*, log *x*, log log *x*, ranked by eventual dominance - is du Bois-Reymond's *Infinitärcalcül* as set out in Hardy's **Orders of Infinity** (1910), and the **Hardy fields** built on it. Expansions that mix powers, exponentials and iterated logs are **transseries** (Écalle, 1992; van der Hoeven, 2006). The infinitesimals themselves are made rigorous by Robinson's **non-standard analysis** (1966), and the surreals (Conway, 1976) contain the Levi-Civita field as a subfield.
 
-Computing in such a field, rather than reasoning about it, also has prior art. Berz framed **automatic differentiation as non-Archimedean analysis** (1992), and Shamseddine and Berz developed numerical analysis directly on the Levi-Civita field, including derivatives of functions where classical AD breaks down. Sergeyev's **grossone** (2003 onward) is the closest in representation: a positional numeral system in powers of an infinite unit ①, with the infinitesimal ①⁻¹, used on an "Infinity Computer" for exact higher-order differentiation, ODE solvers and lexicographic optimization — the same records as the dimensions here, written in a different notation. Grossone keeps the ordinary zero (0·① = 0, ① − ① = 0); this library does not, and that is where the two part ways. The overlap is worth stating plainly: the algebra here is not new, and where this library's structures coincide with those, the credit is theirs.
+Computing in such a field, rather than reasoning about it, also has prior art. Berz framed **automatic differentiation as non-Archimedean analysis** (1992), and Shamseddine and Berz developed numerical analysis directly on the Levi-Civita field, including derivatives of functions where classical AD breaks down. Sergeyev's **grossone** (2003 onward) is the closest in representation: a positional numeral system in powers of an infinite unit ①, with the infinitesimal ①⁻¹, used on an "Infinity Computer" for exact higher-order differentiation, ODE solvers and lexicographic optimization - the same records as the dimensions here, written in a different notation. Grossone keeps the ordinary zero (0·① = 0, ① − ① = 0); this library does not, and that is where the two part ways. The overlap is worth stating plainly: the algebra here is not new, and where this library's structures coincide with those, the credit is theirs.
 
 What this library explores is a different algebraic context for that mechanism. Higher-order terms are preserved instead of truncated. Subtraction retains provenance instead of collapsing to zero. Multiplication by zero shifts structure instead of destroying it. The idea is that if you stop throwing away information at each step, calculus operations become extractable from the algebra.
 
@@ -89,10 +91,10 @@ Breadth in one structure, at a cost that depends entirely on the shape of the pr
 The numbers under [Performance](#performance) are measured, not asserted, and they do
 not all point the same way.
 
-- **vs PyTorch/JAX** — They give first-order gradients, fast, and vectorised across a batch. This gives every order from one evaluation, plus limits and integration. Neither is a backend here, so no throughput ratio against them is quoted — the measurements below are against NumPy and SymPy, which are what this actually runs on.
-- **vs SymPy** — SymPy is symbolic, this is numerical. On the cases measured this is the faster of the two: 3–70x on indeterminate limits (both exact) and ~6400x on a Taylor expansion to order 8, agreeing to 2.5e-15.
-- **vs mpmath** — mpmath is arbitrary-precision and carries the special-function library this does not (gamma, zeta, Bessel). On derivatives the two agree exactly: the 4th derivative of x⁴eˣ at 1 matches to all 15 digits. The difference is method — mpmath samples and extrapolates, so a limit is only as good as the extrapolation converges. On six harder limits it returned 0.99962 for xˣ as x→0⁺ and −2.7e−8 for x²·ln x, where reading the standard part off the algebra gives both exactly.
-- **vs dual numbers** — Classic dual numbers give you one derivative (epsilon squared is zero). Here epsilon squared is kept, so you get all orders.
+- **vs PyTorch/JAX** - They give first-order gradients, fast, and vectorised across a batch. This gives every order from one evaluation, plus limits and integration. Neither is a backend here, so no throughput ratio against them is quoted - the measurements below are against NumPy and SymPy, which are what this actually runs on.
+- **vs SymPy** - SymPy is symbolic, this is numerical. On the cases measured this is the faster of the two: 3–70x on indeterminate limits (both exact) and ~6400x on a Taylor expansion to order 8, agreeing to 2.5e-15.
+- **vs mpmath** - mpmath is arbitrary-precision and carries the special-function library this does not (gamma, zeta, Bessel). On derivatives the two agree exactly: the 4th derivative of x⁴eˣ at 1 matches to all 15 digits. The difference is method - mpmath samples and extrapolates, so a limit is only as good as the extrapolation converges. On six harder limits it returned 0.99962 for xˣ as x→0⁺ and −2.7e−8 for x²·ln x, where reading the standard part off the algebra gives both exactly.
+- **vs dual numbers** - Classic dual numbers give you one derivative (epsilon squared is zero). Here epsilon squared is kept, so you get all orders.
 
 ---
 
@@ -131,7 +133,7 @@ integrate(lambda x, y: x * y, (0, 1), (0, 1))  # 0.25
 
 ### Division by zero
 
-ZERO isn't Python's 0 — it's a structural infinitesimal, coefficient 1 at dimension −1. Operations on it are well-defined and reversible:
+ZERO isn't Python's 0 - it's a structural infinitesimal, coefficient 1 at dimension −1. Operations on it are well-defined and reversible:
 
 ```python
 from composite.composite_lib import ZERO, R
@@ -163,11 +165,11 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 
 ## Modules
 
-- **[composite_lib.py](composite/composite_lib.py)** — Core engine. Composite class, all arithmetic, transcendentals, derivatives, limits, integration.
-- **[composite_multivar.py](composite/composite_multivar.py)** — Multivariable calculus. MC class, partial derivatives, gradient, Hessian, Jacobian, Laplacian, divergence, curl.
-- **[composite_extended.py](composite/composite_extended.py)** — Complex analysis. Complex composites, residues, poles, contour integrals, asymptotics, ODE solver.
-- **[composite_vector.py](composite/composite_vector.py)** — Vector calculus. Triple integrals, line integrals, surface integrals.
-- **[backends/](composite/backends/)** — Interchangeable storage for the dimension map: dict, sparse-dense, vector-dimension, dense-series.
+- **[composite_lib.py](composite/composite_lib.py)** - Core engine. Composite class, all arithmetic, transcendentals, derivatives, limits, integration.
+- **[composite_multivar.py](composite/composite_multivar.py)** - Multivariable calculus. MC class, partial derivatives, gradient, Hessian, Jacobian, Laplacian, divergence, curl.
+- **[composite_extended.py](composite/composite_extended.py)** - Complex analysis. Complex composites, residues, poles, contour integrals, asymptotics, ODE solver.
+- **[composite_vector.py](composite/composite_vector.py)** - Vector calculus. Triple integrals, line integrals, surface integrals.
+- **[backends/](composite/backends/)** - Interchangeable storage for the dimension map: dict, sparse-dense, vector-dimension, dense-series.
 
 ---
 
@@ -177,14 +179,14 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 
 - Full arithmetic with dimensional convolution and deconvolution
 - Integer and real-exponent powers
-- Transcendentals — sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, exp, ln, sqrt, erf, erfc, normal_cdf
+- Transcendentals - sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, exp, ln, sqrt, erf, erfc, normal_cdf
 - All-order derivatives from a single evaluation
 - Algebraic limits including indeterminate forms and limits at infinity
 - Definite, improper, and adaptive integration with error estimates
-- Vector dimensions over an iterated-logarithm basis — log, loglog and deeper
+- Vector dimensions over an iterated-logarithm basis - log, loglog and deeper
   scales as ordinary arithmetic, at any depth, with the transcendentals
   accepting log-axis arguments
-- Completeness tracking — every value carries the highest order it is complete
+- Completeness tracking - every value carries the highest order it is complete
   to, propagated through each operation
 - TracedComposite for step-by-step operation logging
 
@@ -206,7 +208,7 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 
 ## Performance
 
-No single ratio — it depends on what you ask for. Measured on CPython/macOS, float64, one thread,
+No single ratio - it depends on what you ask for. Measured on CPython/macOS, float64, one thread,
 NumPy 1.26.4, SymPy 1.14.0.
 
 **Derivatives.** Tag a number, evaluate `1/(1+x)` once, read all ten derivatives off the result:
@@ -222,7 +224,7 @@ order and has run out of digits by order 10.
 A *single* first derivative goes the other way: NumPy does it in **0.2 µs** against **35 µs** here,
 roughly 140x. The crossover is around the third derivative.
 
-**Batches.** NumPy vectorises and this does not — four orders of magnitude per point. Structural.
+**Batches.** NumPy vectorises and this does not - four orders of magnitude per point. Pythorch and CUDA backends not present here support batching.
 
 **Sparse grids.** An explicit PDE whose active front stays at 121 cells: **24x faster** than a
 dense NumPy grid at 200,000 cells, **260x** at 2,000,000. Composite time is flat; the dense grid
@@ -231,7 +233,7 @@ pays for the whole domain whether anything is happening in it or not.
 **vs SymPy.** Indeterminate limits: **3–70x faster**, both exact. A Taylor expansion to order 8:
 0.6 ms against 3.7 s, about **6000x**, agreeing to 15 digits.
 
-**Pick the backend.** `use_dense_series()` for calculus — anything with transcendentals builds a
+**Backend selection.** `use_dense_series()` for calculus - anything with transcendentals builds a
 dense, contiguous series, and it is ~1.6x faster there than the alternatives. `use_dict()` for
 pure-arithmetic jets, where there is no series to lay out (~2x faster on `1/(1+x)`). The default
 `use_sparse_dense()` is the grid backend: several times slower on either kind of jet, and the one
@@ -316,7 +318,7 @@ Milovan, T. (2026). *Provenance-Preserving Arithmetic: A Unified Framework for A
 
 Contributions welcome. Useful areas:
 
-- Special functions — Bessel, gamma, etc.
+- Special functions - Bessel, gamma, etc.
 - Bug reports and edge cases
 - Docs and examples
 
@@ -334,7 +336,7 @@ Milovan, T. (2026). Composite Machine: Automatic Calculus via Dimensional Arithm
 
 ## License
 
-**Code:** AGPL-3.0. Free for open-source, research, and personal use. Commercial licensing available — contact [tmilovan@fwd.hr](mailto:tmilovan@fwd.hr).
+**Code:** AGPL-3.0. Free for open-source, research, and personal use. Commercial licensing available - contact [tmilovan@fwd.hr](mailto:tmilovan@fwd.hr).
 
 **Paper:** CC BY 4.0.
 
