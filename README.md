@@ -282,7 +282,6 @@ Milovan, T. (2026). *Provenance-Preserving Arithmetic: A Unified Framework for A
 - [**Examples**](docs/Examples.md) - Code snippets for common tasks
 - [**Roadmap (DRAFT)**](docs/Roadmap%20(DRAFT).md) - What's next
 - [**Zero Rules v2**](docs/Zero%20Rules%20v2%20%E2%80%94%20Formal%20Specification%20(DRAFT).md) - What a zero coefficient means, and how it behaves
-- ~~[**Changelog**](CHANGELOG.md) - What changed and why~~ *(not currently in the tree)*
 
 ---
 
