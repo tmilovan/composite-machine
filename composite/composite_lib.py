@@ -1777,10 +1777,39 @@ def exp(x, terms=15):
                 t = _vec_composite({tuple(_tgt): 1.0})
                 out = t if out is None else out * t
             if _rest:
+                # _rest CAN HOLD SCALAR DIMENSIONS next to vector ones.  ln()
+                # puts a term on the log axis whatever backend it was called
+                # on (see _carries_vector), so a scalar backend routinely ends
+                # up mixing the two, and everything below indexes dimensions
+                # positionally.  Taking len() of a scalar key is what crashed
+                # (ZERO/2)**0.5 on DictBackend with "object of type 'int' has
+                # no len()" -- while the same expression was fine on the two
+                # array backends, whose to_arrays hands back uniform tuples.
+                # A bare ZERO**0.5 missed it because its remainder is empty.
+                #
+                # Promote every key to one width first.  A scalar dimension d
+                # IS the vector dimension (d, 0, ...): d on the power axis,
+                # nothing on the log axes.
+                _w = max([len(_d) for _d in _rest if isinstance(_d, tuple)]
+                         + [len(_vec_unit(0))])
+
+                def _as_vec(_d):
+                    if isinstance(_d, tuple):
+                        return _d + (0,) * (_w - len(_d))
+                    return (_d,) + (0,) * (_w - 1)
+
+                _wide = {}
+                for _d, _v in _rest.items():
+                    _k = _as_vec(_d)
+                    # Two spellings of one dimension must ADD, not overwrite:
+                    # a scalar 0 and a tuple (0, 0) are the same term.
+                    _wide[_k] = _wide.get(_k, 0.0) + _v
+                _rest = _wide
+
                 # A remainder that is only the standard part needs no series --
                 # and recursing would rebuild it through the ACTIVE backend,
                 # which cannot hold vector dimensions.
-                _zero = tuple(0 for _ in range(len(next(iter(_rest)))))
+                _zero = tuple(0 for _ in range(_w))
                 if set(_rest) <= {_zero}:
                     out = out * _vec_composite(
                         {_zero: math.exp(_rest.get(_zero, 0.0))})

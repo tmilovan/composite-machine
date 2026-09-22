@@ -184,9 +184,58 @@ def b4_battery(t):
                    % (depth, floor, worst, holes[:4] or "none"))
 
 
+def b5_fractional_power_of_a_scaled_infinitesimal(t):
+    head("B5  a fractional power of a SCALED infinitesimal, on every backend")
+    # ZERO ** 0.5 worked everywhere; (ZERO/2) ** 0.5 raised TypeError on
+    # DictBackend alone -- "object of type 'int' has no len()".
+    #
+    # ** routes through exp(n * ln(x)), and ln() puts a term on the LOG AXIS
+    # whatever backend it was called on, so a scalar backend ends up holding
+    # tuple dimensions next to scalar ones.  exp's remainder branch indexed
+    # those keys positionally.  A unit coefficient missed it because its
+    # remainder is empty; a scaled one did not.
+    #
+    # This is the half grade, and the half grade IS the branch point: the two
+    # roots leaving a DOUBLE root under a coefficient perturbation go as
+    # eps**(1/2), which no float can hold.  Losing it on one backend loses
+    # exactly the case composites are there for.
+    cases = [
+        ("ZERO ** 0.5",           lambda cl, C, R: (C({-1: 1.0}) ** 0.5),      -0.5, 1.0),
+        ("(ZERO/2) ** 0.5",       lambda cl, C, R: ((C({-1: 1.0}) / 2.0) ** 0.5),
+         -0.5, 1.0 / math.sqrt(2.0)),
+        ("(3*ZERO) ** 0.5",       lambda cl, C, R: ((R(3) * C({-1: 1.0})) ** 0.5),
+         -0.5, math.sqrt(3.0)),
+        ("ZERO ** 0.25",          lambda cl, C, R: (C({-1: 1.0}) ** 0.25),     -0.25, 1.0),
+        ("(ZERO/2) ** 2",         lambda cl, C, R: ((C({-1: 1.0}) / 2.0) ** 2), -2.0, 0.25),
+    ]
+    for i, (lbl, fn, grade, coeff) in enumerate(cases, 1):
+        vals = {}
+        for bk in BACKENDS:
+            try:
+                vals[bk] = _under(bk, lambda cl, C, R: fn(cl, C, R).coeffs_dict())
+            except Exception as e:
+                vals[bk] = "%s: %s" % (type(e).__name__, e)
+        bad = [bk for bk, v in vals.items() if not isinstance(v, dict)]
+        t.true(f"B5.{i:02d} {lbl} evaluates on all three backends"
+               + (f"  -- {bad}: {vals[bad[0]]}" if bad else ""),
+               not bad, str(vals))
+        if bad:
+            continue
+        got = {bk: v.get(grade) for bk, v in vals.items()}
+        t.true(f"B5.{i:02d}b {lbl} -> grade {grade} on all three: "
+               + ", ".join("%s %s" % (b, "%.12g" % g if g is not None else "MISSING")
+                           for b, g in got.items()),
+               all(g is not None for g in got.values()), str(vals))
+        if all(g is not None for g in got.values()):
+            worst = max(abs(g - coeff) for g in got.values())
+            t.true(f"B5.{i:02d}c coefficient {coeff:.12g}, worst deviation {worst:.2e}",
+                   worst <= 1e-15, str(got))
+
+
 def run_all():
     t = Suite()
     for fn in (b1_product_leading_grade, b2_non_terminating_quotient,
+               b5_fractional_power_of_a_scaled_infinitesimal,
                b3_lattice_phase, b4_battery):
         try:
             fn(t)
