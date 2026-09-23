@@ -336,7 +336,12 @@ class SparseDenseBackend(CompositeBackend):
             if off >= lo:
                 out.append((off, v))           # entirely above
             else:
-                out.append((lo, v[lo - off:]))  # trim the low end
+                # `off` is a float64 dimension, so `lo - off` is a float and
+                # cannot index.  It is also fractional whenever the run sits on
+                # a half grade (sqrt), and there the first surviving term is the
+                # first one at or above the cut -- hence ceil, not round.
+                start = int(math.ceil(lo - off))
+                out.append((off + start, v[start:]))  # trim the low end
         if len(out) == len(data.runs) and all(
                 a is b for (_, a), (_, b) in zip(out, data.runs)):
             return data

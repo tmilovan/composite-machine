@@ -60,3 +60,26 @@ from composite.singularity import (
     radius,                 # radius of convergence from coefficient growth
     Singularity,
 )
+
+# Measurement uncertainty budgets (JCGM 100:2008, the GUM) and the decision the
+# GUM leaves to the engineer: whether the linearised budget is admissible at
+# all, or whether Supplement 1 requires a Monte Carlo propagation instead.
+# First-order propagation by automatic differentiation is well served
+# elsewhere; what is here is the bias, the higher-order variance, the output
+# moments, and the Supplement 1 validation run against those moments.
+from composite import uncertainty
+from composite.uncertainty import (
+    Quantity,           # an input: estimate, standard uncertainty, distribution
+    budget,             # model + inputs -> the budget, and the verdict on it
+    montecarlo,         # GUM-S1 clause 7 sampling, for checking or for falling back to
+    Budget, Contribution,
+    NORMAL, RECTANGULAR, TRIANGULAR, ARCSINE,
+)
+
+# One question, asked constantly and answered badly: what does this function do
+# AT that point?  float64 answers nan; a plot answers slowly and approximately.
+# `explain` seeds the input with an infinitesimal and reads the answer off the
+# grades -- the value where the formula divides 0 by 0, the order of a pole, a
+# corner where the slope is infinite, a log divergence -- and then asks
+# forensics whether the spelling loses digits it did not have to.
+from composite.explain import explain, Explanation

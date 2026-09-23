@@ -255,6 +255,29 @@ Python 3.7+. NumPy is optional (used for FFT-accelerated multiplication).
 
 ---
 
+## Demos
+
+Each one runs on its own and prints what it computed against a known answer.
+
+```bash
+python demos/composite_forensics.py        # start here
+```
+
+| demo | what it shows |
+|---|---|
+| [`composite_forensics.py`](demos/composite_forensics.py) | Is the formula bad, or is the problem hard? The two spellings of a quadratic root, one losing 25% of the answer, and the verdict that separates them. Also the failure float64 cannot see: a value that is right while its derivative is not. |
+| [`composite_physics.py`](demos/composite_physics.py) | Dirac hydrogen to α⁸ from one evaluation, zero-point mode sums with the divergent and finite parts on separate grades, Schwarzschild at the horizon and near r = 0. 44 checks against closed forms. |
+| [`composite_roots.py`](demos/composite_roots.py) | Global root finding: intervals *proved* empty by a Taylor bound rather than sampled and hoped for, then Householder polishing that costs nothing because the derivatives are already there. |
+| [`composite_singularity.py`](demos/composite_singularity.py) | A power series locating its own nearest singularity and exponent, which is the blow-up time of an ODE and the critical point of a lattice model. |
+| [`composite_stability_radius.py`](demos/composite_stability_radius.py) | How much can one road get slower before the best route changes? One solve instead of one re-solve per edge. |
+| [`calculus_tutor.py`](demos/calculus_tutor.py) | An interactive console tutor: what the dimensions are doing while calculus happens. |
+
+The forensics demo prints a few warnings before its first table. They are part of
+the demonstration, not breakage: the R1 notice fires because the demo audits
+formulas that contain written zeros, which is the fault it is there to catch.
+
+---
+
 ## Testing
 
 ```bash

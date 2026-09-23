@@ -561,9 +561,10 @@ class Composite:
         if _is_unit(self):
             return other
         a, b = _operands(self, other)
-        return Composite._wrap(
-            _truncate_dims(a._backend, a._backend.convolve(a._data, b._data)),
-            a._backend, complete=_min_complete(self, other))
+        data, complete = _capped(a._backend,
+                                 a._backend.convolve(a._data, b._data),
+                                 _min_complete(self, other))
+        return Composite._wrap(data, a._backend, complete=complete)
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -725,6 +726,67 @@ class Composite:
     def d(self, n=1):
         """Extract nth derivative."""
         return self._backend.read_dim(self._data, -n) * math.factorial(n)
+
+    def lead_dim(self):
+        """The dominant dimension: the one that decides how big this number is.
+
+        Zero coefficients are skipped -- a term that cancelled does not decide
+        the size of the number -- and the comparison is the backend's dominance
+        order, so a power beats a log at the same nominal order.  None when the
+        composite is nothing, or holds only zeros.
+        """
+        dims, vals = self._backend.to_arrays(self._data)
+        nz = [d for d, v in zip(dims, vals) if v != 0.0]
+        if not nz:
+            return None
+        from composite.backends.vector_dim_backend import dom_sorted as _dom_sorted
+        return _dom_sorted(nz, reverse=True)[0]     # biggest dimension = dominant term
+
+    def lead_order(self):
+        """Order of the dominant term: positive infinitesimal, negative unbounded.
+
+        The public way to ask "how big is this number", across every axis.
+        Reading `max(coeffs_dict())` instead is the trap: a log-axis grade is a
+        tuple, comparing it with an integer raises, and `_dim_order` reads only
+        the power component, so `x*ln(x)` (grade (-1, 1)) looks like order 0.
+
+            R(3).lead_order()          ->  0     an ordinary number
+            ZERO.lead_order()          ->  1     infinitesimal, first order
+            (ZERO*ZERO).lead_order()   ->  2     infinitesimal, second order
+            (R(1)/ZERO).lead_order()   -> -1     unbounded, first order
+            sqrt(ZERO).lead_order()    ->  0.5   a half order: a branch point
+            Composite({}).lead_order() ->  None  nothing
+
+        `lead_dim` says WHICH axis that order is on: ln(ZERO) leads on the log
+        axis, so its order is read there, not on the power axis.
+        """
+        d = self.lead_dim()
+        if d is None:
+            return None
+        order = _lead_order(d)
+        return order + 0.0 if isinstance(order, float) else order   # never -0.0
+
+    def _fn_result(self, result, fn):
+        """Hook: `result` is what a library function made from this operand.
+
+        A plain composite keeps it as it is, so this costs nothing.  A subclass
+        that carries state beside the coefficients -- the forensics audit and
+        its error form -- overrides this to re-attach that state, which is why
+        every transcendental hands its result back through its argument.
+
+        The argument is handed in PLAIN (see `_preserves_type`), so the
+        function's own Taylor loops run on ordinary composites and a subclass
+        never sees the library's internal arithmetic.
+        """
+        return result
+
+    def _as_plain(self):
+        """This composite as a plain Composite, sharing the same data."""
+        if type(self) is Composite:
+            return self
+        plain = Composite(_data=self._data)
+        plain._complete = self._complete
+        return plain
 
     def __format__(self, fmt):
         """Support format strings by formatting the standard part."""
@@ -988,6 +1050,51 @@ def _refresh_constants():
 MAX_ACTIVE_DIMS = 60
 
 
+def _order_cap(backend, data):
+    """Drop terms below the order the caller asked for with `set_max_order`.
+
+    The knob used to reach one backend's convolve and nothing else, so on dict
+    and dense-series it set an attribute nobody read, and even on sparse-dense
+    it left the series a transcendental had just built untouched.  Asking for
+    order 1 and paying for order 50 is not a constant tax: every operand keeps
+    the terms, so each multiply is a 50x50 convolution instead of 2x2, and in an
+    iterated computation the count grows at every step.  Measured on a fixed
+    point: 45x, and rising with the iteration count.
+
+    Applied here because this is the choke point every product already passes
+    through.  Only terms BELOW dimension -max_order go; infinities and the
+    standard part are never touched.
+    """
+    cap = getattr(backend, "max_order", None)
+    if cap is None:
+        return data
+    dims, vals = backend.to_arrays(data)
+    keep = [i for i, d in enumerate(dims) if _dim_order(d) <= cap]
+    if len(keep) == len(dims):
+        return data
+    idx = np.array(keep, dtype=int)
+    _order_cap.bit = True          # something was dropped; the caller tightens
+    return backend.create_from_terms(dims[idx], vals[idx])
+
+
+_order_cap.bit = False
+
+
+def _capped(backend, data, complete):
+    """Truncate, and report the cap in the completeness bound.
+
+    A dropped term is exactly what `complete_order` exists to record: the
+    result is right only to the order the cap left standing, and saying so is
+    the difference between a cheaper answer and a quietly wrong one.
+    """
+    _order_cap.bit = False
+    out = _truncate_dims(backend, data)
+    if _order_cap.bit:
+        complete = _tighter(complete, getattr(backend, "max_order", None))
+        _order_cap.bit = False
+    return out, complete
+
+
 def _truncate_dims(backend, data):
     """Keep the MAX_ACTIVE_DIMS dimensions closest to dim 0.
 
@@ -995,6 +1102,7 @@ def _truncate_dims(backend, data):
     Without this, sin(atan(sin(atan(x)))) produces 100k+ dims
     with overflow that corrupts the derivative tower.
     """
+    data = _order_cap(backend, data)
     # Check the count BEFORE materialising: this runs on every multiply, and
     # the overwhelming majority of products are under the cap, so flattening
     # first meant paying for the flat form purely to discover it was not needed.
@@ -1029,6 +1137,47 @@ def _seeded(at):
     if at == 0:
         return x
     return x + ZERO
+
+@_contextlib.contextmanager
+def _full_order():
+    """Suspend the caller's order cap for one library routine.
+
+    `set_max_order` is an economy for the caller's own arithmetic: it says "I
+    only want this many orders back".  It is not a statement about how much
+    depth the library may use internally to produce them.  Integration panels,
+    limits and series solvers all build deep intermediate expansions and then
+    read one number off the end, so a cap applied to them does not return a
+    coarser answer -- it returns a quietly wrong one (integral of e^-x over
+    [0,1] came back 1.3e-06 low, with nothing raised).
+
+    Derivative extraction handles this in `_derivative_scope`, which lifts the
+    cap to the order requested.  Here there is no order to ask for, so the cap
+    is lifted entirely and restored afterwards.
+    """
+    backend = get_backend()
+    old = getattr(backend, "max_order", None)
+    if old is not None:
+        backend.max_order = None
+    try:
+        yield
+    finally:
+        if old is not None:
+            backend.max_order = old
+
+
+def _needs_full_order(fn):
+    """Run `fn` with the caller's order cap suspended."""
+
+    def wrapper(*args, **kwargs):
+        with _full_order():
+            return fn(*args, **kwargs)
+
+    wrapper.__name__ = getattr(fn, "__name__", "wrapper")
+    wrapper.__qualname__ = getattr(fn, "__qualname__", wrapper.__name__)
+    wrapper.__doc__ = fn.__doc__
+    wrapper.__wrapped__ = fn
+    return wrapper
+
 
 def set_max_order(n: int = None):
     """Set global MAX truncation order."""
@@ -1066,14 +1215,24 @@ def _derivative_scope(order, terms):
     that otherwise reach 100k+ dims).
     """
     global MAX_ACTIVE_DIMS
+    backend = get_backend()
     old_min, old_cap = _min_terms[0], MAX_ACTIVE_DIMS
+    old_order = getattr(backend, "max_order", None)
     _min_terms[0] = max(terms, order + 2)
     MAX_ACTIVE_DIMS = max(MAX_ACTIVE_DIMS, order + 8)
+    # A global order cap set by the caller is an economy, not a ceiling on what
+    # an extraction may ask for: with cap 2, nth_derivative(..., n=4) returned
+    # 0.0 and said nothing.  Lift it to cover the order requested and restore it
+    # after, exactly as the dimension cap above is handled.
+    if old_order is not None:
+        backend.max_order = max(old_order, order + 2)
     try:
         yield
     finally:
         _min_terms[0] = old_min
         MAX_ACTIVE_DIMS = old_cap
+        if old_order is not None:
+            backend.max_order = old_order
 
 # =============================================================================
 # TAYLOR SERIES FOR TRANSCENDENTAL FUNCTIONS
@@ -4711,6 +4870,61 @@ def run_tests():
     print("=" * 60)
 
     return passed == len(tests)
+
+
+# =============================================================================
+# TYPE PRESERVATION ACROSS THE ELEMENTARY FUNCTIONS
+# =============================================================================
+#
+# `cos(x)` built its result with `Composite(...)`, so a subclass handed in as
+# `x` was dropped at the first call and everything after it ran unwatched.
+# That is why forensics needed its own namespace (`F.cos`): it re-wrapped the
+# result afterwards, and a formula written against the library's own `cos`
+# silently came back "stable".
+#
+# Here the function hands its result back through the operand's `_fn_result`
+# hook instead.  Three properties matter:
+#
+#   plain in, plain out   `type(x) is Composite` takes the fast path and this
+#                         costs one type check.
+#   internals stay plain  the argument is downcast before the function runs, so
+#                         the Taylor loops inside never see a subclass and a
+#                         subclass never records the library's own arithmetic.
+#   opt-in                a subclass that does not override `_fn_result` gets
+#                         exactly the old behaviour.
+
+def _preserves_type(fn):
+    """Run `fn` on a plain composite, then hand the result back through `x`."""
+
+    def wrapper(x, *args, **kwargs):
+        if type(x) is Composite or not isinstance(x, Composite):
+            return fn(x, *args, **kwargs)
+        return x._fn_result(fn(x._as_plain(), *args, **kwargs), fn)
+
+    wrapper.__name__ = getattr(fn, "__name__", "wrapper")
+    wrapper.__qualname__ = getattr(fn, "__qualname__", wrapper.__name__)
+    wrapper.__doc__ = fn.__doc__
+    wrapper.__wrapped__ = fn
+    return wrapper
+
+
+for _fname in ("sin", "cos", "tan", "exp", "ln", "sqrt", "sinh", "cosh",
+               "tanh", "atan", "asin", "acos", "erf", "erfc", "normal_cdf"):
+    if _fname in globals():
+        globals()[_fname] = _preserves_type(globals()[_fname])
+del _fname
+
+
+# Routines that build deep intermediate series and read one number off the end.
+# A caller's order cap is an economy on what comes BACK, never a budget for the
+# work in between: capped, these degraded silently instead of getting cheaper.
+for _fname in ("limit", "limit_right", "limit_left", "integrate",
+               "integrate_stepped", "integrate_adaptive", "improper_integral",
+               "improper_integral_both", "improper_integral_to",
+               "antiderivative"):
+    if _fname in globals():
+        globals()[_fname] = _needs_full_order(globals()[_fname])
+del _fname
 
 
 # =============================================================================

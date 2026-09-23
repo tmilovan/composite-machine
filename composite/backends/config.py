@@ -17,6 +17,14 @@ def get_backend():
 
 def set_backend(backend):
     global _active_backend
+    # The order cap is the CALLER's setting, not the backend's: it says how many
+    # orders they want back, which has nothing to do with how the coefficients
+    # are stored.  It lived on the backend instance, so switching storage in the
+    # middle of a computation silently dropped it and the work went back to full
+    # depth -- the knob appearing to fail again, for a different reason.
+    carried = getattr(_active_backend, "max_order", None)
+    if carried is not None and getattr(backend, "max_order", None) is None:
+        backend.max_order = carried
     _active_backend = backend
     # ZERO / INF / h are module constants built at import time; rebuild them so
     # they follow the active backend.  Imported lazily to avoid a cycle, and

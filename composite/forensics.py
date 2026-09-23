@@ -76,6 +76,7 @@ EPS = 2.220446049250313e-16
 __all__ = [
     "audit", "compare", "table", "report", "Audit", "Finding", "F", "EPS",
     "STABLE", "ILL_CONDITIONED", "UNSTABLE", "DERIVATIVE_LOST", "REFUSED",
+    "NOT_INSTRUMENTED",
 ]
 
 STABLE = "stable"
@@ -83,6 +84,7 @@ ILL_CONDITIONED = "ill-conditioned problem"
 UNSTABLE = "unstable formula"
 DERIVATIVE_LOST = "derivative corrupted"
 REFUSED = "refused"
+NOT_INSTRUMENTED = "not instrumented"   # the formula never touched the seeded input
 
 _CANCEL = 100.0     # (|a|+|b|)/|a+-b| worth reporting
 _ABSORB = 1e-8      # min/max operand ratio at which the small one is being eaten
@@ -115,7 +117,7 @@ class Audit:
     """The result of auditing one formula at one input."""
 
     def __init__(self, name, at, value, derivative, kappa, error_bound,
-                 findings, exception=None):
+                 findings, exception=None, instrumented=True):
         self.name = name
         self.at = at
         self.value = value              # standard part
@@ -124,6 +126,7 @@ class Audit:
         self.error_bound = error_bound  # absolute, first-order, from an exact input
         self.findings = sorted(findings, key=lambda f: -f.amp)
         self.exception = exception
+        self.instrumented = instrumented
 
     # -- the two numbers ----------------------------------------------------
 
@@ -182,6 +185,14 @@ class Audit:
     def verdict(self):
         if self.exception is not None:
             return REFUSED
+        if not self.instrumented:
+            # The formula handed back a bare float: it left the composite at a
+            # math.* call or an explicit float(), and nothing after that point
+            # was watched.  "stable" here would be a guess dressed as a result,
+            # and the wrong one -- escaping to float is how digits get lost
+            # unwatched.  A CONSTANT is different: it never used the input, but
+            # it is a composite and it loses nothing, so it stays stable.
+            return NOT_INSTRUMENTED
         if self.value == 0.0 and self.error_bound > 0.0:
             # Defensive and, as it stands, redundant: `predicted` already
             # returns inf here and kappa is nan, so `floor` falls back to EPS
@@ -212,6 +223,10 @@ class Audit:
     @property
     def advice(self):
         v = self.verdict
+        if v == NOT_INSTRUMENTED:
+            return ("nothing to audit -- the formula never used the seeded input; "
+                    "write it against the library's functions (sin, cos, exp, ...) "
+                    "rather than math.* or float()")
         if v == UNSTABLE:
             c = self.culprit
             if c is None:
@@ -390,6 +405,27 @@ class _Audited(Composite):
             return t
         return r
 
+    def _fn_result(self, result, fn):
+        """A library function's result, re-wrapped with this operand's error form.
+
+        composite_lib hands every elementary function's result back through its
+        argument (`_preserves_type`), so writing a formula against the library's
+        own `cos` now carries the audit.  `F.cos` did this from the outside and
+        stays as an alias.
+
+        The error rule needs |f'(a)| at this node: one extra evaluation of `fn`
+        on a seeded scalar, exact and with no step size.  The argument reached
+        `fn` as a plain composite, so nothing inside it was recorded.
+        """
+        slope = _slope(fn, _sval(self))
+        sr = _sval(result)
+        if sr is None or slope is None or math.isnan(slope):
+            e = {"overflow": float("inf")}
+        else:
+            e = _lin((slope, _err(self)))
+            e.update(_fresh(EPS * abs(sr)))
+        return self._rewrap(result, e)
+
 
 def _binary(name, symbol, err_rule, additive, reverse=False):
     """Build one operator: run it, propagate its error form, record its fault."""
@@ -563,6 +599,9 @@ def audit(f, at, name=None):
             ArithmeticError, ValueError) as e:
         out, exc = None, e
     findings, _ledger = _ledger, None
+    # Did the formula actually run on the seeded input?  A math.* call or an
+    # explicit float() hands back a plain number and the audit saw nothing.
+    instrumented = (exc is not None or isinstance(out, Composite) or bool(findings))
 
     value = derivative = kappa = float("nan")
     bound = float("nan")
@@ -582,7 +621,8 @@ def audit(f, at, name=None):
             kappa = float("nan")     # undefined: there is no relative scale left
         elif not math.isnan(value):
             kappa = abs(at * derivative / value)
-    return Audit(name, at, value, derivative, kappa, bound, findings, exc)
+    return Audit(name, at, value, derivative, kappa, bound, findings, exc,
+                 instrumented=instrumented)
 
 
 def compare(variants, at, reference=None):
