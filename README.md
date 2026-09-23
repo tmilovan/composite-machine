@@ -44,6 +44,31 @@ For example, it gives you derivatives, integrals, and limits as a side effect of
 > *The residue is infinitesimal, structured, and it contains the derivative of every operation that produced it.*
 >
 
+Euler got here first. In *Institutiones calculi differentialis* (1755), Part I, Chapter 3
+(*De infinitis et infinite parvis*), §84-§88, he says an infinitely small quantity really is
+zero, and that this is not a problem, because there are two ways two quantities can be equal:
+arithmetically, when *a* − *b* = 0, and geometrically, when *a*/*b* = 1. Any two zeros are
+equal in the first way but not in the second. So d*x* = 0 and *a*·d*x* = 0, and still
+*a*·d*x* : d*x* = *a* : 1. In §86 he says the whole force of the differential calculus is
+finding that ratio.
+
+Then in §85 he says what to do about it:
+
+> Since any ratio whatever can hold between zeros, various characters are deliberately used
+> to indicate this diversity ... otherwise the business would slide into the greatest confusion
+> and could not be sorted out in any way.
+>
+> *ad hanc diversitatem indicandam consulto varii characteres usurpantur ... in maximam
+> confusionem illaberetur neque ullo modo expediri posset.*
+
+Different zeros need different characters, or the ratio between them is lost. Here the
+characters are dimensions: `|0|₀`, `|1|₋₁`, `|1|₋₂` are different zeros, and the arithmetic
+keeps their ratios. Euler tracked the ratio by reasoning about it next to the calculation.
+Here it is kept in the number, so it is still there for the next operation. In §88 he also
+orders zeros by how fast they vanish, d*x*² before d*x*, which is the dimension ladder.
+
+Euler states infinitesimal iz zero, so it follows that zero is infinitesimal.
+
 Alpha stage. Research code. The math works, ~~performance doesn't (yet)~~. AGPL-licensed. A PyTorch/CUDA backend is available under commercial license."
 
 ---
@@ -73,7 +98,7 @@ One evaluation. All derivatives fall out. No separate differentiation pass.
 
 The derivative computation part builds on well-known work: Clifford's **dual numbers** (1873), Wengert's **forward-mode AD** (1964), Rall's **Taylor arithmetic** (1981), Griewank's framework (2000).
 
-The number system has a separate and older lineage. A sparse map from exponents to coefficients, with non-integer exponents and finitely many terms below any given one, is the shape of the **Levi-Civita field** (Levi-Civita, 1892–1898) - the smallest non-Archimedean ordered field extension of the reals that is real-closed and Cauchy-complete. Letting an exponent be a *vector* ordered lexicographically instead of a single number gives **Hahn series** (Hahn, 1907), which is what the iterated-logarithm basis here amounts to: dimensions valued in an ordered group, compared componentwise. The scale those vectors index - *x*, log *x*, log log *x*, ranked by eventual dominance - is du Bois-Reymond's *Infinitärcalcül* as set out in Hardy's **Orders of Infinity** (1910), and the **Hardy fields** built on it. Expansions that mix powers, exponentials and iterated logs are **transseries** (Écalle, 1992; van der Hoeven, 2006). The infinitesimals themselves are made rigorous by Robinson's **non-standard analysis** (1966), and the surreals (Conway, 1976) contain the Levi-Civita field as a subfield.
+The number system has a separate and older lineage. A sparse map from exponents to coefficients, with non-integer exponents and finitely many terms below any given one, is the shape of the **Levi-Civita field** (Levi-Civita, 1892-1898) - the smallest non-Archimedean ordered field extension of the reals that is real-closed and Cauchy-complete. Letting an exponent be a *vector* ordered lexicographically instead of a single number gives **Hahn series** (Hahn, 1907), which is what the iterated-logarithm basis here amounts to: dimensions valued in an ordered group, compared componentwise. The scale those vectors index - *x*, log *x*, log log *x*, ranked by eventual dominance - is du Bois-Reymond's *Infinitärcalcül* as set out in Hardy's **Orders of Infinity** (1910), and the **Hardy fields** built on it. Expansions that mix powers, exponentials and iterated logs are **transseries** (Écalle, 1992; van der Hoeven, 2006). The infinitesimals themselves are made rigorous by Robinson's **non-standard analysis** (1966), and the surreals (Conway, 1976) contain the Levi-Civita field as a subfield.
 
 Computing in such a field, rather than reasoning about it, also has prior art. Berz framed **automatic differentiation as non-Archimedean analysis** (1992), and Shamseddine and Berz developed numerical analysis directly on the Levi-Civita field, including derivatives of functions where classical AD breaks down. Sergeyev's **grossone** (2003 onward) is the closest in representation: a positional numeral system in powers of an infinite unit ①, with the infinitesimal ①⁻¹, used on an "Infinity Computer" for exact higher-order differentiation, ODE solvers and lexicographic optimization - the same records as the dimensions here, written in a different notation. Grossone keeps the ordinary zero (0·① = 0, ① − ① = 0); this library does not, and that is where the two part ways. The overlap is worth stating plainly: the algebra here is not new, and where this library's structures coincide with those, the credit is theirs.
 
@@ -92,7 +117,7 @@ The numbers under [Performance](#performance) are measured, not asserted, and th
 not all point the same way.
 
 - **vs PyTorch/JAX** - They give first-order gradients, fast, and vectorised across a batch. This gives every order from one evaluation, plus limits and integration. Neither is a backend here, so no throughput ratio against them is quoted - the measurements below are against NumPy and SymPy, which are what this actually runs on.
-- **vs SymPy** - SymPy is symbolic, this is numerical. On the cases measured this is the faster of the two: 3–70x on indeterminate limits (both exact) and ~6400x on a Taylor expansion to order 8, agreeing to 2.5e-15.
+- **vs SymPy** - SymPy is symbolic, this is numerical. On the cases measured this is the faster of the two: 3-70x on indeterminate limits (both exact) and ~6400x on a Taylor expansion to order 8, agreeing to 2.5e-15.
 - **vs mpmath** - mpmath is arbitrary-precision and carries the special-function library this does not (gamma, zeta, Bessel). On derivatives the two agree exactly: the 4th derivative of x⁴eˣ at 1 matches to all 15 digits. The difference is method - mpmath samples and extrapolates, so a limit is only as good as the extrapolation converges. On six harder limits it returned 0.99962 for xˣ as x→0⁺ and −2.7e−8 for x²·ln x, where reading the standard part off the algebra gives both exactly.
 - **vs dual numbers** - Classic dual numbers give you one derivative (epsilon squared is zero). Here epsilon squared is kept, so you get all orders.
 
@@ -230,7 +255,7 @@ roughly 140x. The crossover is around the third derivative.
 dense NumPy grid at 200,000 cells, **260x** at 2,000,000. Composite time is flat; the dense grid
 pays for the whole domain whether anything is happening in it or not.
 
-**vs SymPy.** Indeterminate limits: **3–70x faster**, both exact. A Taylor expansion to order 8:
+**vs SymPy.** Indeterminate limits: **3-70x faster**, both exact. A Taylor expansion to order 8:
 0.6 ms against 3.7 s, about **6000x**, agreeing to 15 digits.
 
 **Backend selection.** `use_dense_series()` for calculus - anything with transcendentals builds a
@@ -301,7 +326,7 @@ installed instead of the working copy.
 
 | suite | tests | covers |
 |---|---|---|
-| `test_standalone.py` | 167 | paper theorems T1–T8, algebra, derivatives, limits, zero division |
+| `test_standalone.py` | 167 | paper theorems T1-T8, algebra, derivatives, limits, zero division |
 | `test_vector_dimensions.py` | 150 | vector dimensions, depth genericity, log-axis transcendentals |
 | `test_dimension_scales.py` | 131 | dimensions that are not integers, and not scalars |
 | `test_limits.py` | 105 | indeterminate forms, oscillatory, at infinity, directional, domain errors |
