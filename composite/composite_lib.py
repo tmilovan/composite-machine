@@ -606,7 +606,16 @@ class Composite:
             div_dim = _bd if isinstance(_bd, tuple) else float(_bd)
             div_coeff = b._backend.read_dim(b._data, div_dim)
             my_dims, my_vals = a._backend.to_arrays(a._data)
-            if isinstance(div_dim, tuple):
+            # Either side may carry vector dimensions.  Testing only the DIVISOR
+            # missed the common half of it: ln(h) / R(2) has tuple dims above a
+            # scalar below, and `my_dims - div_dim` is then tuple minus float,
+            # which raises.  It surfaced on the dict backend, whose to_arrays
+            # hands back the tuples as written; the other two normalise first
+            # and so hid it.  Ask about the dimensions actually being shifted.
+            _vector = isinstance(div_dim, tuple) or (
+                getattr(my_dims, "dtype", None) == object
+                and any(isinstance(d, tuple) for d in my_dims))
+            if _vector:
                 # Vector dimensions subtract componentwise; object arrays do not
                 # broadcast `-`, so shift each one explicitly.  PAD FIRST: zip
                 # over different-length tuples truncates to the shorter and
@@ -4129,6 +4138,43 @@ def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms:
 # FIXED: integrate_adaptive — recursive bisection with Taylor error
 # =============================================================================
 
+
+def _integrate_by_sampling(f, a, b, tol=1e-10, max_depth=40):
+    """Adaptive Simpson on real evaluations: the fallback for branchy integrands.
+
+    Used when the integrand does not carry composite structure through -- a step,
+    a piecewise definition, a lookup -- so there is no expansion to read an error
+    off.  Simpson on [a, b] against Simpson on its two halves is the classical
+    estimate, and bisecting where they disagree corners a discontinuity instead
+    of straddling it.
+
+    Returns (Composite, float) to match `integrate_adaptive`.
+    """
+    def val(x):
+        y = f(R(x))
+        return float(y.st()) if isinstance(y, Composite) else float(y)
+
+    def simpson(x0, x2, f0, f1, f2):
+        return (x2 - x0) / 6.0 * (f0 + 4.0 * f1 + f2)
+
+    def rec(x0, x2, f0, f1, f2, whole, depth):
+        xm1, xm2 = (x0 + (x0 + x2) / 2) / 2, ((x0 + x2) / 2 + x2) / 2
+        fm1, fm2 = val(xm1), val(xm2)
+        left = simpson(x0, (x0 + x2) / 2, f0, fm1, f1)
+        right = simpson((x0 + x2) / 2, x2, f1, fm2, f2)
+        delta = left + right - whole
+        if depth >= max_depth or abs(delta) <= 15.0 * tol * max(1.0, abs(left + right)):
+            return left + right + delta / 15.0, abs(delta) / 15.0
+        lv, le = rec(x0, (x0 + x2) / 2, f0, fm1, f1, left, depth + 1)
+        rv, re = rec((x0 + x2) / 2, x2, f1, fm2, f2, right, depth + 1)
+        return lv + rv, le + re
+
+    f0, f1, f2 = val(a), val((a + b) / 2.0), val(b)
+    whole = simpson(a, b, f0, f1, f2)
+    value, err = rec(a, b, f0, f1, f2, whole, 0)
+    return Composite({0: value}), err
+
+
 def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4,
                        lane=None):
     """Adaptive integration via composite Taylor convergence.
@@ -4165,12 +4211,34 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4,
         1 if _integrand_needs_lane(f, _lane_probe_points(a, b)) else 0)
 
     probe = _ensure_composite(f(_seeded((a + b) / 2)))
-    if not any(_dim_negative(dim) for dim in probe.c):
-        import warnings
-        warnings.warn(
-            "integrate_adaptive: f does not propagate composite structure to output. "
-            "Falling back to midpoint rule (no adaptive refinement for this integrand).",
-            stacklevel=2)
+    # A PLAIN REAL, and nothing else.  Carrying any other grade means the
+    # integrand does propagate structure -- the seeded parameter of a Borel
+    # transform, a line integral's tangent, an integrand with its own
+    # infinitesimal content -- and sampling would silently throw those grades
+    # away, which is a worse failure than the one being fixed.
+    _plain = [d for d, v in probe.coeffs_dict().items() if v != 0.0]
+    if (_lane == 0                     # an integrand that READS a lane is not sampleable:
+                                       # a line integral takes its tangent from lane 1, and
+                                       # evaluating it at a plain real makes every tangent
+                                       # zero -- arc length came back 0.000 instead of 5
+            and not any(_dim_negative(dim) for dim in probe.c)
+            and all(d == 0 or d == (0,) or (isinstance(d, tuple) and not any(d))
+                    for d in _plain)):
+        # NO STRUCTURE CAME BACK.  The integrand answered a seeded input with a
+        # plain number, so there is no Taylor tail to read and no way to size a
+        # panel from one evaluation.  This is the shape of every integrand
+        # written with a branch -- a step, a piecewise rate, a table lookup,
+        # anything that decides on `x.st()` -- and the old behaviour was a
+        # midpoint rule with NO refinement at all: the unit step at 0.3 over
+        # [0, 1] came back 0.75 against 0.7, tightening tol did nothing, and the
+        # only sign was a warning most callers never see.
+        #
+        # There is still a way to integrate it, just not this one: sample it.
+        # Adaptive Simpson on real evaluations converges on exactly these
+        # functions, bisecting until the discontinuity is cornered in a panel
+        # too small to matter.  It cannot produce the higher grades a composite
+        # integrand carries, which is why it is the fallback and not the method.
+        return _integrate_by_sampling(f, a, b, tol=tol, max_depth=max_depth)
 
     def _panel_with_error(x, dx):
         """One composite eval at midpoint -> integral value + error estimate.
