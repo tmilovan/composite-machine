@@ -733,8 +733,70 @@ class Composite:
         return self._backend.read_dim(self._data, dim)
 
     def d(self, n=1):
-        """Extract nth derivative."""
+        """nth derivative with respect to h, as a real number.
+
+        The fast path is a single coefficient read: for a value whose grades
+        are all non-positive integers the composite IS a Taylor series in h,
+        grade -n holds the coefficient of h**n, and n! converts it.
+
+        Everything else goes through `D`, which differentiates properly and
+        then has its standard part taken -- so a derivative that is unbounded
+        says so instead of coming back 0.0.  That was the one genuinely
+        misleading read: grade -n is ABSENT for (2+h)/h, whose grades are 0
+        and +1, and read_dim reports an absent dimension as 0.0, so d(1)
+        through d(5) all returned 0.0 for a simple pole whose derivatives are
+        -2/h**2, 4/h**3, ... .  Absent read as zero is the same mistake the
+        R1 warning text calls a bug; it is harmless when a Taylor series
+        exists, because an absent grade genuinely has coefficient zero there,
+        and wrong exactly when one does not.
+
+        A half order is the same trap without the pole: sqrt(h) is |1|_-0.5,
+        every integer grade is absent, and its derivative 0.5*h**-0.5 is
+        unbounded rather than zero.
+        """
+        dims, vals = self._backend.to_arrays(self._data)
+        for _g, _v in zip(dims, vals):
+            if _v == 0.0:
+                continue
+            if _dim_positive(_g) or _fractional_power(_g):
+                return self.D(n).st()
         return self._backend.read_dim(self._data, -n) * math.factorial(n)
+
+    def D(self, n=1):
+        """nth derivative with respect to h, as a Composite.
+
+        Differentiation is a GRADE SHIFT.  A term |c|_g is c * h**(-g), so
+        differentiating gives |-g*c|_(g+1): the coefficient picks up -g and
+        the grade moves up one.  That single rule is total over the power
+        axis -- infinitesimals, values, infinities and half orders alike:
+
+            2/h + 1   = |2|_1 + |1|_0     ->  |-2|_2      = -2/h**2
+            h**2 + 2h = |2|_-1 + |1|_-2   ->  |2|_-1 + |2|_0
+            sqrt(h)   = |1|_-0.5          ->  |0.5|_0.5   = 0.5*h**-0.5
+            INF       = |1|_1             ->  |-1|_2
+
+        and it composes, so D(n) is the shift applied n times.  The factorial
+        in `d` is not a separate convention bolted on: applying the shift n
+        times produces n! on its own.  x*x seeded at 2 is |4|_0 + |4|_-1 +
+        |1|_-2, whose D(1) is |4|_0 + |2|_-1 -- standard part 4 = f'(2), and
+        its own next shift gives |2|_0 = f''(2).
+
+        Grade 0 drops out, because a constant differentiates away.  When
+        nothing survives, the answer is the EXPRESSED zero |0|_0 rather than
+        nothing: the derivative of a constant is zero, and a zero here is a
+        value, not an absence.
+
+        The log axis is not a shift and is refused rather than dropped.
+        d/dh of ln(1/h), which is |1|_(0,1), is -1/h -- it crosses from the
+        log axis to the power axis, so it needs its own case, and until that
+        case is written returning something is worse than saying so.
+        `_derivative_axis` drops those terms silently, which is the mistake
+        this avoids.
+        """
+        out = self
+        for _ in range(n):
+            out = _shift_derivative(out)
+        return out
 
     def lead_dim(self):
         """The dominant dimension: the one that decides how big this number is.
@@ -1627,6 +1689,48 @@ def _unit_dim(x):
         from composite.backends.vector_dim_backend import WIDTH
         return (0,) * WIDTH
     return 0
+
+
+def _fractional_power(d):
+    """Power-axis component is not a whole number: a branch point, not a series.
+
+    sqrt(h) is |1|_-0.5 and every INTEGER grade in it is absent, so reading
+    grade -1 off it reports 0.0 for a derivative that is actually unbounded.
+    Asked of the power component only, because a log-axis grade is always a
+    whole number and is refused elsewhere on its own grounds.
+    """
+    p = d[0] if isinstance(d, tuple) else d
+    p = float(p)
+    return p != int(p)
+
+
+def _shift_derivative(x):
+    """d/dh by the grade shift: |c|_g -> |-g*c|_(g+1).  See Composite.D."""
+    from composite.backends.vector_dim_backend import canon
+    terms = {}
+    for g, c in x.coeffs_dict().items():
+        if isinstance(g, tuple):
+            if any(e != 0 for e in g[1:]):
+                raise NotImplementedError(
+                    f"d/dh of a log-axis term is not a grade shift: {g} is an "
+                    f"iterated logarithm, and d/dh of ln(1/h) is -1/h, which "
+                    f"lands on the POWER axis.  Refusing rather than dropping "
+                    f"the term, which would return a well-formed wrong answer.")
+            power = g[0]
+        else:
+            power = g
+        if power == 0:
+            continue                    # a constant differentiates away
+        key = canon((power + 1,) + g[1:]) if isinstance(g, tuple) else power + 1
+        terms[key] = terms.get(key, 0.0) + (-power) * c
+    if not terms:
+        # The derivative of a constant is ZERO, and a zero here is a value.
+        # Returning nothing would say "no derivative", which is a different
+        # statement and the one R6 exists to keep apart.
+        terms = {canon((0,) + (0,) * (WIDTH - 1))
+                 if x.coeffs_dict() and isinstance(next(iter(x.coeffs_dict())), tuple)
+                 else 0: 0.0}
+    return _like(x, terms)
 
 
 def _like(x, terms):
