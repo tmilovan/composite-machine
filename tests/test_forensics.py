@@ -319,7 +319,7 @@ def x5_expressed_zero(t):
            "baseline" in z.src and "x * x" in z.src, "source: %r" % z.src)
     # A zero-crossing INTERMEDIATE is not a data zero.  ln(S/K) at S = K is
     # exactly 0 and still carries the derivative 1/S, and flagging it reported
-    # `derivative corrupted` for three correct Black-Scholes sensitivities.
+    # `conventional derivative corrupted` for three correct Black-Scholes sensitivities.
     def d1(S, K, r, sig, T):
         return (F.ln(S / K) + (r + sig * sig / 2) * T) / (sig * F.sqrt(T))
 

@@ -6,7 +6,7 @@
 import numpy as np
 from typing import Tuple
 from .base_backend import (CompositeBackend, DIM_DTYPE, dim_cast,
-                            InexactGradeError, _add_exact)
+                            InexactGradeError, _add_exact, inexact_grade)
 
 
 class DictData:
@@ -51,10 +51,7 @@ def _dim_add(da, db):
     if not ta and not tb:
         out, ok = _add_exact(float(da), float(db))
         if not ok:
-            raise InexactGradeError(
-                f"grade {da!r} + {db!r} is not exact in float64 (got {out!r}); "
-                f"the product would carry an identifier one ulp from the one "
-                f"it should share")
+            raise inexact_grade(da, db, out)
         return out
     va = da if ta else (da,)
     vb = db if tb else (db,)

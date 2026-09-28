@@ -7,7 +7,7 @@ import math
 import numpy as np
 from typing import Tuple
 from .base_backend import (CompositeBackend, DIM_DTYPE, dim_cast,
-                            InexactGradeError, _add_exact)
+                            InexactGradeError, _add_exact, inexact_grade)
 
 # Direct convolution costs len(a)*len(b) multiply-adds; FFT costs O(M log M) on
 # the padded transform length.  So the choice must be made on the PRODUCT of the
@@ -523,10 +523,7 @@ class SparseDenseBackend(CompositeBackend):
                 # two grades are one term or two depending on their history.
                 off, ok = _add_exact(float(offset_a), float(offset_b))
                 if not ok:
-                    raise InexactGradeError(
-                        f"grade {offset_a!r} + {offset_b!r} is not exact in "
-                        f"float64 (got {off!r}); the product would carry an "
-                        f"identifier one ulp from the one it should share")
+                    raise inexact_grade(offset_a, offset_b, off)
                 results.append((off, conv))
 
         return self._truncate(SparseData(runs=_merge_runs(results)))

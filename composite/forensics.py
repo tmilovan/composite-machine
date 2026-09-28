@@ -82,7 +82,13 @@ __all__ = [
 STABLE = "stable"
 ILL_CONDITIONED = "ill-conditioned problem"
 UNSTABLE = "unstable formula"
-DERIVATIVE_LOST = "derivative corrupted"
+# "conventional derivative corrupted", not "derivative corrupted".  Nothing is
+# corrupted: an expressed zero IS an infinitesimal, so the composite reports the
+# exact derivative of the expression as written.  x*x + R(0) is x**2 + h, and h
+# is x - a, so the function is x**2 + x - a and its derivative at 2 really is 5.
+# What the conversion breaks is only the CONVENTIONAL reading, the one that
+# assumes the written zero contributed nothing.
+DERIVATIVE_LOST = "conventional derivative corrupted"
 REFUSED = "refused"
 NOT_INSTRUMENTED = "not instrumented"   # the formula never touched the seeded input
 
@@ -236,9 +242,12 @@ class Audit:
             return "rewrite -- %s at %s %s" % (what, c.where, self._cost_clause())
         if v == DERIVATIVE_LOST:
             w = self.zeros[0]
-            return ("value is right, sensitivity is not -- an expressed zero at %s "
-                    "converts to an infinitesimal and shifts the derivative; drop "
-                    "the term rather than adding a literal 0.0" % w.where)
+            return ("the value is right and so is the derivative OF WHAT WAS "
+                    "WRITTEN -- an expressed zero at %s is an infinitesimal, so "
+                    "the expression is not the function it resembles and the "
+                    "conventional reading no longer holds; drop the term rather "
+                    "than adding a literal 0.0, or re-evaluate under "
+                    "conventional()" % w.where)
         if v == ILL_CONDITIONED:
             return ("accept -- the problem amplifies input error %.3g x; no formula "
                     "does better than %.1e" % (self.kappa, self.floor))

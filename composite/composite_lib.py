@@ -56,12 +56,16 @@ Author: Toni Milovan
 
 import math
 import contextlib as _contextlib
+import contextvars as _contextvars
+import functools as _functools
+from fractions import Fraction as _Fraction
 from typing import Callable, List, Optional, Union
 import struct
 import numpy as np
 
 from composite.backends import get_backend
-from composite.backends.base_backend import DIM_DTYPE, dim_cast
+from composite.backends.base_backend import (DIM_DTYPE, dim_cast,
+                                             dim_fraction)
 
 # =============================================================================
 # EXCEPTIONS
@@ -143,6 +147,207 @@ def _operands(a, b):
     return _r1(a), _r1(b)
 
 
+_CONVENTIONAL = _contextvars.ContextVar("composite_conventional_zero", default=False)
+
+# Every infinitesimal SOURCE created, counted at the places one can be born.
+# See degeneracy_watch() for what it is for and why the count is of sources
+# rather than of terms.  This is observability; the verdict is carried on the
+# numbers themselves, see _mint.
+_inf_sources = [0]
+
+# Provenance carried on every composite, as ONE id and ONE flag:
+#
+#   _src   the FIRST infinitesimal source this number descends from, or None
+#   _deg   True once a SECOND, different source has reached it
+#
+# A flag alone cannot do it: in `x*x + x` both operands carry an infinitesimal
+# and it is the same one, so "both are graded" is not the question.  The id
+# answers it, and one id is enough, because a number that is not yet flagged
+# descends from at most one source -- so its first id names its whole set.
+# That makes this exactly equivalent to carrying the set, for the only question
+# asked of it, at two fields instead of an allocation per number.
+#
+# Counting is not carried.  Knowing a third source arrived tells a caller
+# nothing the second did not already tell them: the reading is off the
+# conventional function either way.
+_next_src = [0]
+
+# Sources minted DURING an operation, drained by _carries.  R1 converts a
+# wholly-zero operand inside the op, and that conversion makes infinitesimal
+# content no operand had, so the operand list cannot show it.  Measured: with
+# the union taken over the operands alone, `x*x + 0.0` and `x*x + (x - x)` both
+# came back clean.  Global like _inf_sources, and no more thread-isolated.
+_pending_mints = []
+_in_op = [0]
+
+# OFF by default.  Carrying only matters to a caller who is going to read grade
+# -n as the nth derivative of a function they have in mind, and it costs 11-21%
+# on ordinary arithmetic (measured: +11.1% on 200 derivative(), +21% on a
+# 200-term multiply).  Switched off it costs nothing at all rather than less:
+# set_degeneracy_tracking puts the UNDECORATED operators back on the class, so
+# there is no wrapper frame to enter.
+#
+# The entry points that report on degeneracy -- taylor_degeneracy, explain --
+# turn it on around their own evaluation, so the supported path works whatever
+# this is set to.  MINTING IS NOT SWITCHED: it happens at three cold sites and
+# ZERO is built once at import, so if minting were skipped while off, a later
+# `x*x + ZERO` would not flag once it was switched on.
+_TRACKING = [False]
+
+#: The operators that carry.  Named here rather than discovered, so switching
+#: cannot half-apply.
+_CARRIED_OPS = ("__add__", "__radd__", "__sub__", "__rsub__", "__neg__",
+                "__mul__", "__rmul__", "__truediv__", "__rtruediv__", "__pow__")
+
+
+def _mint(c):
+    """Mark c as a fresh infinitesimal source.
+
+    The three callers are the three ways a source comes into existence, and
+    they are the three places _inf_sources was already counted: Composite.zero
+    (a written zero), _r1 (a cancellation converting), and _seeded (an
+    extraction's own seed).  A composite written by hand as Composite({-1: 1.0})
+    passes none of them and carries no source, so it does not flag.  That is a
+    known gap, not an oversight: see taylor_degeneracy.
+    """
+    _inf_sources[0] += 1
+    _next_src[0] += 1
+    c._src = _next_src[0]
+    c._deg = False
+    if _in_op[0]:
+        _pending_mints.append(c._src)
+    return c
+
+
+def _join(result, *operands, minted=()):
+    """Carry provenance from operands, and any source minted inside the op.
+
+    `minted` is a separate channel on purpose.  Folding ids in with the
+    operands and telling them apart by type read the exponent of `x ** 5` as
+    source number 5, and every clean expression with a raw int operand flagged.
+    """
+    src, deg = None, False
+    # getattr, not attribute access: a Composite SUBCLASS may build its
+    # instances through __new__ without going near __init__ or _wrap, and
+    # forensics._Audited does exactly that.  An unset slot then raises, and it
+    # raised from inside every arithmetic operation the audit performed.
+    ids = [s for s in (getattr(o, "_src", None) for o in operands
+                       if isinstance(o, Composite)) if s is not None]
+    if any(getattr(o, "_deg", False) for o in operands
+           if isinstance(o, Composite)):
+        deg = True
+    for o_src in [*ids, *minted]:
+        if src is None:
+            src = o_src
+        elif src != o_src:
+            deg = True                 # a second, different source
+    result._src = src
+    result._deg = deg
+    return result
+
+
+def _carries(op):
+    """Give an arithmetic dunder provenance carrying.
+
+    Wrapping the ten dunders keeps the rule in one place: every other composite
+    in the library is built by them or by _like, so nothing else has to know.
+    """
+    @_functools.wraps(op)
+    def inner(self, *args):
+        depth = len(_pending_mints)
+        _in_op[0] += 1
+        try:
+            result = op(self, *args)
+        finally:
+            _in_op[0] -= 1
+        # FAST PATH: one argument and nothing minted inside, which is every
+        # operation that is not a conversion.  Inlined rather than delegated to
+        # _join because this runs on every arithmetic operation in the library
+        # and the general form costs two comprehensions and a call: measured at
+        # +32% on `40x sin(exp(x))`, +12% with this branch.
+        # `type(...) is Composite`, not isinstance: a SUBCLASS may never have
+        # set the slots (forensics._Audited builds through __new__), and only
+        # the general form is tolerant of that.
+        if (len(_pending_mints) == depth and type(self) is Composite
+                and len(args) < 2):
+            if type(result) is not Composite:
+                return result
+            src, deg = self._src, self._deg
+            if args and type(args[0]) is Composite:
+                other = args[0]
+                if other._deg:
+                    deg = True
+                o_src = other._src
+                if o_src is not None:
+                    if src is None:
+                        src = o_src
+                    elif src != o_src:
+                        deg = True         # a second, different source
+            elif args and isinstance(args[0], Composite):
+                return _join(result, self, args[0])     # subclass: general form
+            result._src = src
+            result._deg = deg
+            return result
+        if isinstance(result, Composite):
+            _join(result, self, *args, minted=_pending_mints[depth:])
+        del _pending_mints[depth:]
+        return result
+    return inner
+
+
+@_contextlib.contextmanager
+def conventional():
+    """Treat an expressed zero as the ORDINARY zero, for the duration.
+
+    The system's answer to `x*x + 0` is the derivative of x**2 + h, and since
+    h is x - a that is x**2 + x - a, whose derivative at 2 is 5.  That is
+    correct and it is the whole point.  But a caller who wrote the zero
+    without meaning it, or who is porting a formula from somewhere that has an
+    additive identity, wants 4.  This gives them 4 without touching the
+    arithmetic everyone else gets.
+
+    Three switches, at the only three places the difference shows:
+
+      - Composite.zero() yields |0|_0 instead of |1|_-1, so a written zero is
+        a zero TERM and gets absorbed rather than converting
+      - R1 does not convert a wholly-zero operand, so a cancellation stays
+        |0|_d instead of lifting one grade down
+      - a wholly-zero divisor raises ZeroDivisionError.  Without this one the
+        single-term-divisor path divides coefficients by 0.0 and hands back
+        |inf|_0 or |nan|_0 with no error at all, which is worse than either
+        semantics.
+
+    What it neutralises is a zero that arrives as a VALUE: `R(0)`, a bare `0`
+    or `0.0`, a data field that happens to be zero, and a cancellation.
+
+    ZERO and h are NOT neutralised.  They name the infinitesimal, in both
+    modes.  Rebinding them was tried and does not work: `from composite import
+    ZERO` binds the object at import, so rebinding this module's global cannot
+    reach the name the caller is actually using, and that spelling is the one
+    everybody writes.  Walking every loaded composite module and rebinding
+    there fixed the library's own uses and still left the caller's, so
+    `(x + ZERO)**2` kept its infinitesimal while `(x + cl.ZERO)**2` lost it --
+    a split decided by import style, which is worse than either answer.  There
+    is no arithmetic route either: the operand in `x + ZERO` is |1|_-1, the
+    same value as the seed's own unit, so nothing distinguishes a zero spelled
+    ZERO from an infinitesimal meant as one.
+
+    `(x*x - R(4))/(x - R(2))` still resolves to 4 with derivative 1: R2 holds
+    that zero inert, so no conversion was ever needed for it.
+
+    Seeding does not go through ZERO in the block.  `_seeded` builds the seed
+    directly at both ends, which also retires its `if at == 0` special case.
+
+        with conventional():
+            all_derivatives(lambda x: x*x + R(0), 2.0, up_to=3)   # 4, 4, 2, 0
+    """
+    token = _CONVENTIONAL.set(True)
+    try:
+        yield
+    finally:
+        _CONVENTIONAL.reset(token)
+
+
 def _r1(c):
     """R1 — a zero used as an OPERAND converts: |0|_d becomes |1|_(d-1).
 
@@ -151,6 +356,8 @@ def _r1(c):
     to it (R2).  When several dimensions are zero, only the lowest converts;
     the composite then holds a nonzero and the rest are terms.
     """
+    if _CONVENTIONAL.get():
+        return c                       # see conventional()
     if not _is_wholly_zero(c):
         return c
     dims, vals = c._backend.to_arrays(c._data)
@@ -172,8 +379,13 @@ def _r1(c):
     # (-1, 0) by this convention, so this only makes the two paths agree.
     dims[0] = _dim_shift(dims[0], -1)
     vals[0] = 1.0
-    return Composite._wrap(c._backend.create_from_terms(dims, vals),
-                           c._backend, demote=False)
+    # A fresh source, and the operand's own provenance on top: the conversion
+    # creates infinitesimal content the operand did not have, so this is a
+    # birth, not a carry.  _mint records it in _pending_mints for the enclosing
+    # operation, which is the only place it can be seen from -- see _carries.
+    converted = _mint(Composite._wrap(c._backend.create_from_terms(dims, vals),
+                                      c._backend, demote=False))
+    return _join(converted, c, minted=(converted._src,))
 
 
 def _scalar_operand(other):
@@ -288,11 +500,16 @@ class Composite:
     # It cannot be inferred from the coefficients: _seeded(t) is exact with max
     # order 1, sin(x*x) is truncated with max order 11, and both merely look
     # like "max order K".  So it is carried.
-    __slots__ = ['_data', '_backend', '_complete']
+    __slots__ = ['_data', '_backend', '_complete', '_src', '_deg']
 
     def __init__(self, coefficients=None, _data=None):
         self._backend = get_backend()
         self._complete = None          # exact unless a series says otherwise
+        # No scan of the coefficients here.  Detecting a hand-written graded
+        # composite would mean walking the dict on EVERY construction, and the
+        # three real sources announce themselves at construction anyway.
+        self._src = None               # see _mint
+        self._deg = False
 
         if _data is not None:
             # Internal fast path: created by arithmetic ops
@@ -315,10 +532,22 @@ class Composite:
             if coefficients:
                 from composite.backends.vector_dim_backend import dom_sorted as _dom_sorted
                 sorted_dims = _dom_sorted(coefficients.keys())
-                if sorted_dims and isinstance(sorted_dims[0], tuple):
+                _exact_frac = (
+                    getattr(self._backend, "EXACT_DIMS", False)
+                    and any(isinstance(_d, _Fraction) and _d.denominator != 1
+                            for _d in sorted_dims))
+                if (sorted_dims and isinstance(sorted_dims[0], tuple)) or _exact_frac:
                     # VECTOR dimensions (power, log, ...).  np.array would turn
                     # these into a 2-D float grid and the rows are unhashable;
                     # an object array keeps them 1-D and keeps the tuples whole.
+                    #
+                    # A FRACTION needs the same treatment for the same reason one
+                    # step on: DIM_DTYPE is float64, so Fraction(1, 10**7) became
+                    # the binary value of 1e-7 and came back out as
+                    # Fraction(944473296573929, 9444732965739290427392).  Simple
+                    # fractions survived only because as_fraction round-trips
+                    # them, which is luck rather than a contract.  Guarded by
+                    # EXACT_DIMS so a float64 backend never receives one.
                     dims = np.empty(len(sorted_dims), dtype=object)
                     for _i, _d in enumerate(sorted_dims):
                         dims[_i] = _d
@@ -353,6 +582,8 @@ class Composite:
         obj._backend = be
         obj._data = data
         obj._complete = complete
+        obj._src = None                # _carries fills these in for op results
+        obj._deg = False
         return obj
 
     # -------------------------------------------------------------------------
@@ -377,8 +608,21 @@ class Composite:
 
     @classmethod
     def zero(cls):
-        """Structural zero: |1|₋₁ (infinitesimal)"""
-        return cls({-1: 1.0})
+        """Structural zero: |1|₋₁ (infinitesimal), or |0|₀ under conventional()
+
+        Counted: this is one of the two ways an infinitesimal comes into
+        existence, and the one that is otherwise invisible.  R(0), ZERO, a raw
+        Python 0 coerced by an operator, Composite(0), and a data value that
+        happens to be zero all arrive here, already converted, so none of them
+        ever reaches _r1 and none of them warns.  A cancellation is audible and
+        a written zero is not, which is the asymmetry degeneracy_watch closes.
+        """
+        if _CONVENTIONAL.get():
+            # Inert here, so no source: under conventional() a written zero is
+            # a zero TERM and the derivatives are the textbook ones.  Counting
+            # it would report degeneracy in the one mode that has none.
+            return cls({0: 0.0})
+        return _mint(cls({-1: 1.0}))
 
     @classmethod
     def infinity(cls):
@@ -410,23 +654,47 @@ class Composite:
             # FIXED: was "|0|₀" — now distinguishable from expressed |0|₀
             return "∅"
 
+        # TWO NOTATIONS, NEVER MIXED.
+        #
+        #   |4|₀        the dimension is a real subscript glyph, so the bars
+        #               delimit the coefficient
+        #   4_1/4       the underscore does the subscripting, so the bars are
+        #               redundant and are dropped
+        #
+        # `|2|_5/6` was both at once, which is neither.  Whether the plain form
+        # is needed is a property of the WHOLE number, not of one term: a
+        # dimension with no glyph anywhere in it puts every term in the
+        # underscore form, so `4_0 + 2_5/6` rather than `|4|₀ + 2_5/6`.
         sub = "₀₁₂₃₄₅₆₇₈₉"
+
+        def _glyphless(n):
+            """No subscript glyphs exist for a fraction or a vector dimension."""
+            if isinstance(n, tuple):
+                return True
+            if isinstance(n, _Fraction):
+                return n.denominator != 1
+            return not float(n).is_integer()
+
+        plain = any(_glyphless(d) for d in dims)
+
         def fmt_dim(n):
             if isinstance(n, tuple):
-                # Vector dimension over the declared basis: no subscript glyphs,
-                # so render it plainly rather than trying to coerce it to a float.
-                return "_(" + ",".join(f"{c:g}" for c in n) + ")"
+                return "(" + ",".join(f"{c:g}" for c in n) + ")"
+            if isinstance(n, _Fraction):
+                # EXACT, so print it exactly.  "%g" showed -0.333333 for a
+                # dimension that is precisely -1/3, which reads as a rounded
+                # float in the one backend whose point is that it is not one.
+                return (str(n.numerator) if n.denominator == 1
+                        else f"{n.numerator}/{n.denominator}")
             f = float(n)
             if not f.is_integer():
-                # A fractional dimension -- sqrt of an odd dimension produces
-                # these.  There are no subscript glyphs for them, so render
-                # plainly rather than silently truncating to an integer.
-                return "_" + f"{f:g}"
+                return f"{f:g}"
             n = int(f)
+            if plain:
+                return str(n)
             if n >= 0:
                 return ''.join(sub[int(d)] for d in str(n))
-            else:
-                return "₋" + ''.join(sub[int(d)] for d in str(-n))
+            return "₋" + ''.join(sub[int(d)] for d in str(-n))
 
         def fmt_coeff(c):
             c = float(c)
@@ -441,8 +709,12 @@ class Composite:
             return f"{c:.6g}"
 
         # Highest dimension first (descending)
-        parts = [f"|{fmt_coeff(vals[i])}|{fmt_dim(dims[i])}"
-                 for i in range(len(dims) - 1, -1, -1)]
+        if plain:
+            parts = [f"{fmt_coeff(vals[i])}_{fmt_dim(dims[i])}"
+                     for i in range(len(dims) - 1, -1, -1)]
+        else:
+            parts = [f"|{fmt_coeff(vals[i])}|{fmt_dim(dims[i])}"
+                     for i in range(len(dims) - 1, -1, -1)]
         return " + ".join(parts)
 
     # =========================================================================
@@ -591,6 +863,15 @@ class Composite:
         if _is_unit(other):
             return self
 
+        # Under conventional() a zero divisor is an error, as it is anywhere
+        # that has an additive identity.  Checked BEFORE _operands, which is
+        # where R1 would have lifted it, and before the single-term path,
+        # which divides coefficients by 0.0 and returns |inf|_0 silently.
+        if _CONVENTIONAL.get() and _is_wholly_zero(other):
+            raise ZeroDivisionError(
+                "division by zero, under conventional(); outside that block a "
+                "zero divisor converts (R1) and division by zero is total")
+
         a, b = _operands(self, other)
         b_dims = b._backend.active_dims(b._data)
 
@@ -603,7 +884,7 @@ class Composite:
         # dividend moves together, zeros included: they shift and stay zero.
         if len(b_dims) == 1:
             _bd = b_dims[0]
-            div_dim = _bd if isinstance(_bd, tuple) else float(_bd)
+            div_dim = _bd if isinstance(_bd, (tuple, _Fraction)) else float(_bd)
             div_coeff = b._backend.read_dim(b._data, div_dim)
             my_dims, my_vals = a._backend.to_arrays(a._data)
             # Either side may carry vector dimensions.  Testing only the DIVISOR
@@ -626,6 +907,16 @@ class Composite:
                 for d in my_dims:
                     _a, _b = pair(d, div_dim)
                     shifted.append(canon(tuple(x - y for x, y in zip(_a, _b))))
+            elif _exact_dims(my_dims) or isinstance(div_dim, _Fraction):
+                # EXACT SUBTRACTION when either side carries a Fraction.  Mixing
+                # the two types does it in float and lands one ulp out:
+                # Fraction(-1,3) - (-1.0) is 0.6666666666666667 where
+                # float(Fraction(2,3)) is 0.6666666666666666, so the grade was
+                # off by an ulp before the backend ever saw it and no round-trip
+                # could recover the third.  h^(1/3) / R(0) came back at
+                # dimension 3002399751580331/4503599627370496.
+                shifted = [dim_fraction(d) - dim_fraction(div_dim)
+                           for d in my_dims]
             else:
                 shifted = my_dims - div_dim
             return Composite._wrap(
@@ -686,11 +977,19 @@ class Composite:
             for _ in range(n):
                 result = result * self
             return result
+        if isinstance(n, _Fraction):
+            # An exact exponent, which is what the fractional backends exist for.
+            # An integral one is the int case, not a root.
+            if n.denominator == 1:
+                return self ** int(n)
+            return _rational_power(self, n)
         if isinstance(n, float):
             return exp(Composite(n) * ln(self))
         if isinstance(n, Composite):
             return exp(n * ln(self))
-        raise TypeError(f"Power exponent must be int, float, or Composite, got {type(n)}")
+        raise TypeError(
+            f"Power exponent must be int, float, Fraction or Composite, "
+            f"got {type(n)}")
 
     # -------------------------------------------------------------------------
     # Extraction methods
@@ -812,6 +1111,32 @@ class Composite:
             return None
         from composite.backends.vector_dim_backend import dom_sorted as _dom_sorted
         return _dom_sorted(nz, reverse=True)[0]     # biggest dimension = dominant term
+
+    @property
+    def conventionally_degenerate(self):
+        """True once a SECOND infinitesimal source has reached this number.
+
+        None when nothing is known: tracking was off while this number was
+        built, or it descends from no infinitesimal at all and has no Taylor
+        reading to corrupt.  NOT False -- reporting a silent "clean" for a
+        number nobody was watching is the failure shape this exists to prevent.
+        See set_degeneracy_tracking, which is off by default.
+
+        The composite is not wrong when this is set, and nothing here refuses
+        or corrects.  What stops holding is the reading of grade -n as the nth
+        derivative of the function you had in mind: `x*x + R(0)` is not x
+        squared, because the written zero is one unit of the seed and h is
+        x - a, so the function is x**2 + x - a and the slope 5 is right.
+        Dimension 0 stays correct while every derivative moves, which is the
+        worst failure shape there is, so it is worth a flag.
+
+        Carried, not computed: reading it costs nothing and it answers for a
+        number you were handed, with no function left to re-evaluate.  See
+        taylor_degeneracy for the one case it does not catch.
+        """
+        if self._deg:
+            return True
+        return False if self._src is not None else None
 
     def lead_order(self):
         """Order of the dominant term: positive infinitesimal, negative unbounded.
@@ -1105,6 +1430,59 @@ ZERO = Composite.zero()       # |1|₋₁ (infinitesimal)
 INF = Composite.infinity()    # |1|₁ (infinity)
 h = ZERO                      # Alias: h is the infinitesimal
 
+
+# -----------------------------------------------------------------------------
+# Degeneracy tracking: the switch
+# -----------------------------------------------------------------------------
+
+def set_degeneracy_tracking(on):
+    """Turn conventional-derivative degeneracy tracking on or off.  Returns the
+    PREVIOUS setting, so a caller can restore it.
+
+    Off by default.  It matters only when you are going to read grade -n as the
+    nth derivative of a function you have in mind; for arithmetic, limits, root
+    finding or anything that reads dimension 0, it answers a question nobody
+    asked and costs 11-21%.
+
+    Switching is a rebind of the operators on the class, not a branch inside
+    them, so OFF costs nothing rather than a little: there is no wrapper to
+    enter.  That also means it is global and not thread-isolated, like
+    set_backend.  Prefer track_degeneracy() to setting it by hand.
+    """
+    on = bool(on)
+    previous = _TRACKING[0]
+    if on != previous:
+        for _name in _CARRIED_OPS:
+            _m = getattr(Composite, _name)
+            setattr(Composite, _name,
+                    _carries(_m) if on else _m.__wrapped__)
+        _TRACKING[0] = on
+    return previous
+
+
+def degeneracy_tracking():
+    """Is tracking on?  A composite built while it was off carries no verdict."""
+    return _TRACKING[0]
+
+
+@_contextlib.contextmanager
+def track_degeneracy(on=True):
+    """Track degeneracy for the duration.
+
+        with track_degeneracy():
+            y = f(_seeded(2.0))
+        y.conventionally_degenerate
+
+    Wrap the WHOLE calculation, seed included.  A number built outside the
+    block carries nothing, and reads back as None rather than as clean.
+    """
+    previous = _TRACKING[0]
+    set_degeneracy_tracking(on)
+    try:
+        yield
+    finally:
+        set_degeneracy_tracking(previous)
+
 def _refresh_constants():
     """Rebuild the module constants under the active backend.
 
@@ -1189,8 +1567,16 @@ def _truncate_dims(backend, data):
         # TypeError the moment a log-scale composite grew past the cap, which
         # is only reachable at the DEFAULT cap and so went unseen while every
         # standalone check ran with MAX_ACTIVE_DIMS raised.
-        order = np.array(sorted(range(len(dims)),
-                                key=lambda i: tuple(abs(c) for c in dims[i])))
+        # A scalar dimension IS the vector (d, 0, ...), so pad it rather than
+        # assuming every object-array entry is iterable.  An object array holds
+        # tuples for the log axes AND Fractions for an exact fractional grade,
+        # and `tuple(abs(c) for c in Fraction(1,3))` raises "'Fraction' object
+        # is not iterable" -- which crashed every product that grew past the cap
+        # on a fractional backend, reached by (h**3 + h**4) ** Fraction(1,2)
+        # squared back.
+        def _mag(d):
+            return tuple(abs(c) for c in d) if isinstance(d, tuple) else (abs(d),)
+        order = np.array(sorted(range(len(dims)), key=lambda i: _mag(dims[i])))
     else:
         order = np.argsort(np.abs(dims))
     keep = order[:MAX_ACTIVE_DIMS]
@@ -1198,16 +1584,63 @@ def _truncate_dims(backend, data):
     return backend.create_from_terms(dims[keep], vals[keep])
 
 
+def _exact_dims(dims):
+    """Does this dimension array carry a Fraction, i.e. an exact fractional grade?"""
+    return (getattr(dims, "dtype", None) == object
+            and any(isinstance(d, _Fraction) for d in dims))
+
+
 def _seeded(at):
     """Evaluation point seeded with infinitesimal for derivative extraction.
 
     R(0) = ZERO already carries the infinitesimal, so R(0) + ZERO
     would double-seed to |2|₋₁. This helper avoids that.
+
+    Under conventional() R(0) is |0|₀, a zero TERM, so there is nothing to
+    double and nothing to avoid: the seed is built directly at both ends and
+    the special case disappears.
+
+    THE SEED IS BUILT DIRECTLY, never through R(0).  R(0) is Composite.zero(),
+    which counts as an infinitesimal SOURCE, and the seed is the extraction's
+    own infinitesimal rather than one the caller's formula introduced.  Going
+    through R(0) made seeding AT THE ORIGIN indistinguishable from injecting a
+    zero, so `x * _seeded(0.0)` and any nested differentiation at 0 came back
+    flagged as conventionally degenerate when nothing had been injected at all.
+    ZERO is a module constant and costs nothing, so only the at == 0 end was
+    affected.
     """
-    x = R(at)
+    # The seed is the first infinitesimal to enter, and it is a FRESH source
+    # every time.  Minting last, over the result, is deliberate: `R(at) + ZERO`
+    # would otherwise carry ZERO's id, and ZERO is a module constant built once
+    # at import, so two separate seeds would share one id and `x * _seeded(3.0)`
+    # would not flag.
+    if _CONVENTIONAL.get():
+        return _mint(Composite({0: float(at), -1: 1.0}))
     if at == 0:
-        return x
-    return x + ZERO
+        return _mint(Composite({-1: 1.0}))
+    return _mint(R(at) + ZERO)
+
+@_contextlib.contextmanager
+def _extraction_scope():
+    """An extraction is transparent to any degeneracy count around it.
+
+    derivative(), the integrators and the limit routines all build a seed, read
+    a float off the result and throw the composite away.  That seed never
+    reaches the caller's expression, so counting it made every nested extraction
+    look like a second infinitesimal: `x * R(derivative(sin, 0.0))` came back
+    flagged when nothing had entered the outer calculation at all.
+
+    Restoring the count on exit is the difference between an infinitesimal that
+    ENTERS an expression and one that is consumed inside a self-contained
+    calculation.  A bare _seeded() whose result the caller goes on to use is the
+    first kind and still counts.
+    """
+    saved = _inf_sources[0]
+    try:
+        yield
+    finally:
+        _inf_sources[0] = saved
+
 
 @_contextlib.contextmanager
 def _full_order():
@@ -1229,9 +1662,11 @@ def _full_order():
     old = getattr(backend, "max_order", None)
     if old is not None:
         backend.max_order = None
+    _saved_sources = _inf_sources[0]   # see _extraction_scope
     try:
         yield
     finally:
+        _inf_sources[0] = _saved_sources
         if old is not None:
             backend.max_order = old
 
@@ -1266,6 +1701,224 @@ def get_max_order() -> int:
 # so that Taylor expansions inside black-box functions use enough terms.
 _min_terms = [0]
 
+def _rational_power(x, r):
+    """x ** r for an exact rational r, by factoring out the leading term.
+
+    Write x = c0 * h**(-m) * (1 + u), where m is the DOMINANT dimension and u is
+    what is left after normalising.  Then
+
+        x**r = c0**r * h**(-m*r) * (1 + u)**r
+
+    with (1+u)**r the binomial series.  m*r is Fraction arithmetic, so the grade
+    is exact for any denominator, and `ln` is never called.
+
+    THIS REPLACES TWO BROKEN PATHS.  The old code was exact only for a composite
+    with exactly ONE expressed term, and fell through to exp(float(r) * ln(x))
+    otherwise, which failed two ways:
+
+      - ln needs a positive standard part, so an expressed zero BELOW the leading
+        term raised.  |1|_-1 ** 1/3 worked and |1|_-1 + |0|_-2 ** 1/3 raised,
+        for the same number h differing only in which inert zero was written.
+      - float(r) threw the exactness away, so (h**3 + h**4) ** Fraction(1,5)
+        came back at grade 1351079888211149/2251799813685248 instead of 3/5.
+        Dyadic exponents survived by luck, which is why 1/2 always looked fine.
+
+    A monomial makes u empty and the loop exits at once, so the single-term case
+    is subsumed rather than special-cased and the len(dims) == 1 test is gone.
+    """
+    lead = x.lead_dim()
+    if lead is None:
+        raise ZeroDivisionError(
+            f"{x} ** {r}: a fractional power of nothing, or of a value that is "
+            f"wholly zero, has no leading term to factor out")
+    c0 = x._backend.read_dim(x._data, lead)
+
+    # c0 ** r must be real.  A negative coefficient has a real q-th root only
+    # for odd q; for even q the answer is complex and saying so beats returning
+    # a nan that propagates silently.
+    if c0 < 0:
+        if r.denominator % 2 == 0:
+            raise ValueError(
+                f"({c0}) ** {r} is not real: an even denominator has no real "
+                f"root of a negative coefficient")
+        scale = -((-c0) ** float(r)) if r.numerator % 2 else (-c0) ** float(r)
+    else:
+        scale = c0 ** float(r)
+
+    head = lead[0] if isinstance(lead, tuple) else lead
+    new_head = dim_fraction(head) * r
+    new_dim = ((new_head,) + tuple(lead[1:])) if isinstance(lead, tuple) else new_head
+
+    # u = x / (c0 * h**(-lead)) - 1.  Dividing by a single-term composite is a
+    # pure dimension shift, so this stays exact.
+    monomial = Composite({lead: c0})
+    u = x / monomial - Composite({0: 1.0})
+
+    acc = Composite({0: 1.0})
+    term = Composite({0: 1.0})
+    coef = _Fraction(1)
+    for k in range(1, _effective_terms(15) + 1):
+        coef = coef * (r - (k - 1)) / k
+        term = term * u
+        if not term.c or all(v == 0.0 for v in term.c.values()):
+            break
+        acc = acc + term * float(coef)
+    return acc * Composite({new_dim: scale})
+
+
+class Degeneracy:
+    """Whether a Taylor reading of this result is conventionally degenerate.
+
+    The composite is never wrong.  What can be wrong is reading grade -n as the
+    nth derivative of the function you had in mind, and that reading holds only
+    when the seed is the ONLY thing that wrote to those grades.
+
+    `x*x + R(0)` is not x squared.  The written zero is an infinitesimal, and it
+    is one unit of the seed, so the expression is x**2 + h, and h is x - a.  The
+    function is x**2 + x - a and its derivative at 2 is 5.  The composite
+    returning 5 is correct.  It is only wrong against x**2, which nobody wrote.
+
+    So this does not refuse and does not correct.  It reports that a second
+    source entered, which is the one fact a caller expecting textbook
+    derivatives cannot otherwise recover: dimension 0 stays right while every
+    derivative moves, and a well-formed wrong number is the worst failure shape
+    there is.
+    """
+
+    __slots__ = ("sources", "value", "at", "flag")
+
+    def __init__(self, sources, value=None, at=None, flag=None):
+        #: How many sources were born inside the watch.  Observability only:
+        #: the verdict does not consult it.  See degeneracy_watch.
+        self.sources = sources
+        self.value, self.at = value, at
+        #: The verdict, carried by the result.  None when there was no result
+        #: to read it off, and the count then stands in.
+        self.flag = flag
+
+    #: The first infinitesimal to enter a calculation is the one the
+    #: derivatives are read against, whether or not anything called it a seed.
+    #: From the second onward the grades are still exact and no longer answer
+    #: the conventional question.
+    FIRST_IS_FREE = 1
+
+    @property
+    def degenerate(self):
+        # A FLAG, NOT A COUNT.  Knowing a third source arrived says nothing the
+        # second did not already say: the conventional reading is off either
+        # way.  The count survives one step behind it, for degeneracy_watch
+        # around code that produces no composite to read.
+        if self.flag is not None:
+            return self.flag
+        return self.sources > self.FIRST_IS_FREE
+
+    def __bool__(self):
+        return self.degenerate
+
+    def __repr__(self):
+        return "<Degeneracy degenerate=%s sources=%d>" % (self.degenerate, self.sources)
+
+    def __str__(self):
+        if not self.degenerate:
+            return ("one infinitesimal entered, so grade -n is the nth derivative "
+                    "in the ordinary sense")
+        return (
+            "a second infinitesimal entered. The first is the one the derivatives "
+            "are read against; the other puts the expression AS WRITTEN at a "
+            "distance from the function it resembles. The grades are correct; "
+            "reading them as conventional derivatives is not. Re-evaluate under "
+            "conventional() for the textbook reading.")
+
+
+@_contextlib.contextmanager
+def degeneracy_watch():
+    """Count infinitesimal sources created inside the block.
+
+    Yields a callable returning the count so far, so nesting works: each level
+    reads its own delta and an inner watch does not consume the outer one's.
+
+    COUNTED FROM ZERO, AND THE FIRST IS FREE.  Whichever infinitesimal enters a
+    calculation first is the one the derivatives are read against, whether or
+    not anything called it a seed.  From the second onward the grades stay exact
+    and stop answering the conventional question.  So this works with an
+    explicit seed and without one: seed it and the seed is number one, or do not
+    and the first zero you write is.
+
+    SOURCES, NOT TERMS.  A composite can carry a hundred infinitesimal terms and
+    be perfectly ordinary, because they are all powers of the first one.  There
+    are three ways an infinitesimal enters: _seeded(), Composite.zero() and an
+    R1 conversion.  All three are counted, so nothing that merely propagates an
+    existing infinitesimal is counted again.
+
+    Measured on the committed library: ten ordinary expressions, including
+    sin(exp(sqrt(x))) and exp(x)/(1+x*x), create zero sources; x*x + R(0),
+    x*x + 0.0, x*x + (x-x) and R(0)*x**3 + x*x create exactly one each.
+
+    Not counted, and worth knowing: a composite written directly with a non-zero
+    grade, and 1/INF, both introduce grade content without passing either point.
+    Neither arises in ordinary use and both would need their own instrumentation.
+
+    The count is a module global, so it is not thread safe and it belongs around
+    one evaluation rather than around a long-lived section.
+    """
+    start = _inf_sources[0]
+    yield lambda: _inf_sources[0] - start
+
+
+def _makes_own_infinitesimal(f, at):
+    """Does f produce infinitesimal content when given NO seed?
+
+    Evaluated at a plain real, so anything infinitesimal in the result is the
+    formula's own, whatever route it took in.  That is the whole advantage over
+    counting origin events, which can only see the routes it was told about.
+
+    Sampled at a few points rather than proved, because a formula could make its
+    zero only somewhere else; the same limitation `_integrand_needs_lane`
+    carries.  Returns None when no probe point could be evaluated at all.
+    """
+    seen_any = False
+    for pt in ([at] if at else []) + [1.0, 2.0, 0.5]:
+        try:
+            y = _ensure_composite(f(R(float(pt))))
+        except Exception:
+            continue
+        seen_any = True
+        if any(_lead_order(d) != 0 and v != 0.0 for d, v in y.coeffs_dict().items()):
+            return True
+    return False if seen_any else None
+
+
+def taylor_degeneracy(f, at, name="f"):
+    """Evaluate f and report whether its Taylor reading is conventionally valid.
+
+    The verdict is carried by the result itself, so this is one evaluation and
+    the reading is off the number: see _mint and _join.  Every earlier scheme
+    here inspected the OPERANDS of a calculation, and an infinitesimal arrives
+    as the RESULT of one just as often -- `x*x + (x - x)` has no infinitesimal
+    operand anywhere and two sources by the end.
+
+    KNOWN GAP.  A source is recognised where it is born, and a composite
+    written by hand as Composite({-1: 1.0}) is not born at any of the three
+    places: it arrives already graded, with nothing to observe.  Recognising it
+    would mean scanning the coefficients of every composite ever constructed.
+    So `x*x + Composite({-1: 1.0})` and `x*x + R(1)/INF` read clean and are not.
+    A written zero -- R(0), ZERO, a raw 0, a cancellation -- is caught, and that
+    is how a second source is spelled in practice.
+    """
+    # Tracking on for the duration whatever the global setting is: this
+    # function exists to answer the question tracking answers, so switching it
+    # off globally must not silently turn the answer into "clean".
+    with track_degeneracy(), degeneracy_watch() as count:
+        x = _seeded(at)              # inside the watch: the seed is source one
+        try:
+            value = _ensure_composite(f(x))
+        except Exception:
+            value = None
+        n = count()
+    flag = bool(value is not None and value._deg)
+    return Degeneracy(n, value, at, flag=flag)
+
+
 def _effective_terms(default):
     """Return max(default, global minimum) for Taylor series length."""
     return max(default, _min_terms[0])
@@ -1297,9 +1950,11 @@ def _derivative_scope(order, terms):
     # after, exactly as the dimension cap above is handled.
     if old_order is not None:
         backend.max_order = max(old_order, order + 2)
+    _saved_sources = _inf_sources[0]   # see _extraction_scope
     try:
         yield
     finally:
+        _inf_sources[0] = _saved_sources
         _min_terms[0] = old_min
         MAX_ACTIVE_DIMS = old_cap
         if old_order is not None:
@@ -1528,10 +2183,13 @@ def _truncate_order(result, order):
         keep = ~over
         d2 = dims[keep]
         _, v = result._backend.to_arrays(result._data)
-        out = Composite._wrap(
+        # _join: dropping orders off a number does not change WHERE it came
+        # from.  Without this every transcendental lost the flag at its last
+        # step, because the truncation is the last thing sin() does.
+        return _join(Composite._wrap(
             result._backend.create_from_terms(d2, v[keep]), result._backend,
-            complete=_tighter(getattr(result, "_complete", None), order))
-        return out
+            complete=_tighter(getattr(result, "_complete", None), order)),
+            result)
     extra = [d for d in result.c if _dim_order(d) > order]
     if not extra:
         # Nothing to drop, but the bound still HOLDS and must be recorded --
@@ -1767,7 +2425,11 @@ def _like(x, terms):
     else:
         dims = np.array(sorted_dims, dtype=DIM_DTYPE)
     vals = np.array([terms[d] for d in sorted_dims], dtype=np.float64)
-    return Composite._wrap(be.create_from_terms(dims, vals), be, demote=False)
+    # Provenance follows x: a series built from x is a value DERIVED from it,
+    # not a new source.  Without this every transcendental would look like a
+    # leaf and sin(exp(sqrt(x))) would flag.
+    return _join(Composite._wrap(be.create_from_terms(dims, vals), be,
+                                 demote=False), x)
 
 
 def _vec_composite(terms):
@@ -3013,8 +3675,36 @@ def _warn_non_dyadic_exponent(x, s):
     """
     if _is_clean_dyadic(s):
         return
-    if x.st() != 0.0:
-        return                      # exponent stays in the coefficients
+    if (getattr(get_backend(), "EXACT_DIMS", False)
+            or getattr(x._backend, "EXACT_DIMS", False)):
+        # The whole warning is about float64 dimensions, so it has nothing to
+        # say when the grade is held exactly.  It fired on fractional_numpy for
+        # power(h, 1/3) and told the caller the index "will not always
+        # recombine" immediately after it recombined exactly: h**(1/3) cubed
+        # came back {-1: 1.0}, and so did 1/7 and 1/23.
+        #
+        # BOTH backends are asked, and the ACTIVE one first.  Asking only
+        # x._backend missed every case that matters: ZERO and the other module
+        # constants are built once at import, so they carry whichever backend
+        # was installed then, and power(ZERO, 1/3) under use_fractional_numpy()
+        # still warned.  The result is built on the active backend, so that is
+        # what decides exactness; x._backend is kept in the test because
+        # _operands converts toward the richer representation, so a value
+        # carrying an exact backend stays exact regardless of the global.
+        return
+    try:
+        if x.st() != 0.0:
+            return                  # exponent stays in the coefficients
+    except StandardPartUndefinedError:
+        # UNBOUNDED IS NOT "HAS A STANDARD PART".  st() raises when the dominant
+        # grade is positive, and this line called it unguarded, so the helper
+        # threw instead of warning -- power(ln(1/h), 1/3) died with
+        # StandardPartUndefinedError from inside a diagnostic.  That is the very
+        # case the docstring above says this was extended to cover, so it had
+        # never once fired there; it had crashed.  No standard part means
+        # nothing absorbs the exponent and it DOES land on the index, which is
+        # the condition to warn about, so fall through rather than return.
+        pass
     if not any(_dim_nonzero(d) for d in x.c):
         return                      # no dimension at all
     # _dim_order reads only the POWER component, so a pure log-axis term like
@@ -3029,7 +3719,8 @@ def _warn_non_dyadic_exponent(x, s):
         f"float approximation -- accurate to ~1e-16, but it will not always "
         f"recombine: h**(1/7) to the 7th lands at -0.9999999999999998, a "
         f"separate term from -1, so coeff(-1) then reads the wrong value. "
-        f"sqrt and repeated halving are exact and always will be.",
+        f"sqrt and repeated halving are exact and always will be, and "
+        f"config.use_fractional_numpy() makes every denominator exact.",
         stacklevel=3)
 
 
@@ -3158,10 +3849,11 @@ def _reject_pole(result, what: str, at: float):
 
 def derivative(f: Callable, at: float, terms: int = 12) -> float:
     """Compute f'(at) automatically."""
-    x = _seeded(at)
-    result = f(x)
-    _reject_pole(result, "derivative", at)
-    return result.d(1)
+    with _extraction_scope():
+        x = _seeded(at)
+        result = f(x)
+        _reject_pole(result, "derivative", at)
+        return result.d(1)
 
 
 def nth_derivative(f: Callable, n: int, at: float, terms: int = 12) -> float:

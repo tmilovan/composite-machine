@@ -38,7 +38,9 @@ carries no information about x` rather than pretending to have analysed it.
 
 import math
 
-from composite.composite_lib import Composite, R, ZERO
+from composite.composite_lib import (Composite, R, ZERO, _seeded,
+                                     Degeneracy, degeneracy_watch,
+                                     track_degeneracy)
 
 __all__ = ["explain", "Explanation"]
 
@@ -47,14 +49,17 @@ class Explanation:
     """What `explain` found.  `str()` is the sentence; the fields are the facts."""
 
     __slots__ = ("name", "at", "kind", "value", "slope", "order", "coefficient",
-                 "stability", "advice")
+                 "stability", "advice", "degeneracy")
 
     def __init__(self, name, at, kind, value=None, slope=None, order=None,
-                 coefficient=None, stability=None, advice=None):
+                 coefficient=None, stability=None, advice=None, degeneracy=None):
         self.name, self.at, self.kind = name, at, kind
         self.value, self.slope = value, slope
         self.order, self.coefficient = order, coefficient
         self.stability, self.advice = stability, advice
+        # How many infinitesimal sources f introduced on top of the seed.  None
+        # when it was not measured.  See composite_lib.Degeneracy.
+        self.degeneracy = degeneracy
 
     def __repr__(self):
         return "<Explanation %s at %s: %s>" % (self.name, self.at, self.kind)
@@ -88,7 +93,22 @@ class Explanation:
         if self.stability == "stable":
             tail = "; numerically stable"
         elif self.stability:
-            tail = "; numerically %s -- %s" % (self.stability, self.advice)
+            # No "numerically" prefix: every verdict string is already a noun
+            # phrase that stands on its own, and "numerically conventional
+            # derivative corrupted" is not a sentence.
+            tail = "; %s -- %s" % (self.stability, self.advice)
+        # The slope printed above is the slope of the expression AS WRITTEN.
+        # When a second infinitesimal entered, that is no longer the slope of
+        # the function the caller probably has in mind, and saying so here is
+        # the only place they would find out without asking.
+        # Only when the stability verdict has not already said it.  forensics
+        # reaches the same conclusion for some of these formulas and not others,
+        # and printing both makes the sentence say the same thing twice.
+        if (self.degeneracy is not None and self.degeneracy.degenerate
+                and "derivative corrupted" not in (self.stability or "")):
+            tail += ("; a second infinitesimal entered, so these are the "
+                     "derivatives of the expression as written, not of the "
+                     "function it resembles")
         return "%s at x = %g: %s%s" % (self.name, self.at, body, tail)
 
 
@@ -118,31 +138,47 @@ def explain(f, at, name="f"):
     `f` takes one number and returns one number, written against the library's
     functions.  `at` is an ordinary float.
     """
-    seed = (R(at) if at else Composite({})) + ZERO
+    # The seed is built inside the watch so that it counts as the first
+    # infinitesimal; degeneracy begins at the second.  _seeded is used rather
+    # than an open-coded seed so the two agree on what a seed is.
     try:
-        y = f(seed)
+        # Tracking on for the duration whatever the global setting is: explain
+        # reports degeneracy, so the switch being off must not turn the report
+        # into a silent "clean".  See composite_lib.set_degeneracy_tracking.
+        with track_degeneracy(), degeneracy_watch() as _count:
+            seed = _seeded(at)
+            y = f(seed)
+        # The verdict rides on y itself, so there is no second evaluation and
+        # nothing to probe: see composite_lib._join.
+        deg = Degeneracy(_count(), None, at,
+                         flag=bool(isinstance(y, Composite) and y._deg))
     except Exception as e:
         return Explanation(name, at, "refused", advice="%s: %s" % (type(e).__name__, e))
 
+    def _out(*a, **kw):
+        e = Explanation(*a, **kw)
+        e.degeneracy = deg
+        return e
+
     if not isinstance(y, Composite):
-        return Explanation(name, at, "constant", value=float(y))
+        return _out(name, at, "constant", value=float(y))
 
     order = y.lead_order()
     if order is None:
-        return Explanation(name, at, "nothing")
+        return _out(name, at, "nothing")
 
     dim = y.lead_dim()
     coeffs = y.coeffs_dict()
 
     if order < 0:
         if _log_axis(dim):                               # ln(x): unbounded, but slowly
-            return Explanation(name, at, "log-unbounded", coefficient=coeffs[dim])
-        return Explanation(name, at, "unbounded", order=-order,     # a pole
+            return _out(name, at, "log-unbounded", coefficient=coeffs[dim])
+        return _out(name, at, "unbounded", order=-order,     # a pole
                            coefficient=coeffs[dim])
 
     if order != int(order):                              # sqrt-like: a corner
         value = coeffs.get(0, 0.0)
-        return Explanation(name, at, "corner", value=value, order=order)
+        return _out(name, at, "corner", value=value, order=order)
 
     value = coeffs.get(0, coeffs.get((0, 0), 0.0))
     slope = coeffs.get(-1, coeffs.get((-1, 0), 0.0))
@@ -152,7 +188,7 @@ def explain(f, at, name="f"):
     # is no grade -1 term to read, and reporting the missing coefficient as
     # "slope 0" would be a number the function does not have.
     if _log_axis(dim) and -1 not in coeffs and (-1, 0) not in coeffs:
-        return Explanation(name, at, "log-value", value=value,
+        return _out(name, at, "log-value", value=value,
                            stability=stability, advice=advice)
 
     # A slope that lives on the log axis is not a number: x*ln(x) has value 0
@@ -160,8 +196,8 @@ def explain(f, at, name="f"):
     # the slope as 0.0 -- right coefficient, wrong axis.
     if any(isinstance(k, tuple) and k[0] == -1 and any(k[1:]) and v != 0.0
            for k, v in coeffs.items()):
-        return Explanation(name, at, "steep", value=value,
+        return _out(name, at, "steep", value=value,
                            stability=stability, advice=advice)
 
-    return Explanation(name, at, "value", value=value, slope=slope,
+    return _out(name, at, "value", value=value, slope=slope,
                        stability=stability, advice=advice)

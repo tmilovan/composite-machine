@@ -291,6 +291,7 @@ python demos/composite_forensics.py        # start here
 | demo | what it shows |
 |---|---|
 | [`composite_forensics.py`](demos/composite_forensics.py) | Is the formula bad, or is the problem hard? The two spellings of a quadratic root, one losing 25% of the answer, and the verdict that separates them. Also the failure float64 cannot see: a value that is right while its derivative is not. |
+| [`composite_degeneracy.py`](demos/composite_degeneracy.py) | Four questions that classically need four algorithms and four tolerances, all answered by reading one grade: rank deficiency from the grade of a determinant, root multiplicity from expanded coefficients alone, order of contact between two curves, and a vertex found without ever forming the curvature. The answers are integers, so there is nothing to threshold. 60 checks. |
 | [`composite_physics.py`](demos/composite_physics.py) | Dirac hydrogen to α⁸ from one evaluation, zero-point mode sums with the divergent and finite parts on separate grades, Schwarzschild at the horizon and near r = 0. 44 checks against closed forms. |
 | [`composite_roots.py`](demos/composite_roots.py) | Global root finding: intervals *proved* empty by a Taylor bound rather than sampled and hoped for, then Householder polishing that costs nothing because the derivatives are already there. |
 | [`composite_singularity.py`](demos/composite_singularity.py) | A power series locating its own nearest singularity and exponent, which is the blow-up time of an ODE and the critical point of a lattice model. |

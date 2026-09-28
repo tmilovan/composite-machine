@@ -422,18 +422,18 @@ def r1_on_a_vector_zero(t):
     Z = L - L                                  # wholly zero, vector-keyed
     t.true("D98 L - L is wholly zero", lambda: cl._is_wholly_zero(Z))
     t.eq("D99 0.0 + L uplifts to h + L",
-         lambda: str(0.0 + L), "|1|_(0,1) + |1|_(-1,0)")
+         lambda: str(0.0 + L), "1_(0,1) + 1_(-1,0)")
     # LITERAL expected value, not str(0.0 + L): comparing one live result to
     # another live result asserts nothing -- both sides move together, so the
     # check passes whatever the code does.  It also crashes rather than
     # reports, because `want` is evaluated at the call site.
     t.eq("D100 R(0) + L agrees with the bare zero",
-         lambda: str(R(0) + L), "|1|_(0,1) + |1|_(-1,0)")
-    t.eq("D101 1/(h*L) lands at (1,-1)", lambda: str(1 / Z), "|1|_(1,-1)")
+         lambda: str(R(0) + L), "1_(0,1) + 1_(-1,0)")
+    t.eq("D101 1/(h*L) lands at (1,-1)", lambda: str(1 / Z), "1_(1,-1)")
     t.true("D102 the uplift is strictly infinitesimal",
            lambda: cl._dim_negative(sorted((Z + 1).c)[0]))
     # R2: a zero among nonzero terms is a TERM, not an operand -- unchanged
-    t.eq("D103 Z*2 stays a zero term", lambda: str(Z * 2), "|0|_(0,1)")
+    t.eq("D103 Z*2 stays a zero term", lambda: str(Z * 2), "0_(0,1)")
     # and the scalar spellings must not have moved at all
     t.eq("D104 scalar 1/0 unchanged", lambda: str(1 / R(0)), "|1|\u2081")
     t.eq("D105 scalar 0.0 + h unchanged",

@@ -4,6 +4,7 @@
 # License: AGPL-3.0
 
 from abc import ABC, abstractmethod
+from fractions import Fraction as _Fraction
 from typing import Tuple
 import numpy as np
 
@@ -39,6 +40,29 @@ class InexactGradeError(ArithmeticError):
     """
 
 
+FRACTIONAL_HINT = (
+    " A backend that CAN hold this grade exists: config.use_fractional_numpy() "
+    "(or use_fractional_dict / use_fractional_torch) stores the power axis on a "
+    "rational lattice, so thirds, sevenths and the rest are exact integers "
+    "internally and merge as they should. It is not the default because the "
+    "lattice only helps when a fractional grade is actually present, and float64 "
+    "is faster when none is.")
+
+
+def inexact_grade(a, b, got):
+    """The InexactGradeError for a grade sum float64 could not hold.
+
+    One constructor for both raise sites, so the pointer to the fractional
+    backend cannot be present in one message and missing from the other.  A
+    capability nobody can find from the error that blocks them is not a
+    capability.
+    """
+    return InexactGradeError(
+        f"grade {a!r} + {b!r} is not exact in float64 (got {got!r}); the "
+        f"product would carry an identifier one ulp from the one it should "
+        f"share." + FRACTIONAL_HINT)
+
+
 def _add_exact(a, b):
     """a + b, and whether float64 held it exactly (TwoSum).
 
@@ -57,11 +81,45 @@ def dim_cast(d):
 
     A VECTOR dimension (a tuple over a declared basis) passes through whole --
     float() on a tuple raises, and there is nothing to normalise.
+
+    A FRACTION passes through whole for the same reason one step further on:
+    float(Fraction(1,3)) is 0.3333333333333333, which is a different identifier
+    from a third, and the whole point of the fractional backend is that a third
+    stays a third.  Integral fractions still come back as ints, so a caller who
+    never touches a fractional grade sees exactly what it saw before.
     """
     if isinstance(d, tuple):
         return d
+    if isinstance(d, _Fraction):
+        return int(d) if d.denominator == 1 else d
     f = float(d)
     return int(f) if f.is_integer() else f
+
+
+def dim_fraction(d):
+    """A dimension as an exact Fraction.
+
+    An int or a Fraction is exact already.  A float is the awkward one: the
+    binary value 0.3333333333333333 IS exactly
+    6004799503160661/18014398509481984, and taking that literally would put a
+    lattice denominator in the quadrillions for a dimension the caller meant as
+    a third.  So prefer the SIMPLEST fraction that maps back to the same
+    float64, and fall back to the exact binary value when none does.  Integer
+    and dyadic floats round-trip immediately and are unaffected.
+
+    Lives here rather than in the fractional backend because __truediv__ needs
+    it too: mixing a Fraction dimension with a float one subtracts in float and
+    lands an ulp out, which is a wrong grade rather than an imprecise one.
+    """
+    if isinstance(d, _Fraction):
+        return d
+    if isinstance(d, (int, np.integer)):
+        return _Fraction(int(d))
+    f = float(d)
+    if f.is_integer():
+        return _Fraction(int(f))
+    simple = _Fraction(f).limit_denominator(10 ** 6)
+    return simple if float(simple) == f else _Fraction(f)
 
 
 class CompositeBackend(ABC):
@@ -75,6 +133,13 @@ class CompositeBackend(ABC):
     # represent a scalar dimension d as (d, 0, ...), but not the reverse.
     # _operands() uses this to convert toward the richer representation.
     VECTOR_DIMS = False
+
+    # A backend that can hold a Fraction dimension EXACTLY.  The constructor
+    # asks before passing one through: handing a Fraction to a float64 backend
+    # gives it a mix of Fraction and float keys for the same grade, which never
+    # merge, so the default stays float and only a backend that says yes sees
+    # the exact value.
+    EXACT_DIMS = False
 
 
     # --- lifecycle ---
