@@ -91,10 +91,23 @@ def poly(coeffs):
 
 
 def polydiv(a, b):
-    """Quotient and remainder, deg(R) < deg(B), from the library's division."""
+    """Quotient and remainder, deg(R) < deg(B), from the library's division.
+
+    The remainder is formed under `conventional()`, because a polynomial
+    remainder is a question in ORDINARY arithmetic: here a grade is an
+    exponent, not an order in h, so an exact division has to leave nothing
+    rather than leaving what it cancelled.  Without it, `a - q*b` on an exact
+    division deposits (a)*h -- every coefficient shifted one exponent down --
+    and the non-negative part of that survives as a spurious remainder.
+    Measured: (1-3z+2z^2)/(1-z) came back with remainder {0: -3, 1: 2}, which
+    is the dividend shifted, and deg(R) < deg(B) failed.
+    """
+    from .composite_lib import conventional
     q = Composite({k: v for k, v in (a / b).coeffs_dict().items()
                    if k >= 0 and abs(v) > _TOL})
-    return q, _clean(a - q * b)
+    with conventional():
+        rem = a - q * b
+    return q, _clean(rem)
 
 
 def _balance(b):

@@ -388,6 +388,35 @@ def _r1(c):
         denot=_merge_denot(_denot_of(c), _lead_order(dims[0]))))
 
 
+CANCELLATION_CARRIES = "quantity"
+"""What a cancellation deposits.  "quantity" or "magnitude".
+
+    quantity    a - a  =  a * h.  The ANNIHILATED QUANTITY, one grade down.
+                6 - 6 is |6|_-1 and (3+h) - (3+h) is |3|_-1 + |1|_-2.
+    magnitude   only the deepest coefficient, shifted.  (3+h) - (3+h) is
+                |0|_0 + |1|_-2.  Kept reachable for comparison.
+
+"quantity" is the rule because "magnitude" only half-keeps Euler.  Measured:
+
+    (x-x)/(y-y), x=3+h y=2+h    magnitude 1.0        quantity 1.5 = x/y
+    a*(b-b) == a*b - a*b        magnitude 32/64      quantity 64/64
+
+Under "magnitude" different SCALAR zeros get different characters and different
+COMPOSITE zeros all come back as 1, because the deepest coefficient of a seeded
+quantity is always 1.  Carrying the whole quantity gives the ratio at every
+order, which is what §85 asks for.
+
+It also restores distributivity across a cancellation with no sign sacrifice:
+a*(b*h) and (a*b)*h are the same term by associativity of multiplication, sign
+included, so the trilemma does not apply -- it was about a residue read off a
+cancelling PAIR of coefficients, and `a` in `a - a` is one quantity.
+
+THE COST.  `a - a` has `a` on both sides, so the annihilated quantity is
+unambiguous.  `a + (-a)` does not, and taking it from the left operand makes
+`a + (-a)` and `(-a) + a` differ -- the same law CANCELLATION_SIGNED = True
+broke, for the same reason.
+"""
+
 CANCELLATION_SIGNED = False
 """Residue of a cancellation keeps the SIGN of what was annihilated.
 
@@ -599,6 +628,27 @@ def _cancellation_residue(a, b, result):
     dims, vals = result._backend.to_arrays(result._data)
     if len(dims) == 0:
         return result                       # NOTHING has no grade to convert
+    if CANCELLATION_CARRIES == "quantity":
+        # a - a = a * h.  Every grade of the annihilated quantity moves down
+        # one, so the residue IS that quantity and the ratio of two zeros is
+        # the ratio of what they destroyed.  Built by shifting rather than by
+        # `a * ZERO` so it cannot re-enter this function or meet the order cap.
+        src = a if not _is_wholly_zero(a) else b
+        sdims, svals = src._backend.to_arrays(src._data)
+        if len(sdims) == 0:
+            return result                   # nothing was annihilated
+        shifted = {_dim_shift(sd, -1): float(sv) for sd, sv in zip(sdims, svals)}
+        out = _like(src, shifted)
+        if _is_wholly_zero(out):
+            return result                   # would recurse: leave it to _r1
+        new_dim = out.lead_dim()
+        order = _lead_order(new_dim)
+        out._denot = _merge_denot(_denot_of(result), order)
+        out._complete = result._complete
+        _mint(out)
+        _warn_cancelled(new_dim, order, out.coeff(new_dim))
+        return out
+
     d = dims[0]                             # to_arrays is sorted ascending
     mag = a.coeff(d)
     if mag == 0.0:

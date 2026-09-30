@@ -162,7 +162,13 @@ def z4_laws(t):
             [1.0, -2.0, 0.5, 3.0])})
 
     laws = {"a*1 = a": lambda a, b, c: a * R(1) == a,
-            "a+b = b+a": lambda a, b, c: a + b == b + a,
+            # COMMUTATIVITY OF + IS NOT A LAW HERE either, once a cancellation
+            # carries the annihilated quantity: a - a = a*h reads that quantity
+            # off the operands, and in `a + (-a)` the two operands are NOT the
+            # same quantity, so the two orders give a*h and -a*h.  Asserting it
+            # would forbid the rule that makes (x-x)/(y-y) = x/y instead of 1.
+            # z4c_cancelling_pair pins what holds instead.
+            # Multiplication is unaffected and stays below.
             "a*b = b*a": lambda a, b, c: a * b == b * a,
             # ASSOCIATIVITY OF + IS NOT A LAW HERE, and must not be asserted
             # as one.  (a+b)+c and a+(b+c) are different EVENTS: one grouping
@@ -234,6 +240,25 @@ def z5_expressed_vs_absent(t):
     msg = str(w[0].message) if w else ""
     t.true("Z5.20 and the bare-zero warning says so: " + msg[:46] + "...",
            "d.get(k)" in msg and "Composite({})" in msg, msg[:90])
+
+
+# =============================================================================
+def z4c_cancelling_pair(t):
+    head("Z4c  a cancelling pair: a-a is unambiguous, a+(-a) is not")
+    # a - a  has the quantity on both sides, so it is a*h whichever way it is
+    # read.  a + (-a) has a on one side and -a on the other, and the rule reads
+    # the left one, so the two orders differ by a sign.  Pinned rather than
+    # deleted: it is the price of Euler's ratio surviving at every order.
+    for v in (2.0, 6.0, -3.0, 0.5):
+        a = Composite({0: v, -1: 1.0})
+        t.exact(f"Z4c ({v}+h) - itself is (that)*h",
+                (a - a).coeffs_dict(), (a * ZERO).coeffs_dict())
+        t.true(f"Z4c ({v}+h) + (-itself) differs from the other order",
+               (a + (-a)).coeffs_dict() != ((-a) + a).coeffs_dict(),
+               f"{(a + (-a)).coeffs_dict()} vs {((-a) + a).coeffs_dict()}")
+        t.exact(f"Z4c and the two differ by a sign only",
+                {k: -v2 for k, v2 in (a + (-a)).coeffs_dict().items()},
+                ((-a) + a).coeffs_dict())
 
 
 # =============================================================================
@@ -630,7 +655,7 @@ def z11_deconvolve_emits_unique_grades(t):
 
 def run_all():
     t = Suite()
-    for fn in (z1_expressed, z2_family, z3_substitution, z4_laws, z4b_grouping,
+    for fn in (z1_expressed, z2_family, z3_substitution, z4_laws, z4b_grouping, z4c_cancelling_pair,
                z5_expressed_vs_absent, z6_naming, z7_equality_is_identity,
                z8_r1_reaches_the_transcendentals,
                z9_nothing_keeps_the_constant,

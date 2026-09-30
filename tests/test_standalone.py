@@ -592,10 +592,23 @@ def test_algebraic_properties():
     lhs_add = (a + b) + c
     rhs_add = a + (b + c)
     suite.assert_true("Additive associativity", lhs_add.c == rhs_add.c)
+    # a - a = a*h: a cancellation carries the annihilated QUANTITY, one grade
+    # down, so a + (-a) is a*h and not a zero awaiting conversion.  Dimension 0
+    # still holds nothing -- the value is gone, which is the part that has to be
+    # right -- and the quantity reappears from grade -1 down.
     neg_a = -a
     sum_zero = a + neg_a
-    suite.assert_eq("a + (-a) = 0 at dim 0", sum_zero.c.get(0, 0), 0)
-    suite.assert_eq("a + (-a) = 0 at dim -1", sum_zero.c.get(-1, 0), 0)
+    suite.assert_eq("a + (-a) leaves nothing at dim 0", sum_zero.c.get(0, 0), 0)
+    suite.assert_eq("a + (-a) carries a at dim -1", sum_zero.c.get(-1, 0), 3)
+    suite.assert_eq("a + (-a) carries a at dim -2", sum_zero.c.get(-2, 0), 2)
+    suite.assert_true("a + (-a) == a * ZERO", sum_zero.c == (a * ZERO).c)
+    # THE COST OF THAT RULE, asserted so it cannot drift unnoticed: the
+    # annihilated quantity is read from the LEFT operand, and in `a + (-a)` the
+    # two operands are not the same quantity, so the two orders disagree.  In
+    # `a - a` they are, which is why subtraction has no such ambiguity.
+    suite.assert_true("and a + (-a) != (-a) + a, since the left operand decides",
+                      (a + neg_a).c != (neg_a + a).c)
+    suite.assert_true("while a - a has no ambiguity", (a - a).c == (a * ZERO).c)
     return suite.report()
 
 
