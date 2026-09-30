@@ -800,15 +800,42 @@ so it is True for NOTHING and False for a dimensioned zero.
   A written zero, `Composite({0: 0.0})`, is one.
 - `is_zero(x)` — either of the above.
 
-### `CANCELLATION_SIGNED`
+### `CANCELLATION_CARRIES`
 
-Module switch, `False`. A cancellation converts at the site and the residue
-carries the **magnitude** annihilated: `6 - 6` is `|6|₋₁`, `(-6) - (-6)` is
-`|6|₋₁`. A magnitude has no sign, because in `a + (-a)` both operands are
-annihilated symmetrically and neither is the one to take a sign from.
+Module switch, `"quantity"`. What a cancellation deposits.
 
-Set True and the residue keeps the left operand's sign. That is parked, not
-supported: it makes `2 + (-2)` and `(-2) + 2` different numbers.
+`"quantity"` — the whole annihilated quantity, one grade down: **`a - a = a*h`**.
+
+```python
+R(6) - R(6)                  # |6|₋₁
+R(-6) - R(-6)                # |-6|₋₁      the quantity, so the sign comes too
+(R(3)+ZERO) - (R(3)+ZERO)    # |3|₋₁ + |1|₋₂
+```
+
+Equivalently, grade by grade: each dimension that cancels converts where it
+stands, carrying its own coefficient. Multiplying by `h` shifts every grade down
+by one, which is the shift R1 already prescribes, so this is R1 with the
+coefficients kept rather than a separate rule.
+
+Two properties follow rather than being imposed. `(a*h)/(b*h) = a/b`, so the
+ratio between two zeros is the ratio of what they destroyed —
+`(2-2)/(3-3)` is 2/3 and `(x-x)/(y-y)` is `x/y`. And `a*(b*h)` equals `(a*b)*h`
+by associativity of multiplication, so distributivity across a cancellation
+holds, sign included.
+
+**The cost.** `a - a` has the quantity on both sides and is unambiguous;
+`a + (-a)` does not, the rule reads the left operand, and the two orders differ
+by a sign. So `2 + (-2)` is `|2|₋₁` and `(-2) + 2` is `|-2|₋₁`: addition does not
+commute on a cancelling pair. The difference is never more than a sign.
+Multiplication is unaffected — commutative and associative either way.
+
+`"magnitude"` — the previous rule, keeping only the deepest coefficient, so
+`(3+h) - (3+h)` is `|0|₀ + |1|₋₂`. Kept reachable for comparison. It keeps
+addition commutative, and in exchange every composite zero has ratio 1 and
+distributivity fails wherever the other factor is negative.
+
+`CANCELLATION_SIGNED` applies only under `"magnitude"`, choosing whether that
+coefficient keeps its sign.
 
 ### `CONVENTIONAL_STRICT`
 

@@ -54,35 +54,60 @@ If it carries several zeros, convert the **lowest dimension only**. Once that
 one has converted the composite holds a nonzero, so by R2 every remaining zero
 is inert — and, by R2, retained.
 
-**R1 applies AT THE SITE for a cancellation, and the residue carries what was
-annihilated.** The magnitude exists only in the operands, so it is read there
-rather than left for the next use:
+**R1 applies AT THE SITE for a cancellation, and the residue is the whole
+annihilated quantity, one grade down:**
 
 ```
-6 - 6        ->  |6|_-1            not |0|_0 awaiting conversion
-(-6) - (-6)  ->  |6|_-1            the magnitude, so no sign
-1 - 1        ->  |1|_-1
-0 - 0        ->  |1|_-2            R(0) is |1|_-1, so this cancels at grade -1
+a - a  =  a * h
 ```
 
-The lowest grade converts exactly as above; what changes is the coefficient
-deposited, which is that grade's rather than a unit. Note that for a seeded
-quantity the lowest grade's coefficient usually IS 1, so `x - x`, `x*x - x*x`
-and `ZERO - ZERO` are unchanged by this. R1 in the form stated first is left
-with the **written** and **manufactured** zeros, where nothing was annihilated
-and a unit is all there is to deposit.
+The quantity exists only in the operands, so it is read there rather than left
+for the next use:
 
-**Why the magnitude and not a unit.** With a unit, every cancellation is the
-same character and every ratio between two zeros is 1 — `(2-2)/(3-3)` came out
-1, and `(6-6)/(2-2)` came out 1. That is precisely the collapse §85 forbids:
-different zeros need different characters or the ratio is lost. With the
-magnitude they are 2/3 and 3.
+```
+6 - 6              ->  |6|_-1                   not |0|_0 awaiting conversion
+(-6) - (-6)        ->  |-6|_-1                  the quantity, so the sign comes too
+1 - 1              ->  |1|_-1
+0 - 0              ->  |1|_-2                   R(0) is |1|_-1, cancelling at grade -1
+(3+h) - (3+h)      ->  |3|_-1 + |1|_-2          every grade converts, not only the lowest
+(3+h)**2 - same    ->  |9|_-1 + |6|_-2 + |1|_-3
+```
 
-**The residue has no sign, because a magnitude has none.** In `a + (-a)` both
-operands are annihilated symmetrically and neither is the one to take a sign
-from, so `2 + (-2)` and `(-2) + 2` both give `|2|_-1`. Taking the sign from an
-operand instead would make those two differ, which is argument order deciding a
-value. (Recorded in `CANCELLATION_SIGNED`, parked at the unsigned rule.)
+Two readings of the same rule, and they agree term for term. Grade by grade:
+each dimension that goes to zero converts where it stands, carrying its own
+coefficient — `3 - 3` gives `|3|_-1` and `h - h` gives `|1|_-2`, and their sum
+is the line above. Or as a whole: multiplying by `h` shifts every grade down by
+one, because `h` is the unit at grade -1, which is the shift R1 already
+prescribes. So `a - a = a*h` is not an extra axiom; it is R1 with the
+coefficients kept.
+
+R1 in the form stated first is left with the **written** and **manufactured**
+zeros, where nothing was annihilated and a unit is all there is to deposit.
+
+**Why the quantity and not a unit, or just a magnitude.** With a unit every
+cancellation is the same character and every ratio between two zeros is 1 —
+`(2-2)/(3-3)` came out 1 — which is precisely the collapse §85 forbids. Keeping
+only the deepest coefficient fixes that for scalars and not for composites,
+because the deepest coefficient of a seeded quantity is always 1: `(x-x)/(y-y)`
+still came out 1 where `x/y` is 1.5. Carrying the whole quantity gives the ratio
+at every order, since `(a*h)/(b*h) = a/b` is a division the field already
+performs. Measured: `(2-2)/(3-3)` is 2/3, `(6-6)/(2-2)` is 3, `(x-x)/(y-y)` is
+`x/y`.
+
+It also restores **distributivity across a cancellation** with nothing given up
+for it, because `a*(b*h)` and `(a*b)*h` are the same term by associativity of
+multiplication — sign included. Measured 64/64 on scalar pairs where keeping
+only the magnitude gave 32/64, failing on every negative factor.
+
+**The cost is `a + (-a)`.** In `a - a` the annihilated quantity appears
+identically on both sides, so it is unambiguous. In `a + (-a)` the operands are
+`a` and `-a`, the rule reads the left one, and the two orders differ by a sign:
+`2 + (-2)` is `|2|_-1` and `(-2) + 2` is `|-2|_-1`. So commutativity of addition
+does not hold on a cancelling pair. There is no symmetric composite to take
+instead — the only symmetric choice is a magnitude, which is what collapses the
+composite ratios back to 1. The difference is never more than a sign, and
+`z4c_cancelling_pair` asserts that. (Selected by `CANCELLATION_CARRIES`, which
+also keeps the magnitude rule reachable for comparison.)
 
 ```
 0_3 + 0_-1 + 0_-3
@@ -131,11 +156,12 @@ the massless photon `c - v`, a supersymmetric vacuum sum, and a remnant at
 exactly `M = 1`. In each, the identity converted and the residue was larger
 than the real structure around it: the photon's gap came out `h` against an
 infinitesimal-mass gap of `h**2/2`, and the longitudinal term of `k.J` came out
-1, 0.25 or 0.01 depending on how the mass was scaled. Carrying the magnitude
+1, 0.25 or 0.01 depending on how the mass was scaled. Carrying the quantity
 makes this LARGER, not smaller — `c - v` at `v = c` now deposits
-`|299792458|_-1` where it deposited `|1|_-1` — so the guidance is unchanged and
-more pressing: an identity that is known in advance should be written as
-`Composite({})`, which is NOTHING and deposits no order.
+`|299792458|_-1` where it deposited `|1|_-1`, and a cancelled composite deposits
+every grade it had — so the guidance is unchanged and more pressing: an identity
+that is known in advance should be written as `Composite({})`, which is NOTHING
+and deposits no order.
 
 R1 is correct as specified and stays as specified. What the caller must know is
 that an identity has to be written as `NOTHING` deliberately, because the
