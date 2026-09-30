@@ -32,7 +32,11 @@ def test_lead_order_handles_fractional_and_log_axes():
 
 def test_lead_order_skips_zero_coefficients_and_nothing():
     assert Composite({}).lead_order() is None
-    assert (R(1) - R(1)).lead_order() is None        # all coefficients zero
+    assert Composite({0: 0.0}).lead_order() is None  # all coefficients zero
+    # A CANCELLATION is no longer all-zero: it converts at the site and leads
+    # at first order, carrying the magnitude it annihilated.
+    assert (R(1) - R(1)).lead_order() == 1
+    assert (R(6) - R(6)).lead_order() == 1
     assert ((R(1) + H) - H).lead_order() == 0        # the cancelled term does not lead
 
 

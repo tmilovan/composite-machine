@@ -535,7 +535,12 @@ def t8_zero_sectors(t):
     # Per-sector arithmetic through Composite.__add__ made it an operand, and
     # R1 converted it -- an infinitesimal manufactured inside a number nobody
     # used as a zero.  Committed, and no suite caught it.
-    z = Composite({0: 5.0}) - Composite({0: 5.0})
+    # The zero has to be a WRITTEN one.  `Composite({0:5}) - Composite({0:5})`
+    # is no longer a zero at all: a cancellation converts at the site and keeps
+    # what it annihilated, so it arrives here as |5|_-1 -- a genuine series,
+    # never a zero sector, and the guard correctly does not fire on it.
+    # T8.2 below covers that case.
+    z = Composite({0: 0.0})
     A = Transseries({0: R(1), 1: z})
     B = Transseries({1: R(5)})
     two = Transseries({0: R(2)})
@@ -546,6 +551,21 @@ def t8_zero_sectors(t):
                f"(was leaking |1|_-1)", got == want, f"{got} vs {want}")
     t.true("T8.20 and sector 0 is untouched by any of it",
            d((A + B).sectors[0]) == {0: 1.0}, f"{d((A + B).sectors[0])}")
+
+    # A CANCELLED sector is not a zero sector.  5 - 5 leaves |5|_-1, so sector
+    # 1 holds 5h and every operation treats it as the series it is.  Nothing is
+    # manufactured here: the 5 was annihilated and the residue records its size.
+    zc = Composite({0: 5.0}) - Composite({0: 5.0})
+    t.true(f"T8.2 a cancellation reaches the sector as {zc}, not a zero",
+           d(zc) == {-1: 5.0}, f"{d(zc)}")
+    Ac = Transseries({0: R(1), 1: zc})
+    for lbl, got, want in (("Ac + B", d((Ac + B).sectors[1]), {-1: 5.0, 0: 5.0}),
+                           ("Ac - B", d((Ac - B).sectors[1]), {-1: 5.0, 0: -5.0}),
+                           ("Ac * 2", d((Ac * two).sectors[1]), {-1: 10.0})):
+        t.true(f"T8.2 ({lbl}).sectors[1] = {got}, the series says {want}",
+               got == want, f"{got} vs {want}")
+    t.true("T8.21 and sector 0 is untouched there too",
+           d((Ac + B).sectors[0]) == {0: 1.0}, f"{d((Ac + B).sectors[0])}")
 
 
 def run_all():

@@ -896,16 +896,20 @@ def test_subtraction_rules():
     z3 = ZERO * ZERO * ZERO
     z4 = ZERO * ZERO * ZERO * ZERO
 
-    # Rule 1: R(5)-R(5) = 0 at dim[0]. No shift.
+    # Rule 1: R(5)-R(5) shifts to dim[-1] and the residue IS what cancelled.
+    # The magnitude exists only at the cancellation site, so it is read there;
+    # a residue of 1 regardless of operand is what made the conversion
+    # inhomogeneous, and multiplication could not distribute across it.
     r55 = R(5) - R(5)
-    suite.assert_eq("R(5)-R(5) is zero", r55.st(), 0)
-    suite.assert_eq("R(5)-R(5) stays at dim[0]", r55.coeff(0), 0)
-    suite.assert_eq("R(5)-R(5) no dim[-1]", r55.coeff(-1), 0)
+    suite.assert_eq("R(5)-R(5) has no standard part", r55.st(), 0)
+    suite.assert_eq("R(5)-R(5) leaves nothing at dim[0]", r55.coeff(0), 0)
+    suite.assert_eq("R(5)-R(5) leaves 5 at dim[-1]", r55.coeff(-1), 5)
 
-    # Rule 2: R(1)-R(1) = 0 at dim[0], same
+    # Rule 2: same shape, magnitude 1, which is the 1 - 1 != 0 statement
     r11 = R(1) - R(1)
-    suite.assert_eq("R(1)-R(1) is zero", r11.st(), 0)
-    suite.assert_eq("R(1)-R(1) stays at dim[0]", r11.coeff(0), 0)
+    suite.assert_eq("R(1)-R(1) has no standard part", r11.st(), 0)
+    suite.assert_eq("R(1)-R(1) leaves nothing at dim[0]", r11.coeff(0), 0)
+    suite.assert_eq("R(1)-R(1) leaves 1 at dim[-1]", r11.coeff(-1), 1)
 
     # Rules 3-6: 0**a - 0**a = 0**(a+1).
     # Compared as NUMBERS, not as coefficient dicts.  Subtraction leaves the

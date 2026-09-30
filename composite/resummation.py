@@ -64,9 +64,19 @@ def _clean(c, scale=1.0):
     The library keeps EXPRESSED zeros on purpose -- a dimension exists because
     the computation built it.  That is right for the arithmetic and wrong for
     a degree test, which must not see a leading 0*z^5 as degree 5.
+
+    NEGATIVE GRADES GO TOO, for the same reason and by the rule already stated
+    at the top of this module: a polynomial IS the non-negative part, and `/`
+    here is series division that continues into z^-1, z^-2.  The quotient in
+    `polydiv` has always taken its non-negative part; the remainder did not
+    need to, because a cancellation used to leave an inert 0_k.  It converts at
+    the site now and carries what it annihilated, so A - Q*B can land a real
+    coefficient at z^-1 -- which is an infinitesimal event recorded in a
+    container that has no infinitesimals.  Projecting is the same move `st()`
+    makes for a real number, not a workaround for it.
     """
     return Composite({k: v for k, v in c.coeffs_dict().items()
-                      if abs(v) > _TOL * scale})
+                      if k >= 0 and abs(v) > _TOL * scale})
 
 
 def degree(c):

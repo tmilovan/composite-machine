@@ -379,13 +379,201 @@ def _r1(c):
     # (-1, 0) by this convention, so this only makes the two paths agree.
     dims[0] = _dim_shift(dims[0], -1)
     vals[0] = 1.0
-    # A fresh source, and the operand's own provenance on top: the conversion
-    # creates infinitesimal content the operand did not have, so this is a
-    # birth, not a carry.  _mint records it in _pending_mints for the enclosing
-    # operation, which is the only place it can be seen from -- see _carries.
-    converted = _mint(Composite._wrap(c._backend.create_from_terms(dims, vals),
-                                      c._backend, demote=False))
-    return _join(converted, c, minted=(converted._src,))
+    return Composite._wrap(c._backend.create_from_terms(dims, vals),
+                           c._backend, demote=False,
+                           denot=_merge_denot(_denot_of(c), _lead_order(dims[0])))
+
+
+CANCELLATION_SIGNED = False
+"""Residue of a cancellation keeps the SIGN of what was annihilated.
+
+True  -> (-6) - (-6) is -6_-1.  Multiplication distributes across cancellation
+         (81/81 on scalar pairs) and `a + b == b + a` fails on exactly the
+         cancelling pair b == -a (73/81).
+False -> (-6) - (-6) is 6_-1.  Addition stays commutative (81/81) and
+         distributivity holds only where the other factor is positive (45/81).
+
+No residue function can do both: commutativity needs m(v,-v) = m(-v,v), and
+distributivity at factor -1 needs m(-v,v) = -m(v,-v), so m = 0 -- which is the
+conventional ring, and the corner this system exists to leave.
+"""
+
+
+_CANCELLED_MSG = (
+    "a cancellation at grade %s added an order-%g infinitesimal of magnitude "
+    "%.6g. This is a DENOTATION, not a corruption: an expressed zero of "
+    "magnitude m at grade -k denotes m*(x-a)**k, so from here the jet is the "
+    "exact jet of the function the expression denotes rather than of its "
+    "classical reading. Measured: x*x*(R(2)-R(2)) + x*x gives 9, 24, 26, 12, "
+    "and so does 2x**3 - 5x**2 computed independently -- a real slope and a "
+    "real acceleration, of that function. The standard part is unchanged; "
+    "orders from %g are the denoted reading. Composite({}) is NOTHING and adds "
+    "no order, if the classical reading was intended.")
+
+
+CONVENTIONAL_STRICT = False
+"""What d(n) does when the jet is not the CONVENTIONAL one.
+
+False (default) warns and returns the value.  True raises
+NotConventionalError.  Warning is the default because the value is not wrong:
+an expressed zero of magnitude m at grade -k denotes m*(x-a)**k, and read that
+way the jet is the exact jet of the function the expression denotes.  Measured:
+
+    x*x*(R(2)-R(2)) + x*x   jet 9, 24, 26, 12
+    2x**3 - 5x**2           jet 9, 24, 26, 12    the same function, independently
+
+So d(n) returns a true derivative -- a real slope, a real acceleration -- of
+that function rather than of the classical reading of the formula.  Refusing it
+would be refusing a correct answer, which is why strictness is opt-in: it is
+for a caller who wants classical semantics and would rather fail than receive
+the other reading.
+"""
+
+
+class NotConventionalError(ValueError):
+    """Raised by d(n) under CONVENTIONAL_STRICT when the jet is not classical."""
+
+
+_DENOT_MSG = (
+    "d(%s) is not the conventional derivative. An expressed zero entered this "
+    "value at order %g, and an expressed zero of magnitude m at grade -k "
+    "denotes m*(x-a)**k -- so this jet is the exact jet of the function the "
+    "expression DENOTES, not of its classical reading. It is a true derivative "
+    "of that function, not a corrupted one: orders below %g are classical, "
+    "orders from %g are not. To get the classical reading, spell the annihilation "
+    "as Composite({}) (NOTHING adds no order) or re-evaluate the function with "
+    "the conversions off. Set CONVENTIONAL_STRICT = True to raise here instead.")
+
+
+def _report_denotation(n, order):
+    """d(n) reached an order an expressed zero contributed to."""
+    msg = _DENOT_MSG % (n, order, order, order)
+    if CONVENTIONAL_STRICT:
+        raise NotConventionalError(msg)
+    import warnings
+    warnings.warn(msg, stacklevel=3)
+
+
+def _denot_of(x):
+    """The marker, tolerating an object that never assigned the slot.
+
+    Four places build a Composite through __new__ and assign only the fields
+    they know about -- TracedComposite, and forensics' _Audited in three spots.
+    A __slots__ attribute that was never set raises AttributeError on READ, so
+    every read goes through here.  Measured when it did not: explain() came
+    back with stability None and test_forensics aborted.
+    """
+    return getattr(x, "_denot", None)
+
+
+def _lead_or_zero(x):
+    """lead_order, with NOTHING and a bare scalar reading as 0."""
+    o = x.lead_order() if isinstance(x, Composite) else None
+    return 0 if o is None else o
+
+
+def _merge_denot(*cands):
+    """The SHALLOWEST denotation order among the candidates, or None."""
+    vals = [c for c in cands if c is not None]
+    return min(vals) if vals else None
+
+
+def _denot_additive(a, b):
+    """+ and - keep each operand's order: neither shifts a grade (R4)."""
+    da, db = _denot_of(a), _denot_of(b)
+    if da is None and db is None:
+        return None                      # the common path costs two compares
+    return _merge_denot(da, db)
+
+
+def _denot_product(a, b):
+    """Grades ADD, so a denoted operand moves by the other's leading order.
+
+    Measured: a residue at order 1 times an ordinary number stays at 1, times
+    ZERO goes to 2, divided by ZERO comes back to 0 -- exactly lead_order
+    arithmetic, which is why the shift is read off lead_order rather than
+    guessed.  lead_order() is only called when a marker exists, so the
+    unmarked path pays nothing.
+    """
+    da, db = _denot_of(a), _denot_of(b)
+    if da is None and db is None:
+        return None
+    return _merge_denot(None if da is None else da + _lead_or_zero(b),
+                        None if db is None else db + _lead_or_zero(a))
+
+
+def _denot_quotient(a, b):
+    """Division subtracts the divisor's leading order, so a marker moves UP.
+
+    That is the case that makes the marker necessary rather than inferable:
+    residue / ZERO reaches order 0, where even the standard part carries it.
+    """
+    da, db = _denot_of(a), _denot_of(b)
+    if da is None and db is None:
+        return None
+    shift = -_lead_or_zero(b)
+    return _merge_denot(None if da is None else da + shift,
+                        None if db is None else db + shift)
+
+
+def _warn_cancelled(dim, order, mag):
+    """The injection made audible, at the one place a cancellation converts.
+
+    R1's warning covered this case while the conversion happened on next use.
+    Converting at the site took it out of _r1's path, so it is re-raised here
+    and says more: _r1 could only report that a zero converted, this knows
+    which order entered and how big it is.
+    """
+    import warnings
+    # to_arrays hands back numpy floats, so an integer grade prints as "-1.0"
+    # and a reader has to wonder whether it is a fractional grade.  It matters:
+    # a half grade is a branch point, and the two must not look alike.
+    if not isinstance(dim, tuple) and float(dim).is_integer():
+        dim = int(dim)
+    warnings.warn(_CANCELLED_MSG % (dim, order, mag, order), stacklevel=4)
+
+
+def _cancellation_residue(a, b, result):
+    """R1 AT THE CANCELLATION SITE: the residue remembers what was cancelled.
+
+    `6 - 6` leaves 6_-1, not 1_-1.
+
+    The magnitude that was annihilated exists only here, in the operands.  _r1
+    runs later, once the coefficients are gone, so all it can deposit is a
+    unit -- which makes it inhomogeneous, and that is precisely why
+    multiplication does not distribute across it: R1(c*x) = 1_(d-1) for every
+    c, so the c cannot come back out.  Reading the magnitude at the site makes
+    the conversion homogeneous of degree 1 and the law returns.
+
+    Converts the LOWEST grade only, exactly as R1 does, so the composite then
+    holds a nonzero and every remaining zero is inert by R2 and retained.
+    Falls through untouched when nothing was annihilated at that grade, which
+    leaves _r1 to handle a written or manufactured zero with its unit residue:
+    a written zero has no magnitude to read, which is not the same as a
+    magnitude of zero.
+    """
+    if not _is_wholly_zero(result):
+        return result                       # a tail survives: R2 governs, not R1
+    dims, vals = result._backend.to_arrays(result._data)
+    if len(dims) == 0:
+        return result                       # NOTHING has no grade to convert
+    d = dims[0]                             # to_arrays is sorted ascending
+    mag = a.coeff(d)
+    if mag == 0.0:
+        mag = b.coeff(d)                    # whichever operand carried the value
+    if mag == 0.0:
+        return result                       # nothing annihilated here: leave to _r1
+    dims, vals = dims.copy(), vals.copy()
+    new_dim = _dim_shift(d, -1)
+    dims[0] = new_dim
+    vals[0] = mag if CANCELLATION_SIGNED else abs(mag)
+    order = _lead_order(new_dim)
+    out = Composite._wrap(result._backend.create_from_terms(dims, vals),
+                          result._backend, demote=False,
+                          denot=_merge_denot(_denot_of(result), order))
+    out._complete = result._complete
+    _warn_cancelled(new_dim, order, vals[0])
+    return out
 
 
 def _scalar_operand(other):
@@ -526,16 +714,12 @@ class Composite:
     # It cannot be inferred from the coefficients: _seeded(t) is exact with max
     # order 1, sin(x*x) is truncated with max order 11, and both merely look
     # like "max order K".  So it is carried.
-    __slots__ = ['_data', '_backend', '_complete', '_src', '_deg']
+    __slots__ = ['_data', '_backend', '_complete', '_denot']
 
     def __init__(self, coefficients=None, _data=None):
         self._backend = get_backend()
         self._complete = None          # exact unless a series says otherwise
-        # No scan of the coefficients here.  Detecting a hand-written graded
-        # composite would mean walking the dict on EVERY construction, and the
-        # three real sources announce themselves at construction anyway.
-        self._src = None               # see _mint
-        self._deg = False
+        self._denot = None             # no expressed zero has entered
 
         if _data is not None:
             # Internal fast path: created by arithmetic ops
@@ -593,7 +777,7 @@ class Composite:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _wrap(cls, data, backend=None, demote=True, complete=None):
+    def _wrap(cls, data, backend=None, demote=True, complete=None, denot=None):
         """Create a Composite directly from backend data. No dict parsing.
 
         `backend` must be given whenever the data was built by a backend that
@@ -608,8 +792,7 @@ class Composite:
         obj._backend = be
         obj._data = data
         obj._complete = complete
-        obj._src = None                # _carries fills these in for op results
-        obj._deg = False
+        obj._denot = denot
         return obj
 
     # -------------------------------------------------------------------------
@@ -808,8 +991,10 @@ class Composite:
         if not isinstance(other, Composite):
             return NotImplemented
         a, b = _operands(self, other)
-        return Composite._wrap(a._backend.add(a._data, b._data), a._backend,
-                               complete=_min_complete(self, other))
+        out = Composite._wrap(a._backend.add(a._data, b._data), a._backend,
+                              complete=_min_complete(self, other),
+                              denot=_denot_additive(a, b))
+        return _cancellation_residue(a, b, out)
 
     def __radd__(self, other):
         return self.__add__(other)
@@ -826,9 +1011,11 @@ class Composite:
         if not isinstance(other, Composite):
             return NotImplemented
         a, b = _operands(self, other)
-        return Composite._wrap(a._backend.add(a._data, a._backend.negate(b._data)),
-                               a._backend,
-                               complete=_min_complete(self, other))
+        out = Composite._wrap(a._backend.add(a._data, a._backend.negate(b._data)),
+                              a._backend,
+                              complete=_min_complete(self, other),
+                              denot=_denot_additive(a, b))
+        return _cancellation_residue(a, b, out)
 
     def __rsub__(self, other):
         left = _scalar_operand(other)
@@ -836,7 +1023,7 @@ class Composite:
 
     def __neg__(self):
         return Composite._wrap(self._backend.negate(self._data), self._backend,
-                               complete=self._complete)
+                               complete=self._complete, denot=_denot_of(self))
 
     def __mul__(self, other):
         """Multiplication: dimensions add, coefficients multiply.
@@ -851,7 +1038,8 @@ class Composite:
             else:
                 return Composite._wrap(
                     self._backend.scalar_multiply(self._data, float(other)),
-                    self._backend, complete=self._complete)
+                    self._backend, complete=self._complete,
+                    denot=_denot_of(self))
         if not isinstance(other, Composite):
             return NotImplemented
         if _is_unit(other):
@@ -862,7 +1050,8 @@ class Composite:
         data, complete = _capped(a._backend,
                                  a._backend.convolve(a._data, b._data),
                                  _min_complete(self, other))
-        return Composite._wrap(data, a._backend, complete=complete)
+        return Composite._wrap(data, a._backend, complete=complete,
+                               denot=_denot_product(a, b))
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -883,7 +1072,8 @@ class Composite:
                     # __truediv__ did not, so `x / 2` on a vector composite
                     # wrapped DictData in sparse-dense methods.  sinh, cosh,
                     # tanh and atan all divide by a scalar at the end.
-                    self._backend, complete=self._complete)
+                    self._backend, complete=self._complete,
+                    denot=_denot_of(self))
         if not isinstance(other, Composite):
             return NotImplemented
         if _is_unit(other):
@@ -947,7 +1137,8 @@ class Composite:
                 shifted = my_dims - div_dim
             return Composite._wrap(
                 a._backend.create_from_terms(shifted, my_vals / div_coeff),
-                a._backend, complete=_min_complete(self, other))
+                a._backend, complete=_min_complete(self, other),
+                denot=_denot_quotient(a, b))
 
         # deconvolve is lexicographic long division: it repeatedly takes
         # max(rem).  With infinitesimals on TWO independent axes that starves
@@ -962,7 +1153,8 @@ class Composite:
 
         result = a._backend.deconvolve(a._data, b._data)
         out = Composite._wrap(_truncate_dims(a._backend, result), a._backend,
-                              complete=_min_complete(self, other))
+                              complete=_min_complete(self, other),
+                              denot=_denot_quotient(a, b))
         # A multi-term divisor generally yields a NON-TERMINATING quotient that
         # the backend cuts at a fixed length: 1/(1-x) comes back as 50 correct
         # coefficients, not as a closed form.  Every order produced is right,
@@ -1057,6 +1249,18 @@ class Composite:
         """Get coefficient at specific dimension"""
         return self._backend.read_dim(self._data, dim)
 
+    @property
+    def denotation_order(self):
+        """Shallowest order at which an expressed zero entered, or None.
+
+        None means every order is the classical one.  A number k means orders
+        below k are classical and orders from k are the jet of the function the
+        expression DENOTES, reading an expressed zero of magnitude m at grade
+        -j as m*(x-a)**j.  Carried rather than inferred because division moves
+        it: residue / ZERO reaches order 0.
+        """
+        return _denot_of(self)
+
     def d(self, n=1):
         """nth derivative with respect to h, as a real number.
 
@@ -1078,7 +1282,15 @@ class Composite:
         A half order is the same trap without the pole: sqrt(h) is |1|_-0.5,
         every integer grade is absent, and its derivative 0.5*h**-0.5 is
         unbounded rather than zero.
+
+        REPORTS when the order asked for is one an expressed zero contributed
+        to.  The value returned is still a true derivative -- of the function
+        the expression denotes -- so this warns by default rather than
+        refusing; CONVENTIONAL_STRICT = True raises instead.
         """
+        _dn = _denot_of(self)
+        if _dn is not None and n >= _dn:
+            _report_denotation(n, _dn)
         dims, vals = self._backend.to_arrays(self._data)
         for _g, _v in zip(dims, vals):
             if _v == 0.0:
@@ -1208,6 +1420,7 @@ class Composite:
             return self
         plain = Composite(_data=self._data)
         plain._complete = self._complete
+        plain._denot = _denot_of(self)
         return plain
 
     def __format__(self, fmt):
@@ -5886,9 +6099,21 @@ def _preserves_type(fn):
     """Run `fn` on a plain composite, then hand the result back through `x`."""
 
     def wrapper(x, *args, **kwargs):
-        if type(x) is Composite or not isinstance(x, Composite):
-            return fn(x, *args, **kwargs)
-        return x._fn_result(fn(x._as_plain(), *args, **kwargs), fn)
+        plain = type(x) is Composite or not isinstance(x, Composite)
+        out = fn(x if plain else x._as_plain(), *args, **kwargs)
+        if not plain:
+            out = x._fn_result(out, fn)
+        # CARRY THE DENOTATION MARKER.  A transcendental expands about st(x),
+        # so f(st) + f'(st)*(rest) puts a denotation in the argument at the
+        # SAME order in the result.  It is carried here because this wrapper is
+        # the one point all fifteen of them pass through, and because the
+        # plain-Composite branch returns fn's result directly without reaching
+        # _fn_result -- which is exactly where the marker was being dropped:
+        # exp(x + (R(6)-R(6))) came back with denotation_order None.
+        _dx = _denot_of(x) if isinstance(x, Composite) else None
+        if _dx is not None and isinstance(out, Composite):
+            out._denot = _merge_denot(_denot_of(out), _dx)
+        return out
 
     wrapper.__name__ = getattr(fn, "__name__", "wrapper")
     wrapper.__qualname__ = getattr(fn, "__qualname__", wrapper.__name__)

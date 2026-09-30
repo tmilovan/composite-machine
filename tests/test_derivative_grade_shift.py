@@ -30,13 +30,18 @@ def grades(c):
 
 
 def test_pole_derivative_is_unbounded_not_zero(backend):
-    # (2 + h)/h = 2/h + 1, a simple pole.  d/dh = -2/h**2, d2/dh2 = 4/h**3.
+    # `x*2 - (x*2)` cancels 4 against 4, and the residue carries what it
+    # cancelled, so the infinitesimal it produces is 4h and not h.  That is the
+    # point of spelling it this way rather than writing ZERO: the operand
+    # reaches the division from a cancellation.
+    # (2 + h)/(4h) = 1/(2h) + 1/4, a simple pole.
     x = R(2.0)
+    assert grades(x * 2 - (x * 2)) == {-1: 4.0}, "the residue is the magnitude"
     y = (x + ZERO) / (x * 2 - (x * 2))
-    assert grades(y) == {1: 2.0, 0: 1.0}, f"got {y}, want |2|_1 + |1|_0"
-    assert grades(y.D(1)) == {2: -2.0}, f"got {y.D(1)}, want |-2|_2"
-    assert grades(y.D(2)) == {3: 4.0}, f"got {y.D(2)}, want |4|_3"
-    assert grades(y.D(3)) == {4: -12.0}, f"got {y.D(3)}, want |-12|_4"
+    assert grades(y) == {1: 0.5, 0: 0.25}, f"got {y}, want |0.5|_1 + |0.25|_0"
+    assert grades(y.D(1)) == {2: -0.5}, f"got {y.D(1)}, want |-0.5|_2"
+    assert grades(y.D(2)) == {3: 1.0}, f"got {y.D(2)}, want |1|_3"
+    assert grades(y.D(3)) == {4: -3.0}, f"got {y.D(3)}, want |-3|_4"
 
 
 def test_d_refuses_where_it_used_to_return_zero(backend):
@@ -48,12 +53,13 @@ def test_d_refuses_where_it_used_to_return_zero(backend):
 
 
 def test_multiplication_by_a_converted_zero_stays_a_taylor_series(backend):
-    # (2 + h)*h = 2h + h**2.  Bounded, so d(n) keeps the fast path.
+    # (2 + h)*(4h) = 8h + 4h**2, the 4 being the magnitude the cancellation
+    # carried.  Bounded, so d(n) keeps the fast path.
     x = R(2.0)
     y = (x + ZERO) * (x * 2 - (x * 2))
-    assert grades(y) == {-1: 2.0, -2: 1.0}, f"got {y}, want |2|_-1 + |1|_-2"
+    assert grades(y) == {-1: 8.0, -2: 4.0}, f"got {y}, want |8|_-1 + |4|_-2"
     got = [y.d(k) for k in range(4)]
-    assert got == [0.0, 2.0, 2.0, 0.0], f"got {got}, want [0, 2, 2, 0] for 2h + h**2"
+    assert got == [0.0, 8.0, 8.0, 0.0], f"got {got}, want [0, 8, 8, 0] for 8h + 4h**2"
 
 
 def test_shift_reproduces_the_ordinary_derivative(backend):

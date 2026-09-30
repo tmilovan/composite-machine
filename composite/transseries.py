@@ -389,8 +389,33 @@ class Transseries:
         return Transseries(out)
 
     def _cmp(self, other):
-        d = self._r1() - Transseries.lift(other)._r1()
-        for n in sorted(d.sectors):          # dominating sector first
+        """Compare, WITHOUT using `a - b == 0` as the equality test.
+
+        That idiom assumes subtracting equals leaves a zero, which is the one
+        assumption `1 - 1 != 0` denies: a cancellation converts at the site and
+        keeps what it annihilated, so the difference of two EQUAL transseries
+        carries a residue and the lead sign of that residue reported them
+        unequal.  Measured: flat(1)*flat(1) and flat(2) both hold sectors
+        {2: {0: 1.0}} and compared unequal.
+
+        So equality is decided structurally, on the nonzero coefficients, and
+        the difference is used only for the SIGN, and only in sectors that
+        actually differ -- a residue in an equal sector would otherwise decide
+        the comparison before a genuine difference deeper down was reached.
+        """
+        a, b = self._r1(), Transseries.lift(other)._r1()
+
+        def nz(ts, n):
+            c = ts.sectors.get(n)
+            return {} if c is None else {k: v for k, v in c.coeffs_dict().items()
+                                         if v != 0.0}
+
+        differing = [n for n in sorted(set(a.sectors) | set(b.sectors))
+                     if nz(a, n) != nz(b, n)]
+        if not differing:
+            return 0
+        d = a - b
+        for n in differing:                  # dominating sector first
             s = _lead_sign(d.sectors[n])
             if s:
                 return s
