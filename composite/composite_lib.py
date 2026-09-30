@@ -56,6 +56,7 @@ Author: Toni Milovan
 
 import math
 import contextlib as _contextlib
+import contextvars as _contextvars
 import warnings as _warnings
 import functools as _functools
 from fractions import Fraction as _Fraction
