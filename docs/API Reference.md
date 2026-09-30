@@ -1,5 +1,3 @@
-# API Reference# API Reference
-
 # API Reference
 
 Complete reference for the Composite Calculus library.
@@ -14,7 +12,13 @@ Complete reference for the Composite Calculus library.
 - [Transcendental Functions](#transcendental-functions)
 - [High-Level Calculus API](#high-level-calculus-api)
 - [Extraction Methods](#extraction-methods)
+- [Zero Handling](#zero-handling)
 - [Utility Functions](#utility-functions)
+- [Comparison Operations](#comparison-operations)
+- [Type Conversions](#type-conversions)
+- [Error Handling](#error-handling)
+- [Best Practices](#best-practices)
+- [Performance Notes](#performance-notes)
 
 ---
 
@@ -32,18 +36,27 @@ Composite(coefficients=None)
 
 **Parameters:**
 
-- `coefficients`: Dict mapping dimension (int) to coefficient (float), or a scalar number
+- `coefficients`: Dict mapping dimension to coefficient (float), or a scalar number
 
 **Attributes:**
 
-- `c`: Dict[int, float] - Sparse representation of coefficients by dimension
+- `c`: Sparse dict view of coefficients by dimension, rebuilt on every access.
+  Prefer `coeffs_dict()`, or the backend's `to_arrays`, in new code.
 
-**Dimensions:**
+**Dimensions.** A dimension is an integer, a real number, or a vector over an
+iterated-logarithm basis:
 
-- `dimension 0`: Real numbers
-- `dimension -1`: Infinitesimals (first-order)
-- `dimension -2`: Second-order infinitesimals
-- `dimension +1`: Infinities
+- `dimension 0`: real numbers
+- `dimension -1`: infinitesimals (first order)
+- `dimension -2`: second-order infinitesimals
+- `dimension +1`: infinities
+- `dimension -0.5`: a half order, which is a branch point — `sqrt(ZERO)`
+- `dimension (0, 1)`: the log axis — `ln(1/h)`. `(0, 0, 1)` is `ln(ln(1/h))`,
+  and so on to any depth. These appear on their own when `ln` meets an
+  infinitesimal or an infinite value; nothing has to be switched on.
+
+Dimensions compare by dominance, which for a vector is Python's own tuple
+order, so `ln(1/h) > 1 > h*ln(1/h) > h`.
 
 **Example:**
 
@@ -53,6 +66,10 @@ x = Composite({0: 3, -1: 1})  # |3|₀ + |1|₋₁
 
 # Create from scalar
 x = Composite(5)  # |5|₀
+
+# NOT a zero: an empty composite is NOTHING, which is the classical zero
+e = Composite({})             # ∅
+z = Composite({0: 0.0})       # |0|₀, an EXPRESSED zero, which converts under R1
 ```
 
 ---
@@ -213,7 +230,7 @@ print(result.d(1))  # 0 (derivative: -sin(0) = 0)
 
 ---
 
-### `tan(x, terms=10)`
+### `tan(x, terms=12)`
 
 Tangent function via sin/cos.
 
@@ -295,6 +312,14 @@ Arccosine via π/2 - asin(x).
 
 ---
 
+### `erf(x, terms=15)`, `erfc(x, terms=15)`, `normal_cdf(x, terms=15)`
+
+Error function, complementary error function, and the standard normal CDF.
+Each is a series in the argument, so derivatives of every order come back with
+the value.
+
+---
+
 ### `power(x, s, terms=15)`
 
 Real-valued power xˢ for any real exponent.
@@ -372,8 +397,8 @@ Compute the nth derivative f⁽ⁿ⁾(at).
 **Example:**
 
 ```python
-# Third derivative of x⁵ at x=2
-result = nth_derivative(lambda x: x**5, n=3, at=2)  # → 120
+# Third derivative of x⁵ at x=2:  60·x² = 60·4
+result = nth_derivative(lambda x: x**5, n=3, at=2)  # → 240
 
 # Fifth derivative of eˣ at x=1
 result = nth_derivative(lambda x: exp(x), n=5, at=1)  # → e
@@ -408,17 +433,39 @@ derivs = all_derivatives(lambda x: sin(x), at=0, up_to=4)
 
 ---
 
-### `limit(f, as_x_to, terms=12)`
+### `limit(f, as_x_to, terms=12, dir="both", fallback=False)`
 
 Compute lim(x→a) f(x) automatically.
 
 **Parameters:**
 
 - `f`: Callable
-- `as_x_to`: float or float('inf') or float('-inf')
+- `as_x_to`: float, float('inf'), float('-inf'), or a composite INFINITY
 - `terms`: int - Taylor series terms
+- `dir`: str - `"both"` (default), `"+"`, `"-"`
+- `fallback`: bool - if True, fall back to integral averaging when the
+  algebraic route hits a domain error
 
-**Returns:** float
+**Returns:** float, or a Composite when the result is unbounded
+(`limit(lambda x: R(1)/x, 0)` returns `|1|₁`).
+
+**The infinitesimal has a sign, so a single evaluation is one-sided.**
+`dir="both"` builds the same point as `dir="+"` and does not compare the two
+sides, so a function whose sides disagree returns the right-hand value without
+saying so:
+
+```python
+limit(lambda x: sqrt(x*x)/x, 0)   # 1.0
+limit_left(lambda x: sqrt(x*x)/x, 0)   # -1.0
+```
+
+Ask for each side explicitly where that matters.
+
+**Oscillation is refused, not approximated.** `sin(1/x)` at 0 takes every value
+in [-1, 1] and a composite holds one value at one grade, so it raises
+`NotRepresentableError`. This costs the squeeze cases (`x*sin(1/x)`)
+deliberately: probing them returned the right answer for a convergent case and
+0.0 for a divergent one, which is not a fallback.
 
 **Example:**
 
@@ -463,6 +510,35 @@ coeffs = taylor_coefficients(lambda x: exp(x), at=0, up_to=4)
 ---
 
 ### Integration Functions
+
+#### `integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15)`
+
+One entry point for every integral form. This is the function the README and
+the demos use; the routines below it are the specific engines.
+
+**Forms:**
+
+```python
+integrate(lambda x: x**2, 0, 1)                    # 0.333...   definite
+integrate(lambda x: exp(-x), 0, float('inf'))      # 1.0        improper
+integrate(lambda x, y: x*y, (0, 1), (0, 1))        # 0.25       double, one range per variable
+integrate(f, t_range, curve=c)                     #            line integral
+integrate(f, u_range, v_range, surface=s)          #            surface integral
+```
+
+**Returns:** float.
+
+Note that it ends in `result.st()`, so any grade other than the standard part
+is discarded — which is why differentiating under the integral sign is not
+available through this API even though the arithmetic underneath supports it.
+
+---
+
+#### `definite_integral(f, a, b, terms=12)`
+
+The plain definite case, without the form dispatch above.
+
+---
 
 #### `antiderivative(f_composite, constant=0)`
 
@@ -622,12 +698,130 @@ Extract the nth derivative, accounting for factorial scaling.
 
 ```python
 x = R(3) + ZERO
-result = x**4
+result = x**4          # |81|₀ + |108|₋₁ + |54|₋₂ + |12|₋₃ + |1|₋₄
 
-print(result.d(1))  # 108 = first derivative at x=3
-print(result.d(2))  # 216 = second derivative at x=3
-print(result.d(3))  # 216 = third derivative at x=3
+print(result.st())  # 81  = f(3)
+print(result.d(1))  # 108 = f'(3)   = 4·27
+print(result.d(2))  # 108 = f''(3)  = 12·9
+print(result.d(3))  # 72  = f'''(3) = 24·3
+print(result.d(4))  # 24  = f''''(3)
 ```
+
+`d(n)` is `coeff(-n) * n!`, so it is the derivative and not the Taylor
+coefficient. For the coefficients use `taylor_coefficients`.
+
+---
+
+---
+
+### `.D(n=1)`
+
+The nth derivative as a **Composite**, not a float. Differentiation is a grade
+shift: `|c|_g` becomes `|-g*c|_(g+1)`. The result is still differentiable, so
+`f.D(1).d(1)` equals `f.d(2)`.
+
+Use it where `d(n)` would flatten something that is not a number: for `(2+h)/h`
+the grades are 0 and +1, grade -n is absent, and `d(n)` read through `D` says
+the derivative is unbounded instead of returning 0.0.
+
+---
+
+### `.lead_dim()` and `.lead_order()`
+
+`lead_dim` returns the dominant dimension, skipping zero coefficients;
+`lead_order` returns its order — positive for an infinitesimal, negative for an
+unbounded value, `None` for nothing.
+
+```python
+R(3).lead_order()          # 0     an ordinary number
+ZERO.lead_order()          # 1     infinitesimal, first order
+(ZERO*ZERO).lead_order()   # 2
+(R(1)/ZERO).lead_order()   # -1    unbounded
+sqrt(ZERO).lead_order()    # 0.5   a half order: a branch point
+```
+
+**Use this rather than `max(coeffs_dict())`.** A log-axis grade is a tuple,
+comparing it against an integer raises, and reading only the power component
+reports `x*ln(x)` as order 0.
+
+---
+
+### `.coeffs_dict()`, `.complete_order`, `.complete_coeffs()`, `.leaked_coeffs()`
+
+`coeffs_dict()` returns every term the arithmetic produced. `complete_order` is
+the highest order the value vouches for, or `None` when nothing has claimed a
+limit. `complete_coeffs()` returns only the terms within that bound and
+`leaked_coeffs()` only those beyond it.
+
+The distinction is not cosmetic: a product of two truncated series reaches
+deeper than either operand is known to, so terms past the bound are present and
+not vouched for. Read `complete_coeffs()` wherever a wrong coefficient would be
+worse than a missing one.
+
+---
+
+### `.denotation_order`
+
+The shallowest order at which an **expressed zero** entered this value, or
+`None` when every order is the classical one.
+
+An expressed zero of magnitude m at grade -k denotes `m*(x-a)**k`, so from that
+order down the jet is the exact jet of the function the expression *denotes*
+rather than of its classical reading. It is still a true derivative — a real
+slope, a real acceleration — of that function:
+
+```python
+x = R(3) + ZERO
+f = x*x*(R(2)-R(2)) + x*x
+f.denotation_order      # 1.0
+[f.d(n) for n in range(4)]              # [9, 24, 26, 12]
+# reading R(2)-R(2) as 2(x-3) gives g(x) = 2x**3 - 5x**2, whose jet is the same
+```
+
+It is carried rather than inferred, because division moves it: a residue at
+order 1 divided by `ZERO` reaches order 0. Propagation is `min` on add and
+subtract, `+ other.lead_order()` on multiply, `-` on divide.
+
+`d(n)` reports when `n` is at or below it — see `CONVENTIONAL_STRICT`.
+
+---
+
+## Zero Handling
+
+### `is_zero(x)`, `is_nothing(x)`, `is_vanishing(x)`
+
+**Use `is_zero(x)` rather than `x == 0`.** `x == 0` compares against NOTHING,
+so it is True for NOTHING and False for a dimensioned zero.
+
+- `is_nothing(x)` — `Composite({})`, printed `∅`: no term at any dimension.
+  This is the classical zero, an additive identity and a multiplicative
+  annihilator, and it is the right accumulator seed.
+- `is_vanishing(x)` — a zero that HAS a dimension, so it converts under R1.
+  A written zero, `Composite({0: 0.0})`, is one.
+- `is_zero(x)` — either of the above.
+
+### `CANCELLATION_SIGNED`
+
+Module switch, `False`. A cancellation converts at the site and the residue
+carries the **magnitude** annihilated: `6 - 6` is `|6|₋₁`, `(-6) - (-6)` is
+`|6|₋₁`. A magnitude has no sign, because in `a + (-a)` both operands are
+annihilated symmetrically and neither is the one to take a sign from.
+
+Set True and the residue keeps the left operand's sign. That is parked, not
+supported: it makes `2 + (-2)` and `(-2) + 2` different numbers.
+
+### `CONVENTIONAL_STRICT`
+
+Module switch, `False`. What `d(n)` does when the order asked for is one an
+expressed zero contributed to. `False` warns and returns the value; `True`
+raises `NotConventionalError`. Warning is the default because the value is a
+true derivative of the denoted function, not a corrupted one.
+
+### `set_max_order(n)` / `get_max_order()`
+
+Cap how many orders the arithmetic returns. `set_max_order(None)` removes the
+cap. It is the caller's economy, not a property of the backend, and it is
+carried across a backend switch.
 
 ---
 
@@ -742,7 +936,7 @@ Run the built-in test suite to verify library functionality.
 **Example:**
 
 ```python
-from composite_lib import run_tests
+from composite import run_tests
 run_tests()
 ```
 
@@ -792,19 +986,45 @@ result = 10 / x     # int / Composite → Composite
 
 **`ZeroDivisionError`**
 
-- Raised when dividing by Python zero (not ZERO)
-- Use `ZERO` for structural zero instead
+- Not raised for `x / 0`. A written zero is an expressed zero, which R1
+  converts, so `R(1) / 0` is `|1|₁` — an infinity of definite order, not an
+  error. Use `Composite({})` if you mean an absent denominator.
 
 **`ValueError`**
 
-- Raised for ln(x) when [x.st](http://x.st)() ≤ 0
-- Raised for sqrt(x) when [x.st](http://x.st)() < 0
-- Raised for asin(x) when |[x.st](http://x.st)()| ≥ 1
+- Raised for `ln(x)` when `x.st() < 0`. At `x.st() == 0` it does NOT raise:
+  `ln(R(0))` is `|-1|_(0,1)`, a term on the log axis, because `R(0)` is the
+  infinitesimal and `ln` of an infinitesimal is representable.
+- Raised for `sqrt(x)` when `x.st() < 0`
+- Raised for `asin(x)` when `|x.st()| ≥ 1`
 
 **`TypeError`**
 
-- Raised for non-integer powers with `**` operator
-- Use `power(x, s)` for fractional/real powers
+- Raised when `**` is given an exponent that is not an int, float or Composite.
+  A float exponent is supported: `(R(4) + ZERO) ** 0.5` returns a series with
+  standard part 2. `power(x, s)` is the same operation with an explicit
+  `terms=`.
+
+**`LimitDoesNotExistError`**
+
+- Raised by division when the divisor is `Composite({})` (NOTHING). An absent
+  denominator is indeterminate, unlike an expressed zero.
+
+**`NotRepresentableError`**
+
+- Raised where a value has no composite at all: `exp` of a positive grade
+  (`exp(-1/x**2)` at 0), or a bounded transcendental at an unbounded argument
+  (`sin(1/x)` as x → 0, which is a range rather than a point).
+
+**`StandardPartUndefinedError`**
+
+- Raised by `st()` when the dominant grade is positive, so there is no standard
+  part to take.
+
+**`NotConventionalError`**
+
+- Raised by `d(n)` only when `CONVENTIONAL_STRICT` is True and the order asked
+  for is one an expressed zero contributed to. See `denotation_order`.
 
 ---
 
@@ -859,14 +1079,18 @@ result = 10 / x     # int / Composite → Composite
 - Division: O(k*n) for n iterations of long division
 - Transcendental functions: O(terms * operations)
 
-**Typical performance:** ~500-1000× slower than scalar operations, but computes all derivatives simultaneously.
+**Typical performance:** depends entirely on the shape of the problem and on
+the backend; see the Performance section of the README for measured figures
+rather than a single ratio. `use_dense_series()` is the right backend for
+calculus, `use_dict()` for small scattered composites, and the default
+`use_sparse_dense()` for sparse supports over a large domain.
 
 ---
 
 ## See Also
 
-- [**10-Minute Tutorial**](docs/Tutorial%20-%20Getting%20Started.md) - Get started quickly
-- [**API Reference**](docs/API%20Reference.md) - Complete function docs
-- [**Implementation Guide**](docs/Implementation%20Guide.md) - How it works internally
-- [**Examples**](docs/Examples.md) - Code snippets for common tasks
-- [**Roadmap (DRAFT)**](docs/Roadmap%20(DRAFT).md) - What's next
+- [**10-Minute Tutorial**](Tutorial%20-%20Getting%20Started.md) - Get started quickly
+- [**Implementation Guide**](Implementation%20Guide.md) - How it works internally
+- [**Zero Rules v2**](Zero%20Rules%20v2%20%E2%80%94%20Formal%20Specification%20(DRAFT).md) - What a zero coefficient means, and how it behaves
+- [**Examples**](Examples.md) - Code snippets for common tasks
+- [**Roadmap (DRAFT)**](Roadmap%20(DRAFT).md) - What's next

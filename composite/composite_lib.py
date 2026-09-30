@@ -56,7 +56,7 @@ Author: Toni Milovan
 
 import math
 import contextlib as _contextlib
-import contextvars as _contextvars
+import warnings as _warnings
 import functools as _functools
 from fractions import Fraction as _Fraction
 from typing import Callable, List, Optional, Union
@@ -434,6 +434,36 @@ class NotConventionalError(ValueError):
     """Raised by d(n) under CONVENTIONAL_STRICT when the jet is not classical."""
 
 
+class NotConventionalWarning(UserWarning):
+    """d(n) returned a jet of the DENOTED function rather than the classical one.
+
+    Its own category, and registered `always` below, because the default filter
+    shows a given message once per (text, location) and that is the wrong
+    mechanism here.  This warning is a fact about the VALUE being read, not
+    about the line reading it: in a REPL every read is `<stdin>:1`, so after
+    one `d(1)` the rest are silent and non-classical numbers are collected with
+    nothing said.  Observed exactly that way -- d(1) and d(2) went quiet while
+    d(3), whose text had not been seen, still appeared.
+
+    Quiet it per caller in the ordinary way, which the `always` registration
+    does not prevent:
+
+        warnings.filterwarnings("once", category=NotConventionalWarning)
+    """
+
+
+class CancellationWarning(UserWarning):
+    """A cancellation deposited a residue at this point in the code.
+
+    Left on the DEFAULT filter, once per location, because it reports a
+    property of the line rather than of a value -- and a loop that cancels a
+    million times should say so once, not a million times.
+    """
+
+
+_warnings.filterwarnings("always", category=NotConventionalWarning)
+
+
 _DENOT_MSG = (
     "d(%s) is not the conventional derivative. An expressed zero entered this "
     "value at order %g, and an expressed zero of magnitude m at grade -k "
@@ -451,7 +481,7 @@ def _report_denotation(n, order):
     if CONVENTIONAL_STRICT:
         raise NotConventionalError(msg)
     import warnings
-    warnings.warn(msg, stacklevel=3)
+    warnings.warn(msg, NotConventionalWarning, stacklevel=3)
 
 
 def _denot_of(x):
@@ -530,7 +560,8 @@ def _warn_cancelled(dim, order, mag):
     # a half grade is a branch point, and the two must not look alike.
     if not isinstance(dim, tuple) and float(dim).is_integer():
         dim = int(dim)
-    warnings.warn(_CANCELLED_MSG % (dim, order, mag, order), stacklevel=4)
+    warnings.warn(_CANCELLED_MSG % (dim, order, mag, order),
+                  CancellationWarning, stacklevel=4)
 
 
 def _cancellation_residue(a, b, result):

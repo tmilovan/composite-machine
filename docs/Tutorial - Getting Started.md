@@ -146,8 +146,8 @@ from composite import derivative, nth_derivative
 # First derivative
 f_prime = derivative(lambda x: x**3, at=2)  # → 12
 
-# nth derivative
-f_triple_prime = nth_derivative(lambda x: x**5, n=3, at=2)  # → 120
+# nth derivative:  d³/dx³ of x⁵ is 60x², so at x=2 it is 60·4
+f_triple_prime = nth_derivative(lambda x: x**5, n=3, at=2)  # → 240
 ```
 
 ### Limits
@@ -234,17 +234,17 @@ print(f"Match: {abs(expected - actual) < 1e-10}")  # True
 
 Now that you understand the basics:
 
-[API Reference](docs/API%20Reference.md)
+[API Reference](API%20Reference.md)
 
-[Explainer: Core Composite Class — Annotated Reference](docs/Core%20Composite%20Class%20—%20Annotated%20Reference.md)
+[Explainer: Core Composite Class — Annotated Reference](Core%20Composite%20Class%20—%20Annotated%20Reference.md)
 
-[Implementation Guide](docs/Implementation%20Guide.md)
+[Implementation Guide](Implementation%20Guide.md)
 
-[Examples](docs/Examples.md)
+[Examples](Examples.md)
 
-[Roadmap (DRAFT)](docs/Roadmap%20(DRAFT).md)
+[Roadmap (DRAFT)](Roadmap%20(DRAFT).md)
 
-[Exploration & research (Turing completeness)](docs/Turing%20Completeness%20—%20Evidence%20and%20Open%20Questions.md)
+[Exploration & research (Turing completeness)](Turing%20Completeness%20—%20Evidence%20and%20Open%20Questions.md)
 
 ---
 
