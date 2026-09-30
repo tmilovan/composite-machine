@@ -81,8 +81,10 @@ def z1_expressed(t):
            _d(_quiet(lambda: C * 0)) == {-2: 3.0, -1: 5.0},
            f"{_d(_quiet(lambda: C * 0))}")
     # 1 - 1 != 0, which is the same statement
-    t.true(f"Z1.10 R(1) - R(1) is a wholly zero |0|_0", cl._is_wholly_zero(R(1) - R(1)),
-           f"{R(1) - R(1)}")
+    t.exact("Z1.10 R(1) - R(1) converts AT THE SITE, keeping what cancelled",
+            (R(1) - R(1)).coeffs_dict(), {-1: 1.0})
+    t.exact("Z1.10b and the residue is the magnitude, not a unit: R(6) - R(6)",
+            (R(6) - R(6)).coeffs_dict(), {-1: 6.0})
     t.true(f"Z1.11 and it converts on next use: {(R(1) - R(1)) + R(5)}",
            str((R(1) - R(1)) + R(5)) == "|5|\u2080 + |1|\u208b\u2081",
            f"{(R(1) - R(1)) + R(5)}")
@@ -162,7 +164,19 @@ def z4_laws(t):
     laws = {"a*1 = a": lambda a, b, c: a * R(1) == a,
             "a+b = b+a": lambda a, b, c: a + b == b + a,
             "a*b = b*a": lambda a, b, c: a * b == b * a,
-            "(a+b)+c = a+(b+c)": lambda a, b, c: (a + b) + c == a + (b + c),
+            # ASSOCIATIVITY OF + IS NOT A LAW HERE, and must not be asserted
+            # as one.  (a+b)+c and a+(b+c) are different EVENTS: one grouping
+            # performs a cancellation and the other never does, so requiring
+            # them to agree is requiring the system to forget which happened.
+            #     (R(1)+R(-1))+R(2) = |2|_0 + |1|_-1     a cancellation
+            #     R(1)+(R(-1)+R(2)) = |2|_0              none
+            # It read green for as long as it did only because the pool's
+            # coefficients contain no opposite pair, so it never sampled one.
+            # z4b_grouping below asserts what actually holds instead.
+            #
+            # Commutativity is NOT the same case and stays above: a+b and b+a
+            # annihilate the same quantity in the same event, so there is
+            # nothing for a provenance rule to distinguish.
             "(a*b)*c = a*(b*c)": lambda a, b, c: (a * b) * c == a * (b * c),
             "(a+b)*c = a*c+b*c": lambda a, b, c: (a + b) * c == a * c + b * c}
     N = 2000
@@ -223,10 +237,27 @@ def z5_expressed_vs_absent(t):
 
 
 # =============================================================================
+def z4b_grouping(t):
+    head("Z4b  regrouping differs by EXACTLY the residue it caused")
+    # The associativity "failure" is the thesis, not a defect, so it gets
+    # pinned as an identity rather than deleted: the grouping that cancelled
+    # deposits the magnitude it annihilated, and the other deposits nothing.
+    for v, c in ((1.0, 2.0), (6.0, 2.0), (6.0, -4.0), (0.5, 3.0)):
+        a, b, cc = R(v), R(-v), R(c)
+        diff = ((a + b) + cc) - (a + (b + cc))
+        t.exact(f"Z4b ({v}+{-v})+{c} exceeds {v}+({-v}+{c}) by |{v}|_-1",
+                {k: x for k, x in diff.coeffs_dict().items() if x != 0.0},
+                {-1: abs(v)})
+
+
+# =============================================================================
 def z6_naming(t):
     head("Z6  is_zero / is_vanishing / is_nothing")
     cases = [("E", E, True, True, False), ("<0_0>", Z0, True, False, True),
-             ("c-c", C - C, True, False, True), ("ZERO", ZERO, False, False, False),
+             # c-c converts at the site now, so it is a genuine infinitesimal
+             # and none of the three predicates hold.  The remaining producer
+             # of a vanishing composite is the WRITTEN zero, <0_0> above.
+             ("c-c", C - C, False, False, False), ("ZERO", ZERO, False, False, False),
              ("c", C, False, False, False), ("0.0", 0.0, True, False, False)]
     for lbl, v, wz, wn, wv in cases:
         t.true(f"Z6 {lbl:<7} is_zero={is_zero(v)} is_nothing={is_nothing(v)} "
@@ -322,15 +353,22 @@ def z8_r1_reaches_the_transcendentals(t):
     #     z * R(2)   -> |2|_-1     R1 applied
     #     sqrt(z)    -> |0|_0      R1 skipped
     #
+    # Converting at the cancellation site removes the whole class: z arrives
+    # as |1|_-1 already, so every consumer sees an infinitesimal whether or
+    # not it remembered to apply R1 at its door.  Measured: sqrt(z) is now
+    # |1|_-0.5, lead_order 0.5 -- the branch point, kept.
+    #
     # The physical case is the Dirac ground state, E = sqrt(1 - (Z*alpha)**2),
     # whose square-root branch point at Z*alpha = 1 is what says the solution
     # ceases to exist there.  With R1 skipped the argument reached sqrt as a
     # plain zero and the answer was 0 -- the branch point silently gone.
     z = R(1) - R(1)
-    t.exact("Z8.01 a cancellation is still |0|_0 before use", z.coeffs_dict(),
-            {0: 0.0})
-    t.exact("Z8.02 and R1 converts it when applied", _r1(z).coeffs_dict(),
-            {-1: 1.0})
+    t.exact("Z8.01 a cancellation arrives converted, magnitude carried",
+            z.coeffs_dict(), {-1: 1.0})
+    t.exact("Z8.02 so _r1 has nothing left to do: it is a no-op here",
+            _r1(z).coeffs_dict(), {-1: 1.0})
+    t.exact("Z8.02b and sqrt sees the infinitesimal without R1 at its door",
+            cl.sqrt(z).lead_order(), 0.5)
 
     # THE PHYSICS CASE.
     Za = R(1.0)
@@ -592,7 +630,7 @@ def z11_deconvolve_emits_unique_grades(t):
 
 def run_all():
     t = Suite()
-    for fn in (z1_expressed, z2_family, z3_substitution, z4_laws,
+    for fn in (z1_expressed, z2_family, z3_substitution, z4_laws, z4b_grouping,
                z5_expressed_vs_absent, z6_naming, z7_equality_is_identity,
                z8_r1_reaches_the_transcendentals,
                z9_nothing_keeps_the_constant,

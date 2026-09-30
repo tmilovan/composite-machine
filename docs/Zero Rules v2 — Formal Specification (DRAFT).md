@@ -54,6 +54,36 @@ If it carries several zeros, convert the **lowest dimension only**. Once that
 one has converted the composite holds a nonzero, so by R2 every remaining zero
 is inert — and, by R2, retained.
 
+**R1 applies AT THE SITE for a cancellation, and the residue carries what was
+annihilated.** The magnitude exists only in the operands, so it is read there
+rather than left for the next use:
+
+```
+6 - 6        ->  |6|_-1            not |0|_0 awaiting conversion
+(-6) - (-6)  ->  |6|_-1            the magnitude, so no sign
+1 - 1        ->  |1|_-1
+0 - 0        ->  |1|_-2            R(0) is |1|_-1, so this cancels at grade -1
+```
+
+The lowest grade converts exactly as above; what changes is the coefficient
+deposited, which is that grade's rather than a unit. Note that for a seeded
+quantity the lowest grade's coefficient usually IS 1, so `x - x`, `x*x - x*x`
+and `ZERO - ZERO` are unchanged by this. R1 in the form stated first is left
+with the **written** and **manufactured** zeros, where nothing was annihilated
+and a unit is all there is to deposit.
+
+**Why the magnitude and not a unit.** With a unit, every cancellation is the
+same character and every ratio between two zeros is 1 — `(2-2)/(3-3)` came out
+1, and `(6-6)/(2-2)` came out 1. That is precisely the collapse §85 forbids:
+different zeros need different characters or the ratio is lost. With the
+magnitude they are 2/3 and 3.
+
+**The residue has no sign, because a magnitude has none.** In `a + (-a)` both
+operands are annihilated symmetrically and neither is the one to take a sign
+from, so `2 + (-2)` and `(-2) + 2` both give `|2|_-1`. Taking the sign from an
+operand instead would make those two differ, which is argument order deciding a
+value. (Recorded in `CANCELLATION_SIGNED`, parked at the unsigned rule.)
+
 ```
 0_3 + 0_-1 + 0_-3
   convert the lowest      0_-3 -> 1_-4
@@ -85,8 +115,8 @@ So R1 fires exactly on the cases where the cancellation is an *identity*, and
 never on the ones where it is a coincidence:
 
 ```
-x**2 - 9  at 3     ->  0_0 + 6_-1 + 1_-2     coincidence: a tail, R2, no R1
-c - v      (v = c) ->  0_0                   identity: nothing below, R1 fires
+x**2 - 9  at 3     ->  0_0 + 6_-1 + 1_-2     coincidence: a tail, R2, no conversion
+c - v      (v = c) ->  |c|_-1                identity: nothing below, it converts
 ```
 
 This is not a tendency; it follows from what "wholly zero" means. It holds
@@ -98,10 +128,14 @@ computation to distinguish it with.
 **The consequence to be aware of.** A physics run found this in five places —
 the Dirac quantum-number identity `n - (j+1/2)`, charge conservation `k.J`,
 the massless photon `c - v`, a supersymmetric vacuum sum, and a remnant at
-exactly `M = 1`. In each, R1 fired on an identity and the residue `1_(d-1)`
-was larger than the real structure around it: the photon's gap came out `h`
-against an infinitesimal-mass gap of `h**2/2`, and the longitudinal term of
-`k.J` came out 1, 0.25 or 0.01 depending on how the mass was scaled.
+exactly `M = 1`. In each, the identity converted and the residue was larger
+than the real structure around it: the photon's gap came out `h` against an
+infinitesimal-mass gap of `h**2/2`, and the longitudinal term of `k.J` came out
+1, 0.25 or 0.01 depending on how the mass was scaled. Carrying the magnitude
+makes this LARGER, not smaller — `c - v` at `v = c` now deposits
+`|299792458|_-1` where it deposited `|1|_-1` — so the guidance is unchanged and
+more pressing: an identity that is known in advance should be written as
+`Composite({})`, which is NOTHING and deposits no order.
 
 R1 is correct as specified and stays as specified. What the caller must know is
 that an identity has to be written as `NOTHING` deliberately, because the
@@ -138,7 +172,10 @@ every case.
 **R3 — `× 1` and `/ 1` are identities.** They return the operand untouched.
 
 **R4 — addition and subtraction never shift dimensions.** Coefficients add per
-dimension. `a − a` leaves `0_d`: a zero at that dimension, per R2.
+dimension, and the addition itself shifts nothing. Where the result still
+carries a nonzero term, a zero among them is a term and stays put, per R2.
+Where the result is **wholly** zero the cancellation converts at the site, per
+R1: `6 - 6` is `|6|_-1`, not `|0|_0`.
 
 **R6 — there is no additive identity.**
 Adding zero is not a no-op. `0_d` is a number, so by R1 it converts and
