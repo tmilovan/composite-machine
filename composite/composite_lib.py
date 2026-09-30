@@ -56,6 +56,7 @@ Author: Toni Milovan
 
 import math
 import contextlib as _contextlib
+import functools as _functools
 from typing import Callable, List, Optional, Union
 import struct
 import numpy as np
@@ -216,6 +217,32 @@ _ZERO_OPERAND_MSG = (
     "computation that cancelled to all-zero -- correct, and nothing announced "
     "it before this warning existed."
 )
+
+
+_TRUNCATED_MSG = (
+    "%d term%s dropped: %s. The result is complete to order %s and the terms "
+    "past it are still present -- arithmetic keeps producing them, and they are "
+    "not wrong so much as unvouched for. That is the dangerous shape: a "
+    "coefficient that looks right and is not. Read complete_coeffs() rather than "
+    "coeffs_dict() wherever a wrong coefficient would be worse than a missing "
+    "one, and leaked_coeffs() to see exactly what is beyond the bound. To move "
+    "the bound instead: raise `terms=` on the transcendental that set it, or "
+    "set_max_order(None) / a larger MAX_ACTIVE_DIMS for the caps.")
+
+
+def _warn_truncated(dropped, reason, bound):
+    """Truncation made audible, at the two places a term is actually discarded.
+
+    Only where something is REMOVED, never where a bound is merely recorded.
+    _truncate_order is called on the way out of every transcendental and
+    usually has nothing to drop; warning there too would fire on every sin()
+    in the library and the message would be worth nothing.
+    """
+    import warnings
+    warnings.warn(
+        _TRUNCATED_MSG % (dropped, "" if dropped == 1 else "s", reason,
+                          "unbounded" if bound is None else bound),
+        stacklevel=4)
 
 
 def _warn_zero_operand():
@@ -1145,6 +1172,7 @@ def _order_cap(backend, data):
         return data
     idx = np.array(keep, dtype=int)
     _order_cap.bit = True          # something was dropped; the caller tightens
+    _warn_truncated(len(dims) - len(keep), "set_max_order(%s)" % cap, cap)
     return backend.create_from_terms(dims[idx], vals[idx])
 
 
@@ -1179,6 +1207,8 @@ def _truncate_dims(backend, data):
     # first meant paying for the flat form purely to discover it was not needed.
     if backend.term_count(data) <= MAX_ACTIVE_DIMS:
         return data
+    _warn_truncated(backend.term_count(data) - MAX_ACTIVE_DIMS,
+                    "MAX_ACTIVE_DIMS = %d" % MAX_ACTIVE_DIMS, None)
     dims, vals = backend.to_arrays(data)
     # Sort by distance from dim 0, keep closest.
     if dims.dtype == object:
@@ -1234,6 +1264,54 @@ def _full_order():
     finally:
         if old is not None:
             backend.max_order = old
+
+
+@_contextlib.contextmanager
+def _dim_headroom(n):
+    """Raise the dimension cap to hold `n` terms, then put it back.
+
+    Same trade as _derivative_scope: the cap exists for deep composition chains
+    that would otherwise reach 100k+ dimensions, and it stays in force for
+    everything that did not ask for a specific depth.
+    """
+    global MAX_ACTIVE_DIMS
+    old = MAX_ACTIVE_DIMS
+    MAX_ACTIVE_DIMS = max(old, n + 8)      # + 8 for intermediate products, as
+    try:                                   # _derivative_scope uses order + 8
+        yield
+    finally:
+        MAX_ACTIVE_DIMS = old
+
+
+def _honours_terms(fn):
+    """An explicit `terms=` is a REQUEST, not a suggestion.
+
+    MAX_ACTIVE_DIMS is a safety default against dimension explosion, and as a
+    default it is right: a caller who said nothing about depth gets the guard.
+    A caller who wrote `terms=300` has said something about depth, and silently
+    handing back 60 answers a question they did not ask.  Measured before this
+    existed: sqrt(h - h*h, terms=300) and terms=1000 returned byte-identical
+    60-term series, so a convergence study flat-lined at 3.24e-03 and looked
+    like a property of the mathematics.
+
+    _derivative_scope already took this position for extraction -- "a global
+    order cap set by the caller is an economy, not a ceiling on what an
+    extraction may ask for" -- and this is the same rule for a direct call.
+
+    No-op unless the request exceeds the cap, so the default path is untouched:
+    every terms= default in this module is 12 or 15 against a cap of 60.
+    """
+    @_functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        asked = kwargs.get("terms")
+        if asked is None and len(args) > 1:
+            asked = args[1]
+        asked = max(asked or 0, _min_terms[0])
+        if asked <= MAX_ACTIVE_DIMS:
+            return fn(*args, **kwargs)
+        with _dim_headroom(asked):
+            return fn(*args, **kwargs)
+    return wrapper
 
 
 def _needs_full_order(fn):
@@ -1526,6 +1604,7 @@ def _truncate_order(result, order):
             result._complete = _tighter(result._complete, order)
             return result
         keep = ~over
+        _warn_truncated(int(over.sum()), "order cap %s" % order, order)
         d2 = dims[keep]
         _, v = result._backend.to_arrays(result._data)
         out = Composite._wrap(
@@ -1538,6 +1617,7 @@ def _truncate_order(result, order):
         # otherwise a caller downstream reads "exact" off a truncated series.
         result._complete = _tighter(result._complete, order)
         return result
+    _warn_truncated(len(extra), "order cap %s" % order, order)
     out = _like(result, {d: v for d, v in result.c.items()
                          if _dim_order(d) <= order})
     out._complete = _tighter(getattr(result, "_complete", None), order)
@@ -1883,6 +1963,7 @@ def _is_nothing(x):
     return isinstance(x, Composite) and not x.c
 
 
+@_honours_terms
 def sin(x, terms=12):
     terms = _effective_terms(terms)
     if isinstance(x, (int, float)):
@@ -1941,6 +2022,7 @@ def sin(x, terms=12):
                                             _min_complete(x)))
 
 
+@_honours_terms
 def cos(x, terms=12):
     terms = _effective_terms(terms)
     if isinstance(x, (int, float)):
@@ -1998,6 +2080,7 @@ def cos(x, terms=12):
                                             _min_complete(x)))
 
 
+@_honours_terms
 def exp(x, terms=15):
     """Exponential function for Composite numbers."""
     terms = _effective_terms(terms)
@@ -2195,6 +2278,7 @@ def _ln_vector(x, terms):
     return lead + ln(ratio, terms)
 
 
+@_honours_terms
 def ln(x, terms=15):
     """Natural logarithm for composite numbers.
 
@@ -2332,6 +2416,7 @@ def ln(x, terms=15):
                                     _min_complete(x)))
 
 
+@_honours_terms
 def sqrt(x, terms=12):
     """Square root for composite numbers via binomial series.
 
@@ -2463,6 +2548,7 @@ def sqrt(x, terms=12):
                                     _min_complete(x)))
 
 
+@_honours_terms
 def tan(x, terms=12):
     """Tangent function via sin/cos"""
     if isinstance(x, (int, float)):
@@ -2567,6 +2653,7 @@ def _lane_d1(x, axis=1):
     return total
 
 
+@_honours_terms
 def _reciprocal(x, terms=15):
     """Compute 1/x via geometric series. Internal helper."""
     a = x.st()
@@ -2626,6 +2713,7 @@ def _maclaurin_odd(x, coeffs, terms):
     return _truncate_order(out, _tighter(bound, _min_complete(x)))
 
 
+@_honours_terms
 def atan(x, terms=15):
     """Arctangent for composite numbers."""
     # WITHOUT THIS the series stops at the function's own default,
@@ -2691,6 +2779,7 @@ def atan(x, terms=15):
         out = _truncate_order(out, out._complete)
     return out
 
+@_honours_terms
 def asin(x, terms=15):
     """Arcsine for composite numbers."""
     # WITHOUT THIS the series stops at the function's own default,
@@ -2754,6 +2843,7 @@ def asin(x, terms=15):
         out = _truncate_order(out, out._complete)
     return out
 
+@_honours_terms
 def acos(x, terms=15):
     """Arccosine for composite numbers."""
     # WITHOUT THIS the series stops at the function's own default,
@@ -2788,6 +2878,7 @@ def acos(x, terms=15):
 # HYPERBOLIC FUNCTIONS
 # =============================================================================
 
+@_honours_terms
 def sinh(x, terms=15):
     """Hyperbolic sine: (exp(x) - exp(-x)) / 2"""
     if isinstance(x, (int, float)):
@@ -2810,6 +2901,7 @@ def sinh(x, terms=15):
     x = _r1(x)
     return (exp(x, terms) - exp(-x, terms)) / 2
 
+@_honours_terms
 def cosh(x, terms=15):
     """Hyperbolic cosine: (exp(x) + exp(-x)) / 2"""
     if isinstance(x, (int, float)):
@@ -2832,6 +2924,7 @@ def cosh(x, terms=15):
     x = _r1(x)
     return (exp(x, terms) + exp(-x, terms)) / 2
 
+@_honours_terms
 def tanh(x, terms=15):
     """Hyperbolic tangent: sinh(x) / cosh(x)"""
     if isinstance(x, (int, float)):
@@ -2868,9 +2961,17 @@ def tanh(x, terms=15):
 # DIMENSION SHIFT that antiderivative() performs.  So
 #
 #     f(a + h) = f(a) + integral_0^h f'(a + s) ds
-#              = antiderivative( f'(x), f(a) )
+#              = antiderivative( f'(x) * dx/dh, f(a) )
 #
 # is the whole implementation -- no series coefficients to derive, no table.
+#
+# THE dx/dh FACTOR IS NOT OPTIONAL.  antiderivative() integrates with respect to
+# the composite's own infinitesimal, so the chain rule has to be supplied the way
+# atan and asin already supply it, with _d_deps(x).  Without it these three were
+# correct for a plain seed -- where dx/dh is 1 -- and silently wrong for every
+# composed argument: d/dx erf(2x) came back 0.4151 where it is 0.8302, exactly
+# the missing factor of 2, and likewise for erfc and Phi.  A plain seed is what
+# a direct test uses, which is why it survived.
 # The standard part comes from math so it keeps full precision; the
 # infinitesimal part comes from the algebra so derivatives and limits work.
 # erfc and Phi use math.erfc rather than 1 - erf, which loses its significant
@@ -2880,6 +2981,27 @@ _TWO_OVER_SQRT_PI = 2.0 / math.sqrt(math.pi)
 _ONE_OVER_SQRT_2PI = 1.0 / math.sqrt(2.0 * math.pi)
 
 
+def _chained(deriv, x):
+    """f'(x) * dx/dh, truncated back to what f'(x) actually knew.
+
+    antiderivative() integrates in h, so the chain factor is required -- without
+    it erf, erfc and Phi were right only for a plain seed, where dx/dh is 1, and
+    silently wrong for every composed argument (d/dx erf(2x) came back at half
+    its value).
+
+    The truncation is the other half.  dx/dh has more than one term whenever x
+    does, so the product CONVOLVES the series one order further than f'(x) was
+    computed to -- and that new top order is missing the contribution of a term
+    nobody evaluated.  Emitting it means the answer moves when `terms` is raised,
+    which is exactly what completeness promises it will not do.  So the product
+    is cut back to f'(x)'s own bound: one fewer order than before, and every
+    order that remains is one the series actually knows.
+    """
+    order = getattr(deriv, "_complete", None)
+    return _truncate_order(deriv * _d_deps(x), order)
+
+
+@_honours_terms
 def erf(x, terms=15):
     """Error function.  d/dx erf = (2/sqrt(pi)) exp(-x^2)."""
     if isinstance(x, (int, float)):
@@ -2905,9 +3027,11 @@ def erf(x, terms=15):
     a = x.st()
     if not _has_infinitesimal_part(x):
         return Composite({0: math.erf(a)})
-    return antiderivative(_TWO_OVER_SQRT_PI * exp(-(x * x), terms), math.erf(a))
+    return antiderivative(_chained(_TWO_OVER_SQRT_PI * exp(-(x * x), terms), x),
+                          math.erf(a))
 
 
+@_honours_terms
 def erfc(x, terms=15):
     """Complementary error function.  d/dx erfc = -(2/sqrt(pi)) exp(-x^2).
 
@@ -2937,9 +3061,11 @@ def erfc(x, terms=15):
     a = x.st()
     if not _has_infinitesimal_part(x):
         return Composite({0: math.erfc(a)})
-    return antiderivative(-_TWO_OVER_SQRT_PI * exp(-(x * x), terms), math.erfc(a))
+    return antiderivative(_chained(-_TWO_OVER_SQRT_PI * exp(-(x * x), terms), x),
+                          math.erfc(a))
 
 
+@_honours_terms
 def normal_cdf(x, terms=15):
     """Standard normal CDF.  Phi'(x) = exp(-x^2/2)/sqrt(2 pi).
 
@@ -2958,7 +3084,7 @@ def normal_cdf(x, terms=15):
     if not _has_infinitesimal_part(x):
         return Composite({0: base})
     return antiderivative(
-        _ONE_OVER_SQRT_2PI * exp(-(x * x) * 0.5, terms), base)
+        _chained(_ONE_OVER_SQRT_2PI * exp(-(x * x) * 0.5, terms), x), base)
 
 
 Phi = normal_cdf          # the name the finance literature uses
