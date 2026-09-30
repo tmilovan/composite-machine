@@ -380,9 +380,12 @@ def _r1(c):
     # (-1, 0) by this convention, so this only makes the two paths agree.
     dims[0] = _dim_shift(dims[0], -1)
     vals[0] = 1.0
-    return Composite._wrap(c._backend.create_from_terms(dims, vals),
-                           c._backend, demote=False,
-                           denot=_merge_denot(_denot_of(c), _lead_order(dims[0])))
+    # _mint: this conversion MAKES infinitesimal content no operand had, which
+    # is the second of the three ways a source comes into existence.
+    return _mint(Composite._wrap(
+        c._backend.create_from_terms(dims, vals),
+        c._backend, demote=False,
+        denot=_merge_denot(_denot_of(c), _lead_order(dims[0]))))
 
 
 CANCELLATION_SIGNED = False
@@ -583,7 +586,14 @@ def _cancellation_residue(a, b, result):
     leaves _r1 to handle a written or manufactured zero with its unit residue:
     a written zero has no magnitude to read, which is not the same as a
     magnitude of zero.
+
+    Honours conventional() exactly as _r1 does.  Converting at the site takes
+    this route out of _r1's path, so the context's own check there does not
+    cover it, and a cancellation kept converting inside the very block that
+    exists to stop it -- which is what conventional() is for.
     """
+    if _CONVENTIONAL.get():
+        return result                  # see conventional()
     if not _is_wholly_zero(result):
         return result                       # a tail survives: R2 governs, not R1
     dims, vals = result._backend.to_arrays(result._data)
@@ -604,6 +614,10 @@ def _cancellation_residue(a, b, result):
                           result._backend, demote=False,
                           denot=_merge_denot(_denot_of(result), order))
     out._complete = result._complete
+    # A cancellation is a source, and it used to be minted in _r1 -- converting
+    # at the site moved this case out of _r1's path, so the mint moves with it
+    # or a cancelled zero stops being a second source and stops flagging.
+    _mint(out)
     _warn_cancelled(new_dim, order, vals[0])
     return out
 
@@ -746,12 +760,17 @@ class Composite:
     # It cannot be inferred from the coefficients: _seeded(t) is exact with max
     # order 1, sin(x*x) is truncated with max order 11, and both merely look
     # like "max order K".  So it is carried.
-    __slots__ = ['_data', '_backend', '_complete', '_denot']
+    __slots__ = ['_data', '_backend', '_complete', '_denot', '_src', '_deg']
 
     def __init__(self, coefficients=None, _data=None):
         self._backend = get_backend()
         self._complete = None          # exact unless a series says otherwise
         self._denot = None             # no expressed zero has entered
+        # Assigned here and in _wrap, never left unset: the carry fast path
+        # reads self._src directly rather than through getattr, deliberately,
+        # and a __slots__ attribute that was never assigned raises on READ.
+        self._src = None               # descends from no infinitesimal source
+        self._deg = False              # no second source has reached it
 
         if _data is not None:
             # Internal fast path: created by arithmetic ops
@@ -825,6 +844,8 @@ class Composite:
         obj._data = data
         obj._complete = complete
         obj._denot = denot
+        obj._src = None
+        obj._deg = False
         return obj
 
     # -------------------------------------------------------------------------
@@ -2045,8 +2066,9 @@ def _rational_power(x, r):
         came back at grade 1351079888211149/2251799813685248 instead of 3/5.
         Dyadic exponents survived by luck, which is why 1/2 always looked fine.
 
-    A monomial makes u empty and the loop exits at once, so the single-term case
-    is subsumed rather than special-cased and the len(dims) == 1 test is gone.
+    A monomial makes u NOTHING and the loop exits at once.  That is tested for
+    rather than fallen into: it used to arrive by `q - 1` cancelling to an
+    inert zero, and a cancellation is no longer inert.
     """
     lead = x.lead_dim()
     if lead is None:
@@ -2073,8 +2095,18 @@ def _rational_power(x, r):
 
     # u = x / (c0 * h**(-lead)) - 1.  Dividing by a single-term composite is a
     # pure dimension shift, so this stays exact.
+    #
+    # ASK BEFORE SUBTRACTING.  An exact monomial divides out to |1|_0, and
+    # `q - 1` is then a cancellation -- which converts AT THE SITE and deposits
+    # |1|_-1, so "nothing left to expand" became "expand h" and the binomial
+    # series ran its full 15 terms.  Measured: ZERO ** 1/2 came back at grade
+    # -31/2 where it is -1/2, and -1/2 - 15 is exactly that.  NOTHING is what
+    # the loop below needs in order to exit at once, and it is also what an
+    # exact monomial genuinely has left over, so it is built rather than
+    # arrived at by cancelling.
     monomial = Composite({lead: c0})
-    u = x / monomial - Composite({0: 1.0})
+    q = x / monomial
+    u = Composite({}) if _is_unit(q) else q - Composite({0: 1.0})
 
     acc = Composite({0: 1.0})
     term = Composite({0: 1.0})
