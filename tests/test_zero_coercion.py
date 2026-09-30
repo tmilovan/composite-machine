@@ -456,8 +456,14 @@ def z10_division_by_an_unbounded_multi_axis_divisor(t):
     h = Composite({-1: 1.0})
     lg = cl.ln(ZERO)
     den = lg + h
+    # Compared as NUMBERS, not as repr strings.  numpy 2 renders a scalar as
+    # "np.float64(-1.0)" where numpy 1 rendered "-1.0", so str() of a vector
+    # dimension differs between versions and this check failed on numpy 2 for
+    # no reason to do with the arithmetic.  Sorting strings also put "(0, 1)"
+    # before "(np.float64(-1.0), 0)", so even the order was a spelling artifact.
     t.exact("Z10.01 the divisor really does span two axes",
-            sorted(map(str, den.coeffs_dict())), ["(-1.0, 0)", "(0, 1)"])
+            sorted(tuple(float(c) for c in d) for d in den.coeffs_dict()),
+            [(-1.0, 0.0), (0.0, 1.0)])
     t.raises("Z10.02 and genuinely has no standard part",
              StandardPartUndefinedError, den.st)
 
