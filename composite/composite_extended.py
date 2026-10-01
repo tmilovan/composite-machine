@@ -196,10 +196,12 @@ def residue(f, at, terms=15):
     Why +1? Because h = |1|_{-1}, so h^{-1} = |1|_{+1}.
     The Laurent term b_1/(z-a) = b_1 * h^{-1} = |b_1|_{+1}.
     """
-    if at == 0:
-        z = ZERO
-    else:
-        z = Composite({0: complex(at), -1: 1.0})
+    # float(at), not complex(at): coefficients are float64, so a complex one
+    # raised "float() argument must be ... not 'complex'" from Composite.__init__
+    # and residue() worked at the origin only.  A complex expansion point needs
+    # the (real, imag) PAIR representation -- see C() and C_var() -- not a
+    # complex coefficient, which this value group cannot hold.
+    z = ZERO if at == 0 else Composite({0: float(at), -1: 1.0})
 
     result = f(z)
     return result.coeff(1)
@@ -216,7 +218,10 @@ def pole_order(f, at, max_order=10):
     if at == 0:
         z = ZERO
     else:
-        z = Composite({0: complex(at), -1: 1.0})
+        # float(at), not complex(at) -- see residue() above: coefficients are
+        # float64, so a complex expansion point raised TypeError and this worked
+        # at the origin only.
+        z = Composite({0: float(at), -1: 1.0})
 
     result = f(z)
 

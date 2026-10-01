@@ -1730,14 +1730,35 @@ def _compare(a, b):
     a_dims, a_vals = a._backend.to_arrays(a._data)
     b_dims, b_vals = b._backend.to_arrays(b._data)
 
-    all_dims = np.union1d(a_dims, b_dims)
-    if len(all_dims) == 0:
+    # Key every dimension as a COMMON-WIDTH vector and compare those.
+    #
+    # _operands promotes on the DATA TYPE, and VectorDimBackend subclasses
+    # DictBackend, so on the dict backend both sides hold DictData, the
+    # promotion is skipped, and the dims stay float on one side and tuple on the
+    # other.  np.union1d then sorted a tuple against a float and raised, so
+    # `1/h > ln(1/h)` answered on sparse-dense and was a TypeError on dict --
+    # the asymptotic comparison the ordering exists to answer, failing on one
+    # backend only.
+    #
+    # canon() is NOT the tool here: it strips trailing zeros, so canon((1,0))
+    # collapses back to the scalar and the mixed kinds return.  At equal width
+    # Python's own tuple order IS the dominance order -- that is what dom_key
+    # documents -- so pad instead of canonicalising, and read the coefficients
+    # out of the arrays already in hand rather than through read_dim, which
+    # would need the stored key form back again.
+    from composite.backends.vector_dim_backend import as_vec
+    _w = max([len(d) if isinstance(d, tuple) else 1
+              for d in list(a_dims) + list(b_dims)] or [1])
+    ka = {as_vec(dim_cast(d), _w): float(v) for d, v in zip(a_dims, a_vals)}
+    kb = {as_vec(dim_cast(d), _w): float(v) for d, v in zip(b_dims, b_vals)}
+
+    all_keys = set(ka) | set(kb)
+    if not all_keys:
         return 0
 
-    for dim in reversed(all_dims):
-        _d = dim if isinstance(dim, tuple) else float(dim)
-        ca = a._backend.read_dim(a._data, _d)
-        cb = b._backend.read_dim(b._data, _d)
+    for key in sorted(all_keys, reverse=True):
+        ca = ka.get(key, 0.0)
+        cb = kb.get(key, 0.0)
         if math.isnan(ca) or math.isnan(cb):
             return float('nan')
         if ca < cb:
