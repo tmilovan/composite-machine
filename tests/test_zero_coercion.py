@@ -8,7 +8,7 @@ That is R1 and R6, and it is the system's content rather than a cost it
 imposes:
 
     R1  a wholly zero operand converts:  0_d -> 1_(d-1)
-    R6  there is no additive identity.  R(5) + 0_0 -> 5_0 + 1_-1, not 5_0
+    R6  there is no additive identity.  R(5) + <0_0> -> <5_0 1_-1>, not <5_0>
 
 The distinction §0 draws is between a zero and an ABSENCE, not between a zero
 and a zero that came from data.  A masked entry holding 0.0 holds zero; a node
@@ -67,7 +67,7 @@ def _quiet(fn, *a):
 # =============================================================================
 def z1_expressed(t):
     head("Z1  a written zero is expressed, and converts")
-    want = "|5|\u2080 + |1|\u208b\u2081"
+    want = "<|5|\u2080 |1|\u208b\u2081>"
     for i, (lbl, got) in enumerate((
             ("R(5) + 0        -- the spec's own example",
              str(_quiet(lambda: R(5) + 0))),
@@ -75,7 +75,7 @@ def z1_expressed(t):
             ("R(5) + R(0)     -- and the canonical spelling", str(R(5) + R(0)))), 1):
         t.true(f"Z1.0{i} {lbl}: {got}", got == want, f"got {got!r} want {want!r}")
     t.true(f"Z1.04 <0_0> + <0_0> -> 2_-1: {Z0 + Z0}",
-           str(Z0 + Z0) == "|2|\u208b\u2081", f"{Z0 + Z0}")
+           str(Z0 + Z0) == "<|2|\u208b\u2081>", f"{Z0 + Z0}")
     t.true(f"Z1.05 c * 0 converts rather than annihilating: "
            f"{_d(_quiet(lambda: C * 0))}",
            _d(_quiet(lambda: C * 0)) == {-2: 3.0, -1: 5.0},
@@ -86,7 +86,7 @@ def z1_expressed(t):
     t.exact("Z1.10b and the residue is the magnitude, not a unit: R(6) - R(6)",
             (R(6) - R(6)).coeffs_dict(), {-1: 6.0})
     t.true(f"Z1.11 and it converts on next use: {(R(1) - R(1)) + R(5)}",
-           str((R(1) - R(1)) + R(5)) == "|5|\u2080 + |1|\u208b\u2081",
+           str((R(1) - R(1)) + R(5)) == "<|5|\u2080 |1|\u208b\u2081>",
            f"{(R(1) - R(1)) + R(5)}")
     t.true("Z1.12 ZERO - ZERO == ZERO**2", (ZERO - ZERO) == ZERO ** 2,
            f"{ZERO - ZERO}")
@@ -174,7 +174,7 @@ def z4_laws(t):
             # as one.  (a+b)+c and a+(b+c) are different EVENTS: one grouping
             # performs a cancellation and the other never does, so requiring
             # them to agree is requiring the system to forget which happened.
-            #     (R(1)+R(-1))+R(2) = |2|_0 + |1|_-1     a cancellation
+            #     (R(1)+R(-1))+R(2) = <|2|_0 |1|_-1>     a cancellation
             #     R(1)+(R(-1)+R(2)) = |2|_0              none
             # It read green for as long as it did only because the pool's
             # coefficients contain no opposite pair, so it never sampled one.
@@ -471,7 +471,7 @@ def z9_nothing_keeps_the_constant(t):
     # is worse, not better: the scalar fast path below it reads st(nothing) as
     # 0 and returns Composite({0: f(0)}) -- an EXPRESSED zero -- which R1 then
     # converts on next use.  That is how acos(nothing) came back as
-    # |1.5708|_0 + |-1|_-1, a spurious infinitesimal in a constant.  The
+    # <|1.5708|_0 |-1|_-1>, a spurious infinitesimal in a constant.  The
     # short-circuit is kept and returns the constant term instead.
     N = Composite({})
     for nm, want in (("exp", 1.0), ("cos", 1.0), ("cosh", 1.0),

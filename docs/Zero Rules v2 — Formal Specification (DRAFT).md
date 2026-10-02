@@ -14,10 +14,10 @@ Notation: `|a|_d`, shortened to `a_d`, is coefficient `a` at dimension `d`.
 
 ## 0. Notation, and the distinction it must carry
 
-**Write a composite with angle brackets and commas, never with `+`.**
+**Write a composite with angle brackets and spaces, never with `+`.**
 
 ```
-<0_0, 6_-1, 1_-2>          one number, three terms
+<0_0 6_-1 1_-2>            one number, three terms
 <0_0> + <6_-1>             an operation between two numbers
 ```
 
@@ -26,13 +26,20 @@ addition of two numbers is a genuine ambiguity, and it is the single thing
 that makes these rules hard to reason about. `0_3 + -4_1` has two readings:
 
 ```
-<0_3, -4_1>          one number whose dimension-3 term is empty   ->  stays as written
-<0_3> + <-4_1>       two numbers being added                      ->  <-4_1, 1_2>
+<0_3 -4_1>           one number whose dimension-3 term is empty   ->  stays as written
+<0_3> + <-4_1>       two numbers being added                       ->  <-4_1 1_2>
 ```
 
 Both are legitimate; they are different expressions. With `+` overloaded they
 look identical, and every apparent inconsistency in these rules traces back to
 reading one as the other.
+
+One ambiguity is accepted rather than removed. Where a dimension is fractional
+or a vector there are no subscript glyphs, so the terms drop the bars and a
+negative coefficient sits straight against the separating space: `<3_0 -1_-0.5>`
+reads as a subtraction on first glance. It needs a glyphless dimension and a
+negative coefficient together, and the glyph form's bars prevent it
+(`<|3|₀ |-1|₋₁>`), so the form stands as written.
 
 **The distinction that follows.** A composite entering an operation is an
 **operand**. The pieces a composite is written from are **terms**. R1 speaks
@@ -40,7 +47,7 @@ only of operands. Terms are notation; there is nothing for a rule to act on.
 
 ```
 <0_0>                     an operand — a number that is a zero
-<0_0, 6_-1, 1_-2>         one operand whose first term happens to be zero
+<0_0 6_-1 1_-2>           one operand whose first term happens to be zero
 ```
 
 ---
@@ -69,8 +76,8 @@ for the next use:
 (-6) - (-6)        ->  |-6|_-1                  the quantity, so the sign comes too
 1 - 1              ->  |1|_-1
 0 - 0              ->  |1|_-2                   R(0) is |1|_-1, cancelling at grade -1
-(3+h) - (3+h)      ->  |3|_-1 + |1|_-2          every grade converts, not only the lowest
-(3+h)**2 - same    ->  |9|_-1 + |6|_-2 + |1|_-3
+(3+h) - (3+h)      ->  <|3|_-1 |1|_-2>          every grade converts, not only the lowest
+(3+h)**2 - same    ->  <|9|_-1 |6|_-2 |1|_-3>
 ```
 
 Two readings of the same rule, and they agree term for term. Grade by grade:
@@ -109,12 +116,37 @@ composite ratios back to 1. The difference is never more than a sign, and
 `z4c_cancelling_pair` asserts that. (Selected by `CANCELLATION_CARRIES`, which
 also keeps the magnitude rule reachable for comparison.)
 
+**The second cost is dimensional, and nothing in the system reports it.** Read a
+composite for `f(x0 + h)` physically: the coefficient at grade `-k` is
+`f^(k)(x0)/k!`, so it carries units `[f]/[x]^k`, and with `[h] = [x]` every term
+`c_k*h^k` has units `[f]`. The number is homogeneous in `[f]`. Now cancel: `a - a`
+is `a*h`, so a coefficient of units `[f]/[x]^j` moves from grade `-j` to grade
+`-(j+1)`. The residue is still homogeneous, but in `[f]*[x]` rather than `[f]`.
+
+So **subtraction is no longer dimensionally closed.** Subtracting two energies
+yields energy times length, and adding that residue back to an energy gives a
+composite whose grade-0 and grade-1 terms are not the same kind of quantity. The
+arithmetic proceeds; `NotConventionalWarning` reports that the jet is denoted,
+which is a different statement, and no units are tracked so nothing checks this.
+
+It closes exactly when the infinitesimal is **dimensionless**, `[x] = 1`, which
+makes `[f]*[x] = [f]`. That is the case in practice for a ratio like `v/c`, a
+coupling like `alpha`, or a bare perturbation parameter, and it is how
+`composite_relativity.py` and the hydrogen sections of `composite_physics.py` are
+built, which is why their results are unaffected. Seed a variable that carries a
+unit, let a cancellation fire, and the residue deposits an energy in the slot a
+force belongs in. Prefer a dimensionless seed where a cancellation is reachable;
+`Composite({})` annihilates with no residue and no dimensional question.
+
+This is a consequence of the grade reading rather than a measurement: the library
+has no units to check, so the statement is derived, not observed.
+
 ```
-0_3 + 0_-1 + 0_-3
+<0_3 0_-1 0_-3>
   convert the lowest      0_-3 -> 1_-4
-  a nonzero now exists    0_3 + 0_-1 + 1_-4
+  a nonzero now exists    <0_3 0_-1 1_-4>
   R2: the rest are inert, and kept
-                          =  0_3 + 0_-1 + 1_-4
+                          =  <0_3 0_-1 1_-4>
 ```
 
 Exactly one conversion happens. The other zeros are not discarded — they record
@@ -140,7 +172,7 @@ So R1 fires exactly on the cases where the cancellation is an *identity*, and
 never on the ones where it is a coincidence:
 
 ```
-x**2 - 9  at 3     ->  0_0 + 6_-1 + 1_-2     coincidence: a tail, R2, no conversion
+x**2 - 9  at 3     ->  <0_0 6_-1 1_-2>     coincidence: a tail, R2, no conversion
 c - v      (v = c) ->  |c|_-1                identity: nothing below, it converts
 ```
 
@@ -188,8 +220,8 @@ merges into another coefficient and never promotes.
 
 ```
 <0_0>                  an operand  ->  R1 applies   ->  <1_-1>
-<0_0, 6_-1, 1_-2>      one operand ->  R1 does not apply to its terms
-   ÷ <1_-1>            all terms shift together     ->  <0_1, 6_0, 1_-1>
+<0_0 6_-1 1_-2>        one operand ->  R1 does not apply to its terms
+   ÷ <1_-1>            all terms shift together     ->  <0_1 6_0 1_-1>
 ```
 
 Nothing here is stipulated. Once `+` stops doing two jobs, R1 alone decides
@@ -208,8 +240,8 @@ Adding zero is not a no-op. `0_d` is a number, so by R1 it converts and
 contributes `1_(d-1)`:
 
 ```
-R(5) + 0_0   ->  5_0 + 1_-1        not 5_0
-0_0 + 0_0    ->  2_-1
+R(5) + <0_0>   ->  <5_0 1_-1>      not <5_0>
+<0_0> + <0_0>  ->  <2_-1>
 ```
 
 This is the `1 − 1 ≠ 0` thesis applied consistently — if subtracting a value
@@ -266,10 +298,10 @@ dimensions nobody built.
 | `0_3 × 2_0` | `2_2` |
 | `5_0 × 0_3` | `5_2` |
 | `0_0 / 0_0` | `1_0` |
-| `0_3 + 5_3` | `5_3 + 1_2` (an addition — R1 applies to `0_3`) |
-| `(0_3 + 0_-1 + 0_-3) × 2_0` | `0_3 + 0_-1 + 2_-4` |
-| `x − x` for `x = 3_3+5_-1+2_-3`, then `× 2_0` | `0_3 + 0_-1 + 2_-4` |
-| `(0_2 + 3_0)(0_1 + 5_0)` | `6_1 + 18_0` |
+| `<0_3> + <5_3>` | `<5_3 1_2>` (an addition — R1 applies to `0_3`) |
+| `<0_3 0_-1 0_-3> × 2_0` | `<0_3 0_-1 2_-4>` |
+| `x − x` for `x = <3_3 5_-1 2_-3>`, then `× 2_0` | `<0_3 0_-1 2_-4>` |
+| `<0_2 3_0><0_1 5_0>` | `<6_1 18_0>` |
 
 The last one term by term, as written with `+` so each zero is an operand:
 
@@ -284,11 +316,11 @@ The last one term by term, as written with `+` so each zero is an operand:
 ## 2b. The derivation that most needs the notation
 
 ```
-x = 3 + h        <3_0, 1_-1>
-x²               <9_0, 6_-1, 1_-2>
-x² − 9           <0_0, 6_-1, 1_-2>     the subtraction is finished here;
-                                        the 0_0 is a TERM of this number
-÷ h              <0_1, 6_0, 1_-1>      one operand, all terms shift together
+x = 3 + h        <3_0 1_-1>
+x²               <9_0 6_-1 1_-2>
+x² − 9           <0_0 6_-1 1_-2>     the subtraction is finished here;
+                                       the 0_0 is a TERM of this number
+÷ h              <0_1 6_0 1_-1>      one operand, all terms shift together
 st                6
 ```
 
@@ -342,9 +374,9 @@ R2 keeps the zero rather than discarding it, so the cancellation record
 survives arithmetic:
 
 ```
-(3+h)² − 9      ->  0_0 + 6_-1 + 1_-2
-÷ h             ->  0_1 + 6_0 + 1_-1        st = 6, and the 0_1 records the 9−9
-(0_2+3_0) × 2_0 ->  0_2 + 6_0               the product keeps the dimension it built
+(3+h)² − 9      ->  <0_0 6_-1 1_-2>
+÷ h             ->  <0_1 6_0 1_-1>        st = 6, and the 0_1 records the 9−9
+<0_2 3_0> × 2_0 ->  <0_2 6_0>               the product keeps the dimension it built
 ```
 
 Read the markers with `[d for d, v in c.c.items() if v == 0.0]`.
@@ -357,7 +389,7 @@ Read the markers with `[d for d, v in c.c.items() if v == 0.0]`.
 - **Order of a zero.** `0_0 × 0_0 = 1_-2`, `0_0³ = 1_-3`. A zero carries its
   dimensional order through every operation; `0_2` and `0_0` are different
   numbers with different futures.
-- **The derivative tower.** `(3+h)² = 9_0 + 6_-1 + 1_-2` — value and all
+- **The derivative tower.** `(3+h)² = <9_0 6_-1 1_-2>` — value and all
   derivatives, from one evaluation.
 - **The cancellation record**, at its own dimension, carried through
   subsequent arithmetic.
@@ -368,8 +400,8 @@ The README states that the residue of `1 − 1` "contains the derivative of ever
 operation that produced it." That is not what happens:
 
 ```
-(3+h)²      =  9_0 + 6_-1 + 1_-2      the 6 is already present
-minus 9     =  0_0 + 6_-1 + 1_-2      the subtraction only adds the 0_0
+(3+h)²      =  <9_0 6_-1 1_-2>      the 6 is already present
+minus 9     =  <0_0 6_-1 1_-2>      the subtraction only adds the 0_0
 ```
 
 The derivative is in the tower **before** any subtraction. The residue records
@@ -396,7 +428,7 @@ All fifteen headline results, measured together, 0 failures:
 | `lim ln(1+x)/x`, `(1+x)^(1/x)` @0 | 1, e | ✓ |
 | `∫x²` over [0,1] | 1/3 | ✓ |
 | `ZERO/ZERO`, `5·ZERO/ZERO` | 1, 5 | ✓ |
-| `(0_2+3_0)(0_1+5_0)` | `<6_1, 18_0>` | ✓ |
+| `<0_2 3_0><0_1 5_0>` | `<6_1 18_0>` | ✓ |
 
 ---
 
@@ -548,7 +580,7 @@ why that is `ZERO**2`.
   - the six algebraic laws of §3, fuzzed over operands **built by addition** of
     single terms with zeros included, ≥1500 cases each
   - the provenance assertions of §5 — `((3+h)²−9)/h` must be
-    `0_1 + 6_0 + 1_-1`, not `6_0 + 1_-1`
+    `<0_1 6_0 1_-1>`, not `<6_0 1_-1>`
 - Regression guard for 7.3: `∫₀^∞ x·e⁻ˣ dx` must terminate and return 1.
 - Round-trip guard for 7.4: a composite carrying zero coefficients must survive
   `to_json` / `from_json` unchanged.

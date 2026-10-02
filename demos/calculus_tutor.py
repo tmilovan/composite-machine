@@ -659,7 +659,7 @@ def lesson6():
     of the composite and uses them as the coefficients of an ordinary
     real polynomial in a real variable t:
 
-        F = |c0|_0 + |c1|_-1 + |c2|_-2 + ...     lives in h
+        F = <|c0|_0 |c1|_-1 |c2|_-2 ...>         lives in h
               |      |         |
               v      v         v
         P(t) = c0 + c1.t + c2.t^2 + ...          lives in the reals

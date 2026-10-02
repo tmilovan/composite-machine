@@ -36,7 +36,7 @@ from composite import R, ZERO
 # Create a composite number: 3 + infinitesimal
 x = R(3) + ZERO
 
-print(x)  # |3|₀ + |1|₋₁
+print(x)  # <|3|₀ |1|₋₁>
 # |3|₀ means: value = 3 at dimension 0
 # |1|₋₁ means: derivative seed = 1 at dimension -1
 ```
@@ -57,7 +57,7 @@ When you compute with composite numbers, **derivatives emerge automatically**:
 x = R(3) + ZERO
 result = x ** 2
 
-print(result)  # |9|₀ + |6|₋₁ + |1|₋₂
+print(result)  # <|9|₀ |6|₋₁ |1|₋₂>
 
 # Extract values:
 print(result.st())   # 9 (function value)

@@ -339,14 +339,14 @@ def test_an_exact_dimension_prints_exactly(flavour):
     # glyphs, so the bars delimit the coefficient.  4_1/4 uses the underscore to
     # do the subscripting, so the bars are redundant and are dropped.  `|2|_5/6`
     # was both at once, which is neither.
-    assert str(cl.ZERO ** F(1, 3)) == "1_-1/3"
-    assert str(cl.ZERO ** F(2, 3)) == "1_-2/3"
-    assert str(Composite({F(1, 3): 2.5})) == "2.5_1/3"
+    assert str(cl.ZERO ** F(1, 3)) == "<1_-1/3>"
+    assert str(cl.ZERO ** F(2, 3)) == "<1_-2/3>"
+    assert str(Composite({F(1, 3): 2.5})) == "<2.5_1/3>"
     # an integral dimension keeps its subscript glyphs, and the bars with them
-    assert str(cl.ZERO) == "|1|₋₁"
-    assert str(R(3.0) + cl.ZERO) == "|3|₀ + |1|₋₁"
+    assert str(cl.ZERO) == "<|1|₋₁>"
+    assert str(R(3.0) + cl.ZERO) == "<|3|₀ |1|₋₁>"
     # and the choice is made for the WHOLE number, never per term
-    assert str(R(3.0) + (cl.ZERO ** F(1, 3))) == "3_0 + 1_-1/3"
+    assert str(R(3.0) + (cl.ZERO ** F(1, 3))) == "<3_0 1_-1/3>"
     for c in (cl.ZERO ** F(1, 3), R(3.0) + (cl.ZERO ** F(1, 3)),
               Composite({F(5, 6): 2.0, 0: 4.0, -3: 0.5})):
         s = str(c)
@@ -582,7 +582,7 @@ def test_rational_power_coefficients_match_the_binomial_series(flavour):
 def test_rational_power_edge_cases(flavour):
     h = cl.ZERO
     # a negative coefficient has a real q-th root only for odd q
-    assert str((R(-8.0) * (h ** 3)) ** F(1, 3)) == "|-2|₋₁"
+    assert str((R(-8.0) * (h ** 3)) ** F(1, 3)) == "<|-2|₋₁>"
     with pytest.raises(ValueError, match="not real"):
         (-h) ** F(1, 2)
     # nothing, and a wholly zero value, have no leading term to factor out

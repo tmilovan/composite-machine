@@ -45,7 +45,7 @@ The KEY INSIGHT:
     coefficients of f around a. No limits needed — the algebra
     produces them automatically.
 
-    Example: (3 + h)² = |9|₀ + |6|₋₁ + |1|₋₂
+    Example: (3 + h)² = <|9|₀ |6|₋₁ |1|₋₂>
                          ↑       ↑        ↑
                         f(3)   f'(3)/1!  f''(3)/2!
 
@@ -78,7 +78,7 @@ class Composite:
     # Using __slots__ for memory efficiency. The only instance attribute
     # is 'c': a dict mapping integer dimensions to float coefficients.
     #
-    #   self.c = {0: 5.0, -1: 3.0}   represents   |5|₀ + |3|₋₁
+    #   self.c = {0: 5.0, -1: 3.0}   represents   <|5|₀ |3|₋₁>
     #
     # Empty dict {} represents the additive identity (true zero, NOT
     # the structural ZERO which is |1|₋₁).
@@ -182,7 +182,7 @@ class Composite:
         part appears before infinitesimal parts).
 
         Examples:
-            |9|₀ + |6|₋₁ + |1|₋₂
+            <|9|₀ |6|₋₁ |1|₋₂>
             |1|₁                     (INF)
             |0|₀                     (empty composite)
         """
@@ -233,7 +233,7 @@ class Composite:
         |a|ₙ + |b|ₘ = |a|ₙ + |b|ₘ  (different dimensions: keep both)
 
         Example:
-            (|3|₀ + |2|₋₁) + (|1|₀ + |5|₋₁) = |4|₀ + |7|₋₁
+            <|3|₀ |2|₋₁> + <|1|₀ |5|₋₁> = <|4|₀ |7|₋₁>
 
         This is identical to adding two polynomials term by term.
         """
@@ -280,8 +280,8 @@ class Composite:
             |1|₋₁ × |1|₋₁ = |1|₋₂
 
         For multi-term composites, this is polynomial convolution:
-            (|a|₀ + |b|₋₁) × (|c|₀ + |d|₋₁)
-            = |ac|₀ + |ad+bc|₋₁ + |bd|₋₂
+            <|a|₀ |b|₋₁> × <|c|₀ |d|₋₁>
+            = <|ac|₀ |ad+bc|₋₁ |bd|₋₂>
 
         This is EXACTLY how (a + bh)(c + dh) expands — because h = |1|₋₁
         and h² = |1|₋₂. The dimensional algebra IS Taylor expansion.
@@ -385,7 +385,7 @@ class Composite:
         For a limit computation, st() returns the limit value.
 
         Example:
-            (|9|₀ + |6|₋₁ + |1|₋₂).st() = 9
+            (<|9|₀ |6|₋₁ |1|₋₂>).st() = 9
         """
         return self.c.get(0, 0.0)
 
@@ -397,7 +397,7 @@ class Composite:
         Useful for direct inspection of the Laurent structure.
 
         Example:
-            x = |9|₀ + |6|₋₁ + |1|₋₂
+            x = <|9|₀ |6|₋₁ |1|₋₂>
             x.coeff(0)  = 9
             x.coeff(-1) = 6
             x.coeff(-2) = 1
@@ -417,7 +417,7 @@ class Composite:
         This recovers the actual derivative value.
 
         Examples (for f(x) = x² at x = 3):
-            composite = |9|₀ + |6|₋₁ + |1|₋₂
+            composite = <|9|₀ |6|₋₁ |1|₋₂>
 
             d(1) = coeff(-1) × 1! = 6 × 1 = 6    ← f'(3) = 2·3 = 6  ✓
             d(2) = coeff(-2) × 2! = 1 × 2 = 2    ← f''(3) = 2      ✓
@@ -546,7 +546,7 @@ def R(x):
     Create a real-valued composite: |x|₀
 
     Short for Composite.real(x). Used constantly in expressions:
-        R(3) + ZERO   →  |3|₀ + |1|₋₁   (i.e., 3 + h)
+        R(3) + ZERO   →  <|3|₀ |1|₋₁>   (i.e., 3 + h)
     """
     return Composite.real(x)
 
@@ -567,7 +567,7 @@ With **only** the code above (~150 lines of mechanism, no transcendental functio
 ```python
 # ── Derivatives (any polynomial) ──────────────────────────
 x = R(3) + h           # x = 3 + infinitesimal
-result = x**2          # |9|₀ + |6|₋₁ + |1|₋₂
+result = x**2          # <|9|₀ |6|₋₁ |1|₋₂>
 result.st()            # → 9    (value)
 result.d(1)            # → 6    (first derivative)
 result.d(2)            # → 2    (second derivative)

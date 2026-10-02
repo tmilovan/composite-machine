@@ -145,10 +145,84 @@ def _operands(a, b):
             dims, vals = b._backend.to_arrays(b._data)
             b = Composite._wrap(a._backend.create_from_terms(dims, vals),
                                 a._backend, demote=False)
+    # Judge each operand on ITS OWN blessing. Asking whether the PAIR contained
+    # a blessed value let `x*x + ZERO` through: x*x is blessed, so the pair was,
+    # and the bare ZERO beside it stayed infinitesimal.
+    #
+    # _like, not the bare constructor: Composite({...}) binds whatever backend is
+    # globally ACTIVE, so demoting an operand living on another one handed its
+    # data to the wrong backend -- "'DictData' object has no attribute 'runs'".
+    # ORDER MATTERS, measured: _is_infinitesimal_operand calls lead_order(), so
+    # testing it first ran that on both operands of EVERY operation and cost 2.07x
+    # on the default path with the mode never entered (0.1078s against 0.0522s).
+    # _sealed is one ContextVar read that returns False immediately when the mode
+    # is off, so it goes first and short-circuits.
+    if _TAGGED.get() is not None:
+        if _sealed(a) and _is_infinitesimal_operand(a):
+            a = _like(a, {0: 0.0})
+        if _sealed(b) and _is_infinitesimal_operand(b):
+            b = _like(b, {0: 0.0})
     return _r1(a), _r1(b)
 
 
 _CONVENTIONAL = _contextvars.ContextVar("composite_conventional_zero", default=False)
+
+#: PROTOTYPE. The trigger: once a number carries an infinitesimal source, every
+#: further zero it meets behaves conventionally. Per NUMBER, not per scope, so a
+#: value cannot escape the regime by leaving a block.
+_ARMED = object()          #: mode on, nothing tagged yet; no _src equals it
+_TAG_PREVIOUS_TRACKING = None   #: what tracking was before TAG armed the mode
+_TAGGED = _contextvars.ContextVar("composite_tagged_source", default=None)
+
+
+def _is_infinitesimal_operand(o):
+    """A purely infinitesimal operand: every term below grade 0.
+
+    ZERO, h, h**2 and `3*h` qualify; a seeded `3 + h` does not, because it has a
+    standard part and is a number being differentiated rather than a zero.
+    """
+    if not isinstance(o, Composite):
+        return False
+    order = o.lead_order()
+    return order is not None and order > 0
+
+
+def _is_blessed(o):
+    """Does this operand descend from the tagged value?
+
+    `_join` propagates `_src` through every operation, so every term of
+    `sin(TAG(3))` carries the tag and keeps composite behaviour, while a bare
+    ZERO does not and is conventional.
+    """
+    blessed = _TAGGED.get()
+    if blessed is None or blessed is _ARMED:
+        return False
+    if getattr(o, "_src", None) != blessed:
+        return False
+    # Lineage is not enough. `R(0) * x` inherits x's source through _join, so the
+    # all-zero product read as blessed and R1 converted it, depositing a stray
+    # unit one grade below -- the jet of x**3 came back [27, 27, 20, 6]. A wholly
+    # zero value has no infinitesimal CONTENT to have descended from the tag, so
+    # it is never blessed. `x - x` is unaffected: the cancellation site sees both
+    # operands blessed and converts there, before this is ever consulted.
+    return not (isinstance(o, Composite) and _is_wholly_zero(o))
+
+
+def _sealed(*operands):
+    """True when the zeros among these operands must behave conventionally.
+
+    PURE: asking never changes the answer. The version this replaced counted
+    operations and mutated, so the first of its three call sites took the slot
+    and the second saw a sealed state -- `R(1)/ZERO` came back <|inf|_0> instead
+    of |1|_1 and `sqrt(ZERO)` came back <|nan|_0> instead of |1|_-0.5.
+
+    Only TAG() blesses a source. Inferring which infinitesimal is the blessed
+    one does not work, and the three attempts are recorded at _TAGGED.
+    """
+    if _TAGGED.get() is None:
+        return False
+    return not any(_is_blessed(o) for o in operands)
+
 
 # Every infinitesimal SOURCE created, counted at the places one can be born.
 # See degeneracy_watch() for what it is for and why the count is of sources
@@ -349,7 +423,95 @@ def conventional():
         _CONVENTIONAL.reset(token)
 
 
-def _r1(c):
+@_contextlib.contextmanager
+def single_infinitesimal():
+    """PROTOTYPE. The FIRST infinitesimal is composite; every later zero is not.
+
+    Once a number carries an infinitesimal source, further zeros it meets stop
+    converting: multiplication by zero annihilates, `a - a` is an inert |0|_0,
+    `c + 0` is c, and division by a zero raises again. The payback is that the
+    jet stays the CLASSICAL one -- no second source can enter, so no order is
+    ever a denoted reading.
+
+    This is a trigger on the NUMBER, not a scope: the state travels with the
+    value through `_join`, so it cannot be defeated by the value leaving a block,
+    which is the one thing conventional() cannot promise.
+    """
+    # The per-number state rides on _src, which only propagates while the
+    # degeneracy wrappers are installed -- set_degeneracy_tracking is a REBIND
+    # of the operators, so with it off there is no wrapper and no provenance.
+    # The trigger therefore cannot be cheaper than tracking: 11-21% by its own
+    # docstring. That is the price of per-number rather than per-scope.
+    previous = set_degeneracy_tracking(True)
+    token = _TAGGED.set(_ARMED)            # armed; TAG() installs the real id
+    try:
+        yield
+    finally:
+        _TAGGED.reset(token)
+        set_degeneracy_tracking(previous)
+
+
+def TAG(value):
+    """PROTOTYPE. Bless ONE value as the infinitesimal source, and arm the mode.
+
+    TAG is the switch. There is nothing else to turn on::
+
+        x = TAG(3)
+        (x*x).d(1)              # 6.0
+        (x*x + R(0)).d(1)       # 6.0   the written zero absorbed
+
+    From the call onward every zero that does NOT descend from the tag behaves
+    conventionally -- `0`, `R(0)`, `ZERO` and a cancellation all absorb,
+    multiplication by zero annihilates, division by one raises -- so no second
+    source can enter and the jet stays the CLASSICAL derivative at every order.
+    Every term of `sin(TAG(3))` descends from the tag, so series still work.
+
+    A second TAG REPLACES the blessing rather than raising: re-running a cell
+    that tags should not be an error, and the newest tag is the live one. Only
+    one value is ever blessed, which is the whole point.
+
+    `UNTAG()` turns it off. `single_infinitesimal()` is the scoped form, for code
+    that wants the mode to end with a block rather than with a call.
+
+    The mode needs `set_degeneracy_tracking`, since the blessing travels on
+    `_src`, so arming costs the 11-21% that switch documents. Arming is therefore
+    not free, but it is paid once and only while the mode is on.
+
+    The seed itself is built with the regime switched OFF. Built inside it,
+    `_ensure_composite(value) + ZERO` has the mode demote its own ZERO -- nothing
+    is blessed yet, so that ZERO is not blessed either -- and TAG would return a
+    value carrying no infinitesimal at all.
+    """
+    global _TAG_PREVIOUS_TRACKING
+    token = _TAGGED.set(None)
+    try:
+        seeded = _mint(_ensure_composite(value) + ZERO)
+    finally:
+        _TAGGED.reset(token)
+    if _TAGGED.get() in (None, _ARMED):
+        # Arming for the first time: remember what tracking was, so UNTAG can
+        # put it back rather than guessing that it was off.
+        _TAG_PREVIOUS_TRACKING = set_degeneracy_tracking(True)
+    _TAGGED.set(seeded._src)
+    return seeded
+
+
+def UNTAG():
+    """Turn the single-infinitesimal mode off and restore degeneracy tracking.
+
+    Returns True if the mode had been on. Safe to call when it was not.
+    """
+    global _TAG_PREVIOUS_TRACKING
+    was_on = _TAGGED.get() is not None
+    _TAGGED.set(None)
+    if was_on and _TAG_PREVIOUS_TRACKING is not None:
+        set_degeneracy_tracking(_TAG_PREVIOUS_TRACKING)
+        _TAG_PREVIOUS_TRACKING = None
+    return was_on
+
+
+
+def _r1(c, sibling=None):
     """R1 — a zero used as an OPERAND converts: |0|_d becomes |1|_(d-1).
 
     Only a composite that is wholly zero is a zero.  A zero sitting among
@@ -359,6 +521,8 @@ def _r1(c):
     """
     if _CONVENTIONAL.get():
         return c                       # see conventional()
+    if _sealed(c):
+        return c                       # not the tagged lineage: conventional
     if not _is_wholly_zero(c):
         return c
     dims, vals = c._backend.to_arrays(c._data)
@@ -623,6 +787,8 @@ def _cancellation_residue(a, b, result):
     """
     if _CONVENTIONAL.get():
         return result                  # see conventional()
+    if _sealed(a, b):
+        return result                  # the trigger: a - a stays |0|_0
     if not _is_wholly_zero(result):
         return result                       # a tail survives: R2 governs, not R1
     dims, vals = result._backend.to_arrays(result._data)
@@ -929,10 +1095,12 @@ class Composite:
         ever reaches _r1 and none of them warns.  A cancellation is audible and
         a written zero is not, which is the asymmetry degeneracy_watch closes.
         """
-        if _CONVENTIONAL.get():
+        if _CONVENTIONAL.get() or _TAGGED.get() is not None:
             # Inert here, so no source: under conventional() a written zero is
             # a zero TERM and the derivatives are the textbook ones.  Counting
             # it would report degeneracy in the one mode that has none.
+            # Under the trigger it is LATENT rather than inert -- _r1 at the
+            # point of use decides, where the sibling's source is visible.
             return cls({0: 0.0})
         return _mint(cls({-1: 1.0}))
 
@@ -976,7 +1144,7 @@ class Composite:
         # `|2|_5/6` was both at once, which is neither.  Whether the plain form
         # is needed is a property of the WHOLE number, not of one term: a
         # dimension with no glyph anywhere in it puts every term in the
-        # underscore form, so `4_0 + 2_5/6` rather than `|4|₀ + 2_5/6`.
+        # underscore form, so `<4_0 2_5/6>` rather than `<|4|₀ 2_5/6>`.
         sub = "₀₁₂₃₄₅₆₇₈₉"
 
         def _glyphless(n):
@@ -1027,7 +1195,18 @@ class Composite:
         else:
             parts = [f"|{fmt_coeff(vals[i])}|{fmt_dim(dims[i])}"
                      for i in range(len(dims) - 1, -1, -1)]
-        return " + ".join(parts)
+        # Braces and spaces, never `+`.  Zero Rules v2 section 0: `+` is an
+        # operation BETWEEN composites, so using it for the terms WITHIN one
+        # gives `0_3 + -4_1` two readings -- one number whose dimension-3 term
+        # is empty, which stays as written, and two numbers being added, which
+        # is `<-4_1 1_2>`.  Every apparent inconsistency in those rules traced
+        # back to reading one as the other.
+        #
+        # In the glyph form the bars delimit each coefficient, so a space is
+        # enough.  In the plain form a negative coefficient does sit straight
+        # against the space (`<3_0 -1_-0.5>`), which is accepted: it needs a
+        # fractional or vector dimension AND a negative coefficient together.
+        return "<" + " ".join(parts) + ">"
 
     # =========================================================================
     # SERIALIZATION
@@ -1186,10 +1365,12 @@ class Composite:
         # that has an additive identity.  Checked BEFORE _operands, which is
         # where R1 would have lifted it, and before the single-term path,
         # which divides coefficients by 0.0 and returns |inf|_0 silently.
-        if _CONVENTIONAL.get() and _is_wholly_zero(other):
+        if (_CONVENTIONAL.get() or _sealed(other)) and _is_wholly_zero(other):
             raise ZeroDivisionError(
-                "division by zero, under conventional(); outside that block a "
-                "zero divisor converts (R1) and division by zero is total")
+                "division by zero: a zero divisor is conventional here, under "
+                "conventional() or after the first infinitesimal under "
+                "single_infinitesimal(). Outside both, a zero divisor converts "
+                "(R1) and division by zero is total")
 
         a, b = _operands(self, other)
         b_dims = b._backend.active_dims(b._data)
@@ -1280,12 +1461,69 @@ class Composite:
         return abs(self.st())
 
     def __float__(self):
-        """Float conversion returns standard part."""
+        """Float conversion returns standard part.
+
+        Deliberately NOT the IEEE754 projection: this keeps raising on an
+        unbounded composite, because that exception is what catches an
+        accidental coercion through `math.*`.  See `to_ieee754`.
+        """
         return float(self.st())
 
     def __int__(self):
         """Int conversion returns int of standard part."""
         return int(self.st())
+
+    def to_ieee754(self):
+        """The image of this composite in float arithmetic.
+
+        The one well-defined way back into a system that HAS an additive
+        identity.  No single substitution `h = value` does it, because the two
+        halves of the dimension axis want opposite limits:
+
+        Negative grades want `h = 0`, so that an infinitesimal becomes a true
+        zero.  At the smallest representable float instead, `R(6) - R(6)` comes
+        back as 2.96e-323 -- a subnormal crumb, representable because
+        `6 * 5e-324` is -- and the additive identity is NOT restored.
+
+        Positive grades want `h -> 0` from above, where a pole becomes an
+        infinity, which is IEEE754's own answer for `1/0`.  At `h = 0` exactly
+        they divide by zero and raise instead.
+
+        So the projection is piecewise, keyed on `lead_order`:
+
+            lead_order > 0    infinitesimal      ->  0.0
+            lead_order == 0   bounded            ->  st()
+            lead_order < 0    unbounded          ->  +-inf, by the leading sign
+            no nonzero term   an expressed zero  ->  0.0
+                              NOTHING            ->  nan
+
+        NOTHING is absence rather than a value and float has no absence, so nan
+        is the nearest honest answer; 0.0 would claim it was a zero.
+
+        The sign comes from the DOMINANT term, so `ln(h)` projects to -inf and
+        `ln(1/h)` to +inf, and in `1/h + ln(1/h)` the pole dominates the log.
+        """
+        order = self.lead_order()
+        if order is None:
+            # Every coefficient is zero, or there are none at all.  An
+            # expressed zero IS a value and converts; NOTHING is not.
+            return 0.0 if self.coeffs_dict() else float("nan")
+        if order > 0:
+            return 0.0
+        if order == 0:
+            return float(self.st())
+
+        # Unbounded.  Read the sign off the dominant term rather than
+        # `lead_dim()`, whose key may be a tuple carrying numpy scalars that
+        # will not index coeffs_dict reliably.
+        def _axis(dim):
+            if isinstance(dim, tuple):
+                return (float(dim[0]), tuple(float(e) for e in dim[1:]))
+            return (float(dim), ())
+
+        terms = [(d, v) for d, v in self.coeffs_dict().items() if v != 0.0]
+        _, coefficient = max(terms, key=lambda kv: _axis(kv[0]))
+        return math.copysign(float("inf"), coefficient)
 
     def __pow__(self, n):
         """Power: integer via repeated multiplication, otherwise exp(n*ln(self))."""
@@ -1607,7 +1845,19 @@ class Composite:
     # -------------------------------------------------------------------------
 
     def eval_taylor(self, h_value):
-        """Evaluate Taylor polynomial by substituting h → h_value."""
+        """The INCREMENT f(x0 + h_value) - f(x0), by substituting h -> h_value.
+
+        Grade 0 is deliberately excluded, so this is the change and NOT the
+        value.  Every caller wants it that way: `integrate_step` applies it to an
+        antiderivative, whose grade-0 term is an arbitrary constant; the lane
+        extrapolation at _probe writes `st + result.eval_taylor(-eps)`, adding the
+        standard part back itself; and the tutor takes a difference of two calls,
+        where a constant would cancel regardless.
+
+        For the VALUE, add the standard part: `c.st() + c.eval_taylor(d)`.  The
+        old one-line docstring said "evaluate Taylor polynomial", which promises
+        the value and silently delivers a result short by exactly f(x0).
+        """
         dims, vals = self._backend.to_arrays(self._data)
         _p = lambda d: d[0] if isinstance(d, tuple) else d
         return sum(float(v) * h_value ** (-float(_p(d)))

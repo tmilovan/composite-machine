@@ -63,7 +63,7 @@ Dimensions are indexed on an integer scale with **rational as origin (0)**:
 - `|5|` = rational 5 (only rational dimension exists)
 - `|5|₋₁` = 5 first-order zeroes
 - `|3|₁` = 3 first-order infinities
-- `|2|₁ |5| |1|₋₁` = 2∞ + 5 + 1(0)
+- `<|2|₁ |5| |1|₋₁>` = 2∞ + 5 + 1(0)
 
 ### The Value Zero and Infinity
 
@@ -80,8 +80,13 @@ Both follow the same multiplication rule: `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`. 
 
 ### Notation Conventions
 
-- **Ordering:** Terms are written high-to-low by dimension: `|3|₂ |5|₁ |2| |1|₋₁` (not `|1|₋₁ |2| |5|₁ |3|₂`)
-- **Spacing:** Terms are separated by spaces for readability
+- **Ordering:** Terms are written high-to-low by dimension: `<|3|₂ |5|₁ |2| |1|₋₁>` (not `<|1|₋₁ |2| |5|₁ |3|₂>`)
+- **Grouping:** A composite is written inside angle brackets, so `<|3|₁ |5|>` is
+  one number and `<|3|₁> + <|5|>` is an operation between two. Zero Rules v2
+  section 0 has the reason: `+` doing both jobs is the one ambiguity that made
+  these rules hard to reason about. `repr()` prints this form.
+- **Spacing:** Terms are separated by spaces, which is the separator rather than
+  decoration -- `+` is reserved for the operation
 - **Zero coefficients:** Per Decision 2, `|0|ₙ` is preserved for provenance tracking but may be omitted in simplified display when provenance is not needed
 
 ---
@@ -96,12 +101,12 @@ Both follow the same multiplication rule: `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`. 
 |a|ₖ × 0ⁿ = |a|ₖ₋ₙ
 ```
 
-**Example:** `|2|₁ |5| |1|₋₁ × 0`
+**Example:** `<|2|₁ |5| |1|₋₁> × 0`
 
 - `|2|₁` → `|2|₀` = `|2|` (rational)
 - `|5|` → `|5|₋₁`
 - `|1|₋₁` → `|1|₋₂`
-- **Result:** `|2| |5|₋₁ |1|₋₂`
+- **Result:** `<|2| |5|₋₁ |1|₋₂>`
 
 ### Multiplication by ∞ⁿ (Expansion)
 
@@ -111,12 +116,12 @@ Both follow the same multiplication rule: `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`. 
 |a|ₖ × ∞ⁿ = |a|ₖ₊ₙ
 ```
 
-**Example:** `|2| |5|₋₁ |1|₋₂ × ∞`
+**Example:** `<|2| |5|₋₁ |1|₋₂> × ∞`
 
 - `|2|` → `|2|₁`
 - `|5|₋₁` → `|5|₀` = `|5|`
 - `|1|₋₂` → `|1|₋₁`
-- **Result:** `|2|₁ |5| |1|₋₁` ✓ Matches original!
+- **Result:** `<|2|₁ |5| |1|₋₁>` ✓ Matches original!
 
 ### Composite × Composite
 
@@ -141,7 +146,7 @@ Only same-dimension terms combine:
 
 Terms in different dimensions remain separate — they represent different orders of magnitude.
 
-**Example:** `|3|₁ + |5| + |2|₋₁ + |4|₁ = |7|₁ |5| |2|₋₁`
+**Example:** `|3|₁ + |5| + |2|₋₁ + |4|₁ = <|7|₁ |5| |2|₋₁>`
 
 ### Division
 
@@ -222,7 +227,7 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 #### Test 1.5: Multi-component Collapse
 
-**Input:** `|2|₁ |5| |1|₋₁ × 0`
+**Input:** `<|2|₁ |5| |1|₋₁> × 0`
 
 **Expected:** All shift down 1
 
@@ -231,11 +236,11 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 - `|2|₁` → `|2|₀` = `|2|`
 - `|5|` → `|5|₋₁`
 - `|1|₋₁` → `|1|₋₂`
-- **Result:** `|2| |5|₋₁ |1|₋₂` ✓
+- **Result:** `<|2| |5|₋₁ |1|₋₂>` ✓
 
 #### Test 1.6: Multi-component Expansion
 
-**Input:** `|2| |5|₋₁ |1|₋₂ × ∞`
+**Input:** `<|2| |5|₋₁ |1|₋₂> × ∞`
 
 **Expected:** All shift up 1
 
@@ -244,7 +249,7 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 - `|2|` → `|2|₁`
 - `|5|₋₁` → `|5|₀` = `|5|`
 - `|1|₋₂` → `|1|₋₁`
-- **Result:** `|2|₁ |5| |1|₋₁` ✓ **Reversal works!**
+- **Result:** `<|2|₁ |5| |1|₋₁>` ✓ **Reversal works!**
 
 ---
 
@@ -284,14 +289,14 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 #### Test 2.4: Mixed Orders
 
-**Input:** `|3|₂ |5| |2|₋₁ × 0`
+**Input:** `<|3|₂ |5| |2|₋₁> × 0`
 
 **Process:**
 
 - `|3|₂` → `|3|₁`
 - `|5|` → `|5|₋₁`
 - `|2|₋₁` → `|2|₋₂`
-- **Result:** `|3|₁ |5|₋₁ |2|₋₂` ✓
+- **Result:** `<|3|₁ |5|₋₁ |2|₋₂>` ✓
 
 #### Test 2.5: Order Mismatch Reversal
 
@@ -335,7 +340,7 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 #### Test 3.4: Full Composite × Full Composite
 
-**Input:** `|2|₁ |3| × |1|₁ |4|`
+**Input:** `<|2|₁ |3|> × <|1|₁ |4|>`
 
 **Process (distribute):**
 
@@ -347,11 +352,11 @@ Multi-term exponentiation uses distribution (polynomial expansion).
     - Dim 2: `|2|₂`
     - Dim 1: `|8+3|₁ = |11|₁`
     - Dim 0: `|12|`
-- **Result:** `|2|₂ |11|₁ |12|` ✓
+- **Result:** `<|2|₂ |11|₁ |12|>` ✓
 
 #### Test 3.5: Composite × Composite with Zero Dimensions
 
-**Input:** `|2|₁ |5| |1|₋₁ × |1| |1|₋₁`
+**Input:** `<|2|₁ |5| |1|₋₁> × <|1| |1|₋₁>`
 
 **Process (distribute all 6 terms):**
 
@@ -366,7 +371,7 @@ Multi-term exponentiation uses distribution (polynomial expansion).
     - Dim 0: `|2+5|` = `|7|`
     - Dim -1: `|5+1|₋₁` = `|6|₋₁`
     - Dim -2: `|1|₋₂`
-- **Result:** `|2|₁ |7| |6|₋₁ |1|₋₂` ✓
+- **Result:** `<|2|₁ |7| |6|₋₁ |1|₋₂>` ✓
 
 ---
 
@@ -383,16 +388,16 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 #### Test 4.2: What if we explicitly have zero-valued dimensions?
 
-**Input:** `|0|₁ |5| |0|₋₁ × 0`
+**Input:** `<|0|₁ |5| |0|₋₁> × 0`
 
 **Process:**
 
 - `|0|₁` → `|0|₀` = contributes 0 to rational
 - `|5|` → `|5|₋₁`
 - `|0|₋₁` → `|0|₋₂` = contributes 0 to dim -2
-- **Result:** `|0| |5|₋₁ |0|₋₂`
+- **Result:** `<|0| |5|₋₁ |0|₋₂>`
 
-**Ladder equivalence:** By `|0|ₙ = |1|ₙ₋₁`, we have `|0|₀ = |1|₋₁` and `|0|₋₂ = |1|₋₃`, so the full result is equivalently `|1|₋₁ |5|₋₁ |1|₋₃`. Zero coefficients are **not omitted** — they carry structural meaning via the Ladder.
+**Ladder equivalence:** By `|0|ₙ = |1|ₙ₋₁`, we have `|0|₀ = |1|₋₁` and `|0|₋₂ = |1|₋₃`, so the full result is equivalently `<|1|₋₁ |5|₋₁ |1|₋₃>`. Zero coefficients are **not omitted** — they carry structural meaning via the Ladder.
 
 ✓ **Consistent!** Explicit zeros are preserved and interpretable.
 
@@ -461,7 +466,7 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 
 ### Test 5.1: Full 3×3 Distribution
 
-**Input:** `(|2|₁ |3| |1|₋₁) × (|1|₁ |2| |1|₋₁)`
+**Input:** `<|2|₁ |3| |1|₋₁> × <|1|₁ |2| |1|₋₁>`
 
 **Process (9 terms):**
 
@@ -485,7 +490,7 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 - Dim -1: `|3+2|₋₁` = `|5|₋₁`
 - Dim -2: `|1|₋₂`
 
-**Result:** `|2|₂ |7|₁ |9| |5|₋₁ |1|₋₂` ✓
+**Result:** `<|2|₂ |7|₁ |9| |5|₋₁ |1|₋₂>` ✓
 
 ---
 
@@ -514,7 +519,7 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 
 ### Test 5.3: Coefficient Cancellation Within a Dimension
 
-**Input:** `(|3|₁ |2|) × (|-1|₁ |4|)`
+**Input:** `<|3|₁ |2|> × <|-1|₁ |4|>`
 
 **Process:**
 
@@ -529,13 +534,13 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 - Dim 1: `|12-2|₁ = |10|₁`
 - Dim 0: `|8|`
 
-**Result:** `|-3|₂ |10|₁ |8|` ✓
+**Result:** `<|-3|₂ |10|₁ |8|>` ✓
 
 ---
 
 ### Test 5.4: Complete Cancellation to Zero Coefficient
 
-**Input:** `(|2|₁ |-1|) × (|1|₁ |2|)`
+**Input:** `<|2|₁ |-1|> × <|1|₁ |2|>`
 
 **Process:**
 
@@ -550,11 +555,11 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 - Dim 1: `|4-1|₁ = |3|₁`
 - Dim 0: `|-2|`
 
-**Result:** `|2|₂ |3|₁ |-2|` ✓
+**Result:** `<|2|₂ |3|₁ |-2|>` ✓
 
 **Now try for exact cancellation:**
 
-**Input:** `(|2|₁ |-4|) × (|1|₁ |2|)`
+**Input:** `<|2|₁ |-4|> × <|1|₁ |2|>`
 
 **Process:**
 
@@ -569,9 +574,9 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 - Dim 1: `|4-4|₁ = |0|₁` ← **Zero coefficient!**
 - Dim 0: `|-8|`
 
-**Result:** `|2|₂ |0|₁ |-8|`
+**Result:** `<|2|₂ |0|₁ |-8|>`
 
-**Result:** `|2|₂ |0|₁ |-8|`
+**Result:** `<|2|₂ |0|₁ |-8|>`
 
 **✅ Resolved:** By the Ladder of Absences, `|0|ₙ = |1|ₙ₋₁`. A zero coefficient at dimension n is equivalent to coefficient 1 at dimension n-1. So `|0|₁` = `|1|₀` = `|1|` — the dimension exists and carries meaning. Zero coefficients are always preserved.
 
@@ -583,32 +588,32 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 
 **Definition:** `0 = |0| = |1|₋₁`
 
-**Test A:** `(|2|₁ |3|) × |0|` (multiply by value-zero)
+**Test A:** `<|2|₁ |3|> × |0|` (multiply by value-zero)
 
 **Process:** By the Ladder, `|0|₀ = |1|₋₁`, so normalize first:
 
 - `|2|₁ × |1|₋₁ = |2|₀ = |2|`
 - `|3|₀ × |1|₋₁ = |3|₋₁`
 
-**Result:** `|2| |3|₋₁` ✓
+**Result:** `<|2| |3|₋₁>` ✓
 
 **Interpretation:** Identical to Test B — because `|0|` and `|1|₋₁` are the same value, they must produce the same result. The Ladder normalization is always applied before arithmetic.
 
-**Test B:** `(|2|₁ |3|) × |1|₋₁` (multiply by structural-zero)
+**Test B:** `<|2|₁ |3|> × |1|₋₁` (multiply by structural-zero)
 
 **Process:**
 
 - `|2|₁ × |1|₋₁ = |2|₀ = |2|`
 - `|3|₀ × |1|₋₁ = |3|₋₁`
 
-**Result:** `|2| |3|₋₁` ✓
+**Result:** `<|2| |3|₋₁>` ✓
 
-**Test C:** `(|2|₁ |3|) × 0` (using ×0 as shift operator)
+**Test C:** `<|2|₁ |3|> × 0` (using ×0 as shift operator)
 
 - `|2|₁` → `|2|₀`
 - `|3|₀` → `|3|₋₁`
 
-**Result:** `|2| |3|₋₁` ✓
+**Result:** `<|2| |3|₋₁>` ✓
 
 **Key finding:** `×|1|₋₁` and `×0` (shift operator) produce **identical results**.
 
@@ -650,7 +655,7 @@ Since `|0|₀ = |1|₋₁` (Ladder of Absences), `×|0|` also produces an equiva
 
 ### Test 5.8: Self-Multiplication (Squaring)
 
-**Input:** `(|2|₁ |3|)²`
+**Input:** `<|2|₁ |3|>²`
 
 **Process:**
 
@@ -665,7 +670,7 @@ Since `|0|₀ = |1|₋₁` (Ladder of Absences), `×|0|` also produces an equiva
 - Dim 1: `|6+6|₁ = |12|₁`
 - Dim 0: `|9|`
 
-**Result:** `|4|₂ |12|₁ |9|` ✓
+**Result:** `<|4|₂ |12|₁ |9|>` ✓
 
 **Sanity check:** This should equal `(2∞ + 3)²`
 
@@ -675,7 +680,7 @@ Since `|0|₀ = |1|₋₁` (Ladder of Absences), `×|0|` also produces an equiva
 
 ### Test 5.9: Gaps in Dimensions
 
-**Input:** `(|2|₂ |5|₋₂) × (|3|₁ |1|₋₁)`
+**Input:** `<|2|₂ |5|₋₂> × <|3|₁ |1|₋₁>`
 
 **Process:**
 
@@ -691,7 +696,7 @@ Since `|0|₀ = |1|₋₁` (Ladder of Absences), `×|0|` also produces an equiva
 - Dim -1: `|15|₋₁`
 - Dim -3: `|5|₋₃`
 
-**Result:** `|6|₃ |2|₁ |15|₋₁ |5|₋₃` ✓
+**Result:** `<|6|₃ |2|₁ |15|₋₁ |5|₋₃>` ✓
 
 **Note:** Gaps are preserved. No phantom middle dimensions appear.
 
@@ -783,7 +788,7 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 **Process:** Different dimensions, cannot combine
 
-**Result:** `|3|₁ |2|₋₁` ✓ (remains as two-term composite)
+**Result:** `<|3|₁ |2|₋₁>` ✓ (remains as two-term composite)
 
 ---
 
@@ -793,13 +798,13 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 **Process:** Dim 0 and dim 1, cannot combine
 
-**Result:** `|3|₁ |5|` ✓ (written high-to-low by convention)
+**Result:** `<|3|₁ |5|>` ✓ (written high-to-low by convention)
 
 ---
 
 ### Test 6.4: Full Composite + Full Composite
 
-**Input:** `(|2|₁ |5| |1|₋₁) + (|3|₁ |2| |4|₋₁)`
+**Input:** `<|2|₁ |5| |1|₋₁> + <|3|₁ |2| |4|₋₁>`
 
 **Process:** Combine matching dimensions:
 
@@ -807,7 +812,7 @@ Terms in different dimensions remain separate (they represent different "orders 
 - Dim 0: `|5+2| = |7|`
 - Dim -1: `|1+4|₋₁ = |5|₋₁`
 
-**Result:** `|5|₁ |7| |5|₋₁` ✓
+**Result:** `<|5|₁ |7| |5|₋₁>` ✓
 
 ---
 
@@ -864,11 +869,11 @@ Terms in different dimensions remain separate (they represent different "orders 
 - Dim 0: `|5|` (only in first operand)
 - Dim -1: `|1|₋₁` (only in second operand)
 
-**Result:** `|5| |1|₋₁`
+**Result:** `<|5| |1|₋₁>`
 
 **Note:** `|1|₋₁` occupies dim -1, which doesn't overlap with dim 0, so both terms remain.
 
-**Key finding:** Since `|0|₀ = |1|₋₁` (Ladder of Absences), these two additions are adding the **same value** — the different results (`|5|` vs `|5| |1|₋₁`) reflect the choice of dimensional representation, not different algebraic behavior. Both results are equivalent via the Ladder: `|5|₀` = `|5|₀ |1|₋₁` (the `|1|₋₁` is the zero that's always implicitly present at dim -1).
+**Key finding:** Since `|0|₀ = |1|₋₁` (Ladder of Absences), these two additions are adding the **same value** — the different results (`|5|` vs `<|5| |1|₋₁>`) reflect the choice of dimensional representation, not different algebraic behavior. Both results are equivalent via the Ladder: `|5|₀` = `<|5|₀ |1|₋₁>` (the `|1|₋₁` is the zero that's always implicitly present at dim -1).
 
 **Status:** ✅ Consistent with the Ladder of Absences
 
@@ -876,10 +881,10 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 ### Test 6.9: Commutativity
 
-**Test:** `(|2|₁ |3|) + (|4|₁ |5|)` vs `(|4|₁ |5|) + (|2|₁ |3|)`
+**Test:** `<|2|₁ |3|> + <|4|₁ |5|>` vs `<|4|₁ |5|> + <|2|₁ |3|>`
 
-- First: `|6|₁ |8|`
-- Second: `|6|₁ |8|`
+- First: `<|6|₁ |8|>`
+- Second: `<|6|₁ |8|>`
 
 ✓ **Commutative!**
 
@@ -887,17 +892,17 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 ### Test 6.10: Associativity
 
-**Test:** `((|2|₁ |3|) + (|1|₁ |4|)) + (|3|₁ |2|)` vs `(|2|₁ |3|) + ((|1|₁ |4|) + (|3|₁ |2|))`
+**Test:** `(<|2|₁ |3|> + <|1|₁ |4|>) + <|3|₁ |2|>` vs `<|2|₁ |3|> + (<|1|₁ |4|> + <|3|₁ |2|>)`
 
 **First path:**
 
-- `(|2|₁ |3|) + (|1|₁ |4|) = |3|₁ |7|`
-- `|3|₁ |7| + |3|₁ |2| = |6|₁ |9|`
+- `<|2|₁ |3|> + <|1|₁ |4|> = <|3|₁ |7|>`
+- `<|3|₁ |7|> + <|3|₁ |2|> = <|6|₁ |9|>`
 
 **Second path:**
 
-- `(|1|₁ |4|) + (|3|₁ |2|) = |4|₁ |6|`
-- `|2|₁ |3| + |4|₁ |6| = |6|₁ |9|`
+- `<|1|₁ |4|> + <|3|₁ |2|> = <|4|₁ |6|>`
+- `<|2|₁ |3|> + <|4|₁ |6|> = <|6|₁ |9|>`
 
 ✓ **Associative!**
 
@@ -909,17 +914,17 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 **First path:**
 
-- `|3|₁ + |4| = |3|₁ |4|`
-- `|2|₋₁ × (|3|₁ |4|)` — distribute:
+- `|3|₁ + |4| = <|3|₁ |4|>`
+- `|2|₋₁ × <|3|₁ |4|>` — distribute:
     - `|2|₋₁ × |3|₁ = |6|₀ = |6|`
     - `|2|₋₁ × |4|₀ = |8|₋₁`
-- Result: `|6| |8|₋₁`
+- Result: `<|6| |8|₋₁>`
 
 **Second path:**
 
 - `|2|₋₁ × |3|₁ = |6|₀ = |6|`
 - `|2|₋₁ × |4|₀ = |8|₋₁`
-- Sum: `|6| + |8|₋₁ = |6| |8|₋₁`
+- Sum: `|6| + |8|₋₁ = <|6| |8|₋₁>`
 
 ✓ **Distributive!**
 
@@ -927,7 +932,7 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 ### Test 6.12: Mixed Dimension Sets
 
-**Input:** `(|2|₂ |3|) + (|5|₁ |1|₋₁)`
+**Input:** `<|2|₂ |3|> + <|5|₁ |1|₋₁>`
 
 **Process:** No overlapping dimensions
 
@@ -936,7 +941,7 @@ Terms in different dimensions remain separate (they represent different "orders 
 - Dim 0: `|3|` (first only)
 - Dim -1: `|1|₋₁` (second only)
 
-**Result:** `|2|₂ |5|₁ |3| |1|₋₁` ✓
+**Result:** `<|2|₂ |5|₁ |3| |1|₋₁>` ✓
 
 **Note:** Union of dimension sets.
 
@@ -944,7 +949,7 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 ### Test 6.13: Partial Overlap
 
-**Input:** `(|2|₂ |3|₁ |5|) + (|1|₁ |4| |2|₋₁)`
+**Input:** `<|2|₂ |3|₁ |5|> + <|1|₁ |4| |2|₋₁>`
 
 **Process:**
 
@@ -953,22 +958,22 @@ Terms in different dimensions remain separate (they represent different "orders 
 - Dim 0: `|5+4| = |9|` (both)
 - Dim -1: `|2|₋₁` (second only)
 
-**Result:** `|2|₂ |4|₁ |9| |2|₋₁` ✓
+**Result:** `<|2|₂ |4|₁ |9| |2|₋₁>` ✓
 
 ---
 
 ### Test 6.14: Subtraction (Addition of Negative)
 
-**Input:** `(|5|₁ |3|) - (|2|₁ |1|)`
+**Input:** `<|5|₁ |3|> - <|2|₁ |1|>`
 
-**Rewrite as:** `(|5|₁ |3|) + (|-2|₁ |-1|)`
+**Rewrite as:** `<|5|₁ |3|> + <|-2|₁ |-1|>`
 
 **Process:**
 
 - Dim 1: `|5-2|₁ = |3|₁`
 - Dim 0: `|3-1| = |2|`
 
-**Result:** `|3|₁ |2|` ✓
+**Result:** `<|3|₁ |2|>` ✓
 
 ---
 
@@ -1021,7 +1026,7 @@ Now let's stress-test with indeterminate forms, identities, and pathological cas
 
 **Answer:** `|1|` — just 1 in the rational dimension.
 
-**Test:** `|3|₁ |5| |2|₋₁ × |1|`
+**Test:** `<|3|₁ |5| |2|₋₁> × |1|`
 
 **Process:**
 
@@ -1029,7 +1034,7 @@ Now let's stress-test with indeterminate forms, identities, and pathological cas
 - `|5|₀ × |1|₀ = |5|₀`
 - `|2|₋₁ × |1|₀ = |2|₋₁`
 
-**Result:** `|3|₁ |5| |2|₋₁` ✓ **Identity preserved!**
+**Result:** `<|3|₁ |5| |2|₋₁>` ✓ **Identity preserved!**
 
 ---
 
@@ -1089,7 +1094,7 @@ Now let's stress-test with indeterminate forms, identities, and pathological cas
 
 ### Test 7.4: 0/0 — Reconsidered
 
-**Initial error:** I tested the multi-term composite `(|0||1|₋₁) / (|0||1|₋₁)` which falls into the "division by multi-term" problem (Test 7.10).
+**Initial error:** I tested the multi-term composite `<|0| |1|₋₁> / <|0| |1|₋₁>` which falls into the "division by multi-term" problem (Test 7.10).
 
 **Correct approach:** Use the structural zero `|1|₋₁` (one zero, single term).
 
@@ -1151,7 +1156,7 @@ Per Decision 2, we keep `|0|₁`. This is NOT the same as "no infinity dimension
 **Different infinities:**
 
 - `|3|₁ + |-2|₁ = |1|₁` (determinate)
-- `|2|₂ |3|₁ + |-3|₁ = |2|₂ |0|₁` (partial cancellation)
+- `<|2|₂ |3|₁> + |-3|₁ = <|2|₂ |0|₁>` (partial cancellation)
 
 ✓ **Always determinate** — no true "∞ - ∞" indeterminacy.
 
@@ -1189,14 +1194,14 @@ Per Decision 2, we keep `|0|₁`. This is NOT the same as "no infinity dimension
 
 ✓ **Zero propagates correctly**
 
-**Test:** `|5| |0|₋₁ × ∞`
+**Test:** `<|5| |0|₋₁> × ∞`
 
 **Process:**
 
 - `|5|₀ × ∞ = |5|₁`
 - `|0|₋₁ × ∞ = |0|₀ = |0|`
 
-**Result:** `|5|₁ |0|`
+**Result:** `<|5|₁ |0|>`
 
 Per Decision 2, keep `|0|` since it resulted from operation on existing `|0|₋₁`.
 
@@ -1218,15 +1223,15 @@ Per Decision 2, keep `|0|` since it resulted from operation on existing `|0|₋�
 
 ### Test 7.10: Division by Multi-Term Composite
 
-**Input:** `|12| / (|2||1|₋₁)`
+**Input:** `|12| / <|2| |1|₋₁>`
 
 **Problem:** How do we divide by a sum?
 
 In standard algebra: `a / (b + c) ≠ a/b + a/c`
 
-**Approach 1:** Leave as unevaluated expression `|12| / (|2||1|₋₁)`
+**Approach 1:** Leave as unevaluated expression `|12| / <|2| |1|₋₁>`
 
-**Approach 2:** If `|2||1|₋₁ = 2 + 1(0) = 2` as a value, then `|12| / 2 = |6|`
+**Approach 2:** If `<|2| |1|₋₁> = 2 + 1(0) = 2` as a value, then `|12| / 2 = |6|`
 
 But this loses the `|1|₋₁` provenance.
 
@@ -1251,9 +1256,9 @@ We can define:
 
 **And:** `√(|4|₂) = (|4|₂)^(1/2) = |4^(1/2)|₂ₓ₍₁/₂₎ = |2|₁` ✓
 
-**Test:** `√(|9| |6|₋₁ |1|₋₂)` — can we take square root of multi-term?
+**Test:** `√<|9| |6|₋₁ |1|₋₂>` — can we take square root of multi-term?
 
-This would require `(|3| |1|₋₁)² = |9| |6|₋₁ |1|₋₂`
+This would require `<|3| |1|₋₁>² = <|9| |6|₋₁ |1|₋₂>`
 
 **Verify:**
 
@@ -1261,9 +1266,9 @@ This would require `(|3| |1|₋₁)² = |9| |6|₋₁ |1|₋₂`
 - `|3| × |1|₋₁ = |3|₋₁` (twice) → `|6|₋₁`
 - `|1|₋₁ × |1|₋₁ = |1|₋₂`
 
-**Yes!** `(|3| |1|₋₁)² = |9| |6|₋₁ |1|₋₂` ✓
+**Yes!** `<|3| |1|₋₁>² = <|9| |6|₋₁ |1|₋₂>` ✓
 
-**So:** `√(|9| |6|₋₁ |1|₋₂) = |3| |1|₋₁`
+**So:** `√<|9| |6|₋₁ |1|₋₂> = <|3| |1|₋₁>`
 
 ✓ **Square roots work for perfect squares**
 
@@ -1355,11 +1360,11 @@ Our composites behave like polynomials where the "variable" is dimension shift:
 - `|b|` is like `b·x⁰ = b`
 - `|c|₋₁` is like `c·x⁻¹` (where x⁻¹ = 0)
 
-So `|2|₁ |5| |3|₋₁` corresponds to the polynomial `2x + 5 + 3x⁻¹` or equivalently `2x + 5 + 3/x`.
+So `<|2|₁ |5| |3|₋₁>` corresponds to the polynomial `2x + 5 + 3x⁻¹` or equivalently `2x + 5 + 3/x`.
 
 ### Polynomial Long Division
 
-**Example:** Divide `|6|₁ |11| |6|₋₁` by `|2|₁ |3|`
+**Example:** Divide `<|6|₁ |11| |6|₋₁>` by `<|2|₁ |3|>`
 
 In polynomial form: `(6x + 11 + 6/x) ÷ (2x + 3)`
 
@@ -1370,31 +1375,31 @@ In polynomial form: `(6x + 11 + 6/x) ÷ (2x + 3)`
 
 **Step 2:** Multiply back and subtract
 
-- `|3| × (|2|₁ |3|) = |6|₁ |9|`
-- Subtract from dividend: `(|6|₁ |11| |6|₋₁) - (|6|₁ |9|)`
-- = `|0|₁ |2| |6|₋₁`
-- = `|2| |6|₋₁` (dropping zero coefficient)
+- `|3| × <|2|₁ |3|> = <|6|₁ |9|>`
+- Subtract from dividend: `<|6|₁ |11| |6|₋₁> - <|6|₁ |9|>`
+- = `<|0|₁ |2| |6|₋₁>`
+- = `<|2| |6|₋₁>` (dropping zero coefficient)
 
 **Step 3:** Divide leading terms of remainder
 
 - `|2| ÷ |2|₁ = |1|₋₁`
-- Quotient so far: `|3| |1|₋₁`
+- Quotient so far: `<|3| |1|₋₁>`
 
 **Step 4:** Multiply back and subtract
 
-- `|1|₋₁ × (|2|₁ |3|) = |2|₀ |3|₋₁ = |2| |3|₋₁`
-- Subtract from remainder: `(|2| |6|₋₁) - (|2| |3|₋₁)`
-- = `|0| |3|₋₁`
+- `|1|₋₁ × <|2|₁ |3|> = <|2|₀ |3|₋₁> = <|2| |3|₋₁>`
+- Subtract from remainder: `<|2| |6|₋₁> - <|2| |3|₋₁>`
+- = `<|0| |3|₋₁>`
 - = `|3|₋₁`
 
 **Step 5:** Divide leading terms of remainder
 
 - `|3|₋₁ ÷ |2|₁ = |3/2|₋₂`
-- Quotient: `|3| |1|₋₁ |3/2|₋₂`
+- Quotient: `<|3| |1|₋₁ |3/2|₋₂>`
 
 **Step 6:** This continues infinitely...
 
-- We get an infinite series: `|3| |1|₋₁ |3/2|₋₂ |9/4|₋₃ ...`
+- We get an infinite series: `<|3| |1|₋₁ |3/2|₋₂ |9/4|₋₃ ...>`
 
 ⚠️ **Problem:** Unlike polynomial division over integers, this doesn't terminate!
 
@@ -1417,22 +1422,22 @@ But in our system:
 
 If the dividend is an exact multiple of the divisor, division terminates.
 
-**Test:** `(|4|₂ |12|₁ |9|) ÷ (|2|₁ |3|)`
+**Test:** `<|4|₂ |12|₁ |9|> ÷ <|2|₁ |3|>`
 
-**Check:** Is `|4|₂ |12|₁ |9|` equal to `(|2|₁ |3|)²`?
+**Check:** Is `<|4|₂ |12|₁ |9|>` equal to `<|2|₁ |3|>²`?
 
-- `(|2|₁ |3|)² = |4|₂ |12|₁ |9|` ✓ (we verified this in Test 5.8)
+- `<|2|₁ |3|>² = <|4|₂ |12|₁ |9|>` ✓ (we verified this in Test 5.8)
 
-**So:** `(|4|₂ |12|₁ |9|) ÷ (|2|₁ |3|) = |2|₁ |3|` ✓
+**So:** `<|4|₂ |12|₁ |9|> ÷ <|2|₁ |3|> = <|2|₁ |3|>` ✓
 
 **Case 2: Single-term divisor**
 
 Division by single terms always works:
 
-- `(|6|₁ |10| |4|₋₁) ÷ |2|₋₁`
+- `<|6|₁ |10| |4|₋₁> ÷ |2|₋₁`
 - = `|6|₁/|2|₋₁ + |10|/|2|₋₁ + |4|₋₁/|2|₋₁`
 - = `|3|₂ + |5|₁ + |2|`
-- = `|3|₂ |5|₁ |2|` ✓
+- = `<|3|₂ |5|₁ |2|>` ✓
 
 ### Proposed Rule for Multi-Term Division
 
@@ -1448,13 +1453,13 @@ To check: try polynomial division; if it terminates with zero remainder, the res
 
 Allow division to produce infinite series representations.
 
-`|12| ÷ (|2||1|₋₁)` = infinite series `|6| |-3|₋₁ |3/2|₋₂ ...`
+`|12| ÷ <|2| |1|₋₁>` = infinite series `<|6| |-3|₋₁ |3/2|₋₂ ...>`
 
 This is like writing `12 / (2 + ε) = 6 - 3ε + 3ε²/2 - ...` (Taylor expansion)
 
 **Option C: Rational Expressions**
 
-Keep unevaluated as `|12| / (|2||1|₋₁)` — a "rational composite."
+Keep unevaluated as `|12| / <|2| |1|₋₁>` — a "rational composite."
 
 Like how we write `(x+1)/(x-1)` without expanding.
 
@@ -1478,16 +1483,16 @@ Rational expressions can later be expanded to infinite series if needed (like `1
 
 ### Test: Exact Division
 
-**Test 7.15:** `(|9| |6|₋₁ |1|₋₂) ÷ (|3| |1|₋₁)`
+**Test 7.15:** `<|9| |6|₋₁ |1|₋₂> ÷ <|3| |1|₋₁>`
 
-**Check if exact:** Does `(|3| |1|₋₁)² = |9| |6|₋₁ |1|₋₂`?
+**Check if exact:** Does `<|3| |1|₋₁>² = <|9| |6|₋₁ |1|₋₂>`?
 
 - `|3|² = |9|`
 - `|3| × |1|₋₁ = |3|₋₁` (×2) → `|6|₋₁`
 - `|1|₋₁ × |1|₋₁ = |1|₋₂`
-- Result: `|9| |6|₋₁ |1|₋₂` ✓
+- Result: `<|9| |6|₋₁ |1|₋₂>` ✓
 
-**Answer:** `(|9| |6|₋₁ |1|₋₂) ÷ (|3| |1|₋₁) = |3| |1|₋₁` ✓
+**Answer:** `<|9| |6|₋₁ |1|₋₂> ÷ <|3| |1|₋₁> = <|3| |1|₋₁>` ✓
 
 ---
 

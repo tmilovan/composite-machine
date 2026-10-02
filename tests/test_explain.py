@@ -93,6 +93,20 @@ def test_escapes_are_named_rather_than_guessed():
     assert e2.kind == "nothing"
 
 
+def test_a_non_callable_fails_fast_instead_of_being_refused():
+    # `f = lambda x: x*x,` with a trailing comma is a tuple, and reporting that
+    # as kind="refused" sends the reader to the formula instead of to the call.
+    # `audit` already raises, so the two agree now.
+    import pytest
+    for wrong in ((lambda x: x * x,), 3.0, None, "x*x"):
+        with pytest.raises(TypeError, match="function of one number"):
+            explain(wrong, 2)
+    # a genuine evaluation failure is still a refusal, not a raise
+    refused = explain(lambda x: sqrt(x - R(10)), 2)
+    assert refused.kind == "refused", "got %r" % refused.kind
+    assert "non-negative" in refused.advice, "got %r" % refused.advice
+
+
 def test_str_is_a_sentence():
     assert "blows up" in str(explain(lambda x: R(1) / x, 0))
     assert "corner" in str(explain(lambda x: sqrt(x), 0))

@@ -1,6 +1,17 @@
 """Composite Calculus — Provenance-Preserving Arithmetic"""
 from composite.composite_lib import *
 
+# Named explicitly as well as starred, because they are the two halves of one
+# feature and a reader looking for it should find it here. The star import does
+# reach them today -- composite_lib declares no __all__ -- which means an __all__
+# added there later would drop them silently.
+from composite.composite_lib import (
+    conventional,           # treat every expressed zero as the ordinary zero
+    single_infinitesimal,   # ... except the one TAG() blesses
+    TAG,                    # bless ONE value as the infinitesimal source, and arm
+    UNTAG,                  # ... and disarm
+)
+
 # Resummation is a LAYER ON TOP of the arithmetic, not part of it: it needs
 # integrate() and polynomial multiply/divide, and nothing in composite_lib
 # needs it back.  Kept in its own module for that reason, and imported after
@@ -83,3 +94,12 @@ from composite.uncertainty import (
 # corner where the slope is infinite, a log divergence -- and then asks
 # forensics whether the spelling loses digits it did not have to.
 from composite.explain import explain, Explanation
+
+# Display sits on top of everything and is needed by nothing, so it comes last.
+# Importing it installs `_repr_html_` on the result types, which a notebook
+# picks up and a terminal ignores: `repr()` and `str()` are untouched.  The
+# grade table is there for the shapes a flat string reads wrongly -- a vector
+# grade on the log axis, a half grade, and a `denotation_order` marker, which
+# says the coefficients are not the classical derivatives and does not appear
+# in the string at all.  `composite.display.disable()` removes the hooks.
+from composite import display

@@ -138,6 +138,19 @@ def explain(f, at, name="f"):
     `f` takes one number and returns one number, written against the library's
     functions.  `at` is an ordinary float.
     """
+    # A non-callable `f` is the caller's mistake, not a refusal.  The blanket
+    # except below would turn it into `kind="refused"` with the advice
+    # "TypeError: 'tuple' object is not callable", which reads as though the
+    # MATHEMATICS had been refused and sends the reader to the formula instead
+    # of to the call.  `audit` already raises here, so this also makes the two
+    # agree.  A trailing comma is the usual cause: `f = lambda x: x*x,` is a
+    # one-element tuple, and in a notebook the comma is easy to miss.
+    if not callable(f):
+        raise TypeError(
+            "explain needs a function of one number as its first argument, got "
+            "%s. A trailing comma is the usual cause: `f = lambda x: x*x,` "
+            "builds a tuple rather than a function." % type(f).__name__)
+
     # The seed is built inside the watch so that it counts as the first
     # infinitesimal; degeneracy begins at the second.  _seeded is used rather
     # than an open-coded seed so the two agree on what a seed is.

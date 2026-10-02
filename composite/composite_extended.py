@@ -199,8 +199,9 @@ def residue(f, at, terms=15):
     # float(at), not complex(at): coefficients are float64, so a complex one
     # raised "float() argument must be ... not 'complex'" from Composite.__init__
     # and residue() worked at the origin only.  A complex expansion point needs
-    # the (real, imag) PAIR representation -- see C() and C_var() -- not a
-    # complex coefficient, which this value group cannot hold.
+    # a (real, imag) PAIR of composites.  C() and C_var() above are NOT that --
+    # they put complex() straight into a coefficient, which this value group
+    # cannot hold, so they raise on every input including a purely real one.
     z = ZERO if at == 0 else Composite({0: float(at), -1: 1.0})
 
     result = f(z)

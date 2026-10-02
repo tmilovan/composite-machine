@@ -62,7 +62,7 @@ order, so `ln(1/h) > 1 > h*ln(1/h) > h`.
 
 ```python
 # Create from dict
-x = Composite({0: 3, -1: 1})  # |3|₀ + |1|₋₁
+x = Composite({0: 3, -1: 1})  # <|3|₀ |1|₋₁>
 
 # Create from scalar
 x = Composite(5)  # |5|₀
@@ -136,7 +136,7 @@ Adds coefficients at matching dimensions.
 ```python
 a = Composite({0: 3, -1: 2})
 b = Composite({0: 1, -1: 4})
-result = a + b  # |4|₀ + |6|₋₁
+result = a + b  # <|4|₀ |6|₋₁>
 ```
 
 ---
@@ -154,8 +154,8 @@ Uses convolution: dimensions add, coefficients multiply. This automatically impl
 **Example:**
 
 ```python
-x = R(2) + ZERO  # |2|₀ + |1|₋₁
-y = x * x         # |4|₀ + |4|₋₁ + |1|₋₂
+x = R(2) + ZERO  # <|2|₀ |1|₋₁>
+y = x * x         # <|4|₀ |4|₋₁ |1|₋₂>
 # (2 + h)² = 4 + 4h + h²
 ```
 
@@ -662,6 +662,50 @@ print(x.st())  # 5
 
 ---
 
+### `.to_ieee754()`
+
+The image of the composite in float arithmetic: the one well-defined way back
+into a system that HAS an additive identity.
+
+**Returns:** float
+
+No single substitution `h = value` does this, because the two halves of the
+dimension axis want opposite limits. Negative grades want `h = 0`, so an
+infinitesimal becomes a true zero; at the smallest representable float instead,
+`R(6) - R(6)` comes back as `2.96e-323`, a subnormal crumb, and the identity is
+not restored. Positive grades want `h -> 0` from above, where a pole becomes an
+infinity -- which is IEEE754's own answer for `1/0`; at `h = 0` exactly they
+divide by zero and raise. So the projection is piecewise, keyed on `lead_order`:
+
+| `lead_order` | meaning | projects to |
+| --- | --- | --- |
+| `> 0` | infinitesimal | `0.0` |
+| `== 0` | bounded | `st()` |
+| `< 0` | unbounded | `+-inf`, by the dominant term's sign |
+| `None` | an expressed zero | `0.0` |
+| `None` | NOTHING | `nan` |
+
+```python
+((R(3)+ZERO)*(R(3)+ZERO)).to_ieee754()   # 9.0     bounded
+(R(6) - R(6)).to_ieee754()               # 0.0     a true zero, not a subnormal
+(R(1)/ZERO).to_ieee754()                 # inf
+(R(-1)/ZERO).to_ieee754()                # -inf
+ln(ZERO).to_ieee754()                    # -inf    ln of a small positive is large negative
+(R(1)/ln(ZERO)).to_ieee754()             # 0.0     reaches 0, despite the log axis
+Composite({}).to_ieee754()               # nan     absence, and float has no absence
+Composite({0: 0.0}).to_ieee754()         # 0.0     an expressed zero IS a value
+```
+
+NOTHING becomes `nan` rather than `0.0` because float has no representation of
+absence, and `0.0` would claim it was a zero. See `NOTHING`.
+
+`float(c)` is deliberately NOT this: it keeps raising
+`StandardPartUndefinedError` on an unbounded composite, because that exception
+is what catches an accidental coercion through `math.*`. Ask for the projection
+when you want it.
+
+---
+
 ### `.coeff(dim)`
 
 Get coefficient at a specific dimension.
@@ -698,7 +742,7 @@ Extract the nth derivative, accounting for factorial scaling.
 
 ```python
 x = R(3) + ZERO
-result = x**4          # |81|₀ + |108|₋₁ + |54|₋₂ + |12|₋₃ + |1|₋₄
+result = x**4          # <|81|₀ |108|₋₁ |54|₋₂ |12|₋₃ |1|₋₄>
 
 print(result.st())  # 81  = f(3)
 print(result.d(1))  # 108 = f'(3)   = 4·27
@@ -809,7 +853,7 @@ Module switch, `"quantity"`. What a cancellation deposits.
 ```python
 R(6) - R(6)                  # |6|₋₁
 R(-6) - R(-6)                # |-6|₋₁      the quantity, so the sign comes too
-(R(3)+ZERO) - (R(3)+ZERO)    # |3|₋₁ + |1|₋₂
+(R(3)+ZERO) - (R(3)+ZERO)    # <|3|₋₁ |1|₋₂>
 ```
 
 Equivalently, grade by grade: each dimension that cancels converts where it
@@ -829,8 +873,19 @@ by a sign. So `2 + (-2)` is `|2|₋₁` and `(-2) + 2` is `|-2|₋₁`: addition
 commute on a cancelling pair. The difference is never more than a sign.
 Multiplication is unaffected — commutative and associative either way.
 
+**The dimensional cost.** A coefficient at grade `-k` carries units `[f]/[x]^k`,
+so with `[h] = [x]` every term of `f(x0 + h)` has units `[f]`. Because `a - a` is
+`a*h`, the residue is homogeneous in `[f]*[x]` instead: subtracting two energies
+gives energy times length. It closes only when the infinitesimal is
+dimensionless -- `v/c`, `alpha`, a bare perturbation parameter -- which is how the
+physics demos are seeded. No units are tracked, so nothing warns about this;
+`NotConventionalWarning` is about the denoted jet, not about dimensions. Where a
+cancellation is reachable and the seed carries a unit, prefer a dimensionless
+seed, or annihilate with `Composite({})`, which leaves no residue. Zero Rules v2
+section 1 has the derivation.
+
 `"magnitude"` — the previous rule, keeping only the deepest coefficient, so
-`(3+h) - (3+h)` is `|0|₀ + |1|₋₂`. Kept reachable for comparison. It keeps
+`(3+h) - (3+h)` is `<|0|₀ |1|₋₂>`. Kept reachable for comparison. It keeps
 addition commutative, and in exchange every composite zero has ratio 1 and
 distributivity fails wherever the other factor is negative.
 
@@ -871,7 +926,7 @@ result = x**3
 show(result, "cubic")
 
 # Output:
-# cubic = |8|₀ + |12|₋₁ + |6|₋₂ + |1|₋₃
+# cubic = <|8|₀ |12|₋₁ |6|₋₂ |1|₋₃>
 #   st() = 8
 #   f'   = 12
 #   f''  = 12
@@ -903,7 +958,7 @@ trace(lambda x: (3*x + 1)/(x + 2), to=float('inf'))
 #     |3|₀  ×  |1|₁
 #   = |3|₁
 #     |3|₁  +  |1|₀
-#   = |3|₁ + |1|₀
+#   = <|3|₁ |1|₀>
 #     ...
 # RESULT: |3|₀
 # Limit = 3.0
@@ -922,7 +977,7 @@ translate(lambda x: x**2, at=3)
 
 # Output:
 # Substitution: x = R(3) + ZERO
-# Translation:  |9|₀ + |6|₋₁ + |1|₋₂
+# Translation:  <|9|₀ |6|₋₁ |1|₋₂>
 # f(3) = 9
 # f'(3) = 6
 ```

@@ -241,7 +241,7 @@ def main():
                  else _fmt(min(gaps, default=float('inf')))))
     print()
     print("   Row 1: float and composite pick DIFFERENT tours.  Both cost 14;")
-    print("   only |14|_0 vs |14|_0 + |1|_-1 says which one survives the edge")
+    print("   only <|14|_0> vs <|14|_0 |1|_-1> says which one survives the edge")
     print("   getting more expensive.  A float comparison reports the same tour")
     print("   for every row and cannot tell radius 2.0 from radius 0.")
 

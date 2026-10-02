@@ -421,27 +421,27 @@ def r1_on_a_vector_zero(t):
     L = cl.ln(1 / H)
     Z = L - L                                  # wholly zero, vector-keyed
     t.eq("D98 L - L converts on the POWER axis, log axis untouched",
-         lambda: str(Z), "1_(-1,1)")
+         lambda: str(Z), "<1_(-1,1)>")
     t.eq("D99 0.0 + L uplifts to h + L",
-         lambda: str(0.0 + L), "1_(0,1) + 1_(-1,0)")
+         lambda: str(0.0 + L), "<1_(0,1) 1_(-1,0)>")
     # LITERAL expected value, not str(0.0 + L): comparing one live result to
     # another live result asserts nothing -- both sides move together, so the
     # check passes whatever the code does.  It also crashes rather than
     # reports, because `want` is evaluated at the call site.
     t.eq("D100 R(0) + L agrees with the bare zero",
-         lambda: str(R(0) + L), "1_(0,1) + 1_(-1,0)")
-    t.eq("D101 1/(h*L) lands at (1,-1)", lambda: str(1 / Z), "1_(1,-1)")
+         lambda: str(R(0) + L), "<1_(0,1) 1_(-1,0)>")
+    t.eq("D101 1/(h*L) lands at (1,-1)", lambda: str(1 / Z), "<1_(1,-1)>")
     t.true("D102 the uplift is strictly infinitesimal",
            lambda: cl._dim_negative(sorted((Z + 1).c)[0]))
     # Z is a genuine infinitesimal now, so a scalar multiply scales it.  This
     # also pins the one asymmetry worth knowing: `Z * 2` goes through
     # scalar_multiply and never sees _operands, so under the old rule it was
     # the one product R1 did not reach.
-    t.eq("D103 Z*2 scales the residue", lambda: str(Z * 2), "2_(-1,1)")
+    t.eq("D103 Z*2 scales the residue", lambda: str(Z * 2), "<2_(-1,1)>")
     # and the scalar spellings must not have moved at all
-    t.eq("D104 scalar 1/0 unchanged", lambda: str(1 / R(0)), "|1|\u2081")
+    t.eq("D104 scalar 1/0 unchanged", lambda: str(1 / R(0)), "<|1|\u2081>")
     t.eq("D105 scalar 0.0 + h unchanged",
-         lambda: str(0.0 + H), "|2|\u208b\u2081")
+         lambda: str(0.0 + H), "<|2|\u208b\u2081>")
 
 
 def vector_keyed_with_infinitesimal(t):
