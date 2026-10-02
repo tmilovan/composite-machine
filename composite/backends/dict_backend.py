@@ -63,6 +63,32 @@ def _dim_add(da, db):
     return out[0] if len(out) == 1 else out
 
 
+def _dim_sub(da, db):
+    """Subtract two dimensions, scalar or vector, componentwise.
+
+    The mirror of _dim_add, and needed for exactly the same reason: plain `-`
+    raises on `1 - (0, -1)` and is meaningless between two tuples. deconvolve
+    computed `r_dim - lead_dim` with bare `-`, so dividing by a composite whose
+    dimensions had been through ln() -- or that carried the integration
+    variable on a LANE, which is a vector dimension -- raised
+    "'<' not supported between instances of 'tuple' and 'int'".
+    """
+    ta, tb = isinstance(da, tuple), isinstance(db, tuple)
+    if not ta and not tb:
+        out, ok = _add_exact(float(da), -float(db))
+        if not ok:
+            raise inexact_grade(da, db, out)
+        return out
+    va = da if ta else (da,)
+    vb = db if tb else (db,)
+    n = max(len(va), len(vb))
+    out = tuple((va[i] if i < len(va) else 0) - (vb[i] if i < len(vb) else 0)
+                for i in range(n))
+    while len(out) > 1 and out[-1] == 0:
+        out = out[:-1]
+    return out[0] if len(out) == 1 else out
+
+
 class DictBackend(CompositeBackend):
     """Pure-Python dict backend.
 
@@ -180,7 +206,12 @@ class DictBackend(CompositeBackend):
         b_nonzero = {d: v for d, v in b.terms.items() if v != 0.0}
         if not b_nonzero:
             raise ZeroDivisionError("Cannot deconvolve by zero Composite")
-        b_sorted = sorted(b_nonzero.items())
+        # _dim_key, not bare sorted(): a composite can hold a scalar dimension
+        # and a vector one at once -- 0 beside (0,-1) -- and Python cannot order
+        # those. This is reached by any division whose divisor has been through
+        # ln(), and by every integrand under integrate(), which puts the
+        # variable of integration on a LANE and so makes its dimensions vectors.
+        b_sorted = sorted(b_nonzero.items(), key=lambda kv: _dim_key(kv[0]))
         lead_dim, lead_val = b_sorted[-1]
         quotient = {}
 
@@ -188,15 +219,15 @@ class DictBackend(CompositeBackend):
         for _ in range(max_iter):
             if not remainder:
                 break
-            r_dim = max(remainder.keys())
+            r_dim = max(remainder.keys(), key=_dim_key)
             r_val = remainder[r_dim]
 
-            q_dim = r_dim - lead_dim
+            q_dim = _dim_sub(r_dim, lead_dim)
             q_val = r_val / lead_val
             quotient[q_dim] = q_val
 
             for d_b, v_b in b_nonzero.items():
-                out_d = q_dim + d_b
+                out_d = _dim_add(q_dim, d_b)
                 remainder[out_d] = remainder.get(out_d, 0.0) - q_val * v_b
                 if remainder[out_d] == 0.0:
                     del remainder[out_d]

@@ -2045,11 +2045,21 @@ def _compare(a, b):
 # =============================================================================
 
 def R(x):
-    """Create real number |x|₀, or ZERO (|1|₋₁) if x == 0.
+    """Create real number |x|₀, or the EXPRESSED zero |0|₀ if x == 0.
 
-    |0|₀ and |1|₋₁ are the same number (zero) at different dimensions.
-    R(0) returns the canonical form |1|₋₁.
-    A raw Python scalar 0 (via Composite(0)) keeps the |0|₀ form.
+    |0|₀ and |1|₋₁ are the same number (zero) at different dimensions, and R(0)
+    hands back the un-converted one so that R1 converts it at the point of USE,
+    exactly as a raw Python `0` is converted.
+
+    R(0) used to return |1|₋₁ already converted, which skipped _r1 entirely --
+    and _r1 is where the R1 warning fires and where `_denot` is recorded. The
+    consequence was that `x*x + R(0)` silently read d(1) = 7 instead of 6 with no
+    warning and `denotation_order is None`, while `x*x + 0`, with identical
+    semantics, warned twice and recorded the order. The explicit spelling was the
+    undisclosed one.
+
+    ZERO is NOT built through here. It names the infinitesimal rather than being a
+    written zero, so it stays |1|₋₁ and carries no denotation.
     """
     if isinstance(x, Composite):
         raise TypeError(
@@ -2058,7 +2068,7 @@ def R(x):
             "power(1+x, 1/x) returned 1.0. If the value is already a composite, "
             "use it directly.")
     if x == 0:
-        return Composite.zero()
+        return Composite({0: 0.0})     # latent: _r1 converts it at the point of use
     return Composite.real(x)
 
 ZERO = Composite.zero()       # |1|₋₁ (infinitesimal)

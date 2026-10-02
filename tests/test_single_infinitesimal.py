@@ -135,7 +135,9 @@ def test_a_second_tag_replaces_the_blessing():
     ("TAG(3)",          3,           {0: 3.0, -1: 1.0}),
     ("TAG(0)",          0,           {0: 0.0, -1: 1.0}),
     ("TAG(R(3))",       None,        {0: 3.0, -1: 1.0}),
-    ("TAG(R(0))",       None,        {-1: 1.0}),
+    # R(0) is the LATENT |0|_0, so this now matches TAG(0) exactly -- the two
+    # spellings of a written zero finally agree.
+    ("TAG(R(0))",       None,        {0: 0.0, -1: 1.0}),
     ("TAG(ZERO)",       None,        {-1: 1.0}),
     ("TAG(R(2)+ZERO)",  None,        {0: 2.0, -1: 1.0}),
 ], ids=["int", "int zero", "R(3)", "R(0)", "ZERO", "already seeded"])

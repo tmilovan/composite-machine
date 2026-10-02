@@ -75,7 +75,7 @@ for the next use:
 6 - 6              ->  |6|_-1                   not |0|_0 awaiting conversion
 (-6) - (-6)        ->  |-6|_-1                  the quantity, so the sign comes too
 1 - 1              ->  |1|_-1
-0 - 0              ->  |1|_-2                   R(0) is |1|_-1, cancelling at grade -1
+0 - 0              ->  |1|_-2                   R(0) is |0|_0, which converts to |1|_-1, so the cancellation is at grade -1
 (3+h) - (3+h)      ->  <|3|_-1 |1|_-2>          every grade converts, not only the lowest
 (3+h)**2 - same    ->  <|9|_-1 |6|_-2 |1|_-3>
 ```
