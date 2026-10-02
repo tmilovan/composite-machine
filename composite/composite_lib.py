@@ -485,7 +485,29 @@ def TAG(value):
     global _TAG_PREVIOUS_TRACKING
     token = _TAGGED.set(None)
     try:
-        seeded = _mint(_ensure_composite(value) + ZERO)
+        base = _ensure_composite(value)
+        terms = dict(base.coeffs_dict())
+
+        def _power(dim):
+            return dim[0] if isinstance(dim, tuple) else dim
+
+        if any(v != 0.0 and _power(d) < 0 for d, v in terms.items()):
+            # It ALREADY carries an infinitesimal, so adding another doubles it.
+            # Three ways in: TAG(R(0)), because R(0) converted to |1|_-1 before
+            # TAG ever saw it; TAG(ZERO); and TAG(x) where x was seeded already.
+            # TAG(R(0)) came out |2|_-1 and the jet of ln(1+x)/x at 0 then read
+            # [1, -1, 8/3, -12] -- correct for a seed of 2h, and not what was
+            # asked for. Bless what is there instead, which also makes TAG
+            # idempotent: TAG(TAG(3)) is TAG(3).
+            seeded = _mint(_like(base, terms))
+        elif _is_wholly_zero(base):
+            # No infinitesimal and nothing but zeros: `base + ZERO` would convert
+            # base under R1 and again hand back two units. _seeded carries the
+            # same special case for the same reason.
+            terms[-1] = terms.get(-1, 0.0) + 1.0
+            seeded = _mint(_like(base, terms))
+        else:
+            seeded = _mint(base + ZERO)
     finally:
         _TAGGED.reset(token)
     if _TAGGED.get() in (None, _ARMED):

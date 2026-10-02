@@ -131,6 +131,40 @@ def test_a_second_tag_replaces_the_blessing():
 
 # --- the two bugs the suite-wide run exposed ----------------------------------
 
+@pytest.mark.parametrize("label,value,want", [
+    ("TAG(3)",          3,           {0: 3.0, -1: 1.0}),
+    ("TAG(0)",          0,           {0: 0.0, -1: 1.0}),
+    ("TAG(R(3))",       None,        {0: 3.0, -1: 1.0}),
+    ("TAG(R(0))",       None,        {-1: 1.0}),
+    ("TAG(ZERO)",       None,        {-1: 1.0}),
+    ("TAG(R(2)+ZERO)",  None,        {0: 2.0, -1: 1.0}),
+], ids=["int", "int zero", "R(3)", "R(0)", "ZERO", "already seeded"])
+def test_tag_never_doubles_the_infinitesimal(label, value, want):
+    """Three ways in: R(0) has already converted to |1|_-1 before TAG sees it,
+    ZERO is one by construction, and an already-seeded value carries one. Adding
+    another gave |2|_-1, and the jet of ln(1+x)/x at 0 then read [1, -1, 8/3, -12]
+    -- right for a seed of 2h, and not what was asked for."""
+    built = {"TAG(R(3))": lambda: R(3), "TAG(R(0))": lambda: R(0),
+             "TAG(ZERO)": lambda: ZERO, "TAG(R(2)+ZERO)": lambda: R(2) + ZERO}
+    argument = built[label]() if value is None else value
+    assert grades(TAG(argument)) == want, "%s gave %r" % (label, grades(TAG(argument)))
+
+
+def test_tag_is_idempotent():
+    x = TAG(3)
+    assert grades(TAG(x)) == grades(x), "TAG(TAG(3)) doubled something"
+
+
+def test_the_jet_at_zero_is_right():
+    # The bug this guards was only visible at the origin, where R(0) converts.
+    x = TAG(0)
+    y = ln(R(1) + x) / x
+    got = [y.d(k) for k in range(4)]
+    want = [1.0, -0.5, 2.0 / 3, -1.5]       # ln(1+x)/x = 1 - x/2 + x^2/3 - x^3/4
+    assert all(abs(g - w) < 1e-12 for g, w in zip(got, want)), \
+        "got %r, want %r" % (got, want)
+
+
 def test_asking_whether_it_is_sealed_does_not_seal_it():
     """The predicate must be pure. It was consulted from three places and the
     first consultation took the slot, so the second saw a sealed state and
