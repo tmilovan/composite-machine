@@ -181,6 +181,15 @@ class DenseSeriesBackend(CompositeBackend):
         The phase has to be checked too, and a mismatch refined away: if the
         offsets differ by a half step the common lattice is step/2.
         """
+        # A single term has no spacing of its own -- _lattice gives it 1.0 by
+        # default -- so it sits on any lattice through its point.  Taking the
+        # other operand's step lets |c|_1.5 meet a step-1.5 series; through
+        # _common_step(1.5, 1.0) they were refused as incommensurable.  The
+        # phase check below still decides whether the point is ON that lattice.
+        if a.vals.size == 1 and b.vals.size > 1:
+            a = self._make(a.offset, b.step, a.vals)
+        elif b.vals.size == 1 and a.vals.size > 1:
+            b = self._make(b.offset, a.step, b.vals)
         step = a.step if a.step == b.step else _common_step(a.step, b.step)
         if step is None:
             return None

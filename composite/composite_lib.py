@@ -167,6 +167,50 @@ def _operands(a, b):
 
 _CONVENTIONAL = _contextvars.ContextVar("composite_conventional_zero", default=False)
 
+# See Composite.__float__ and _refusing_float.
+_REFUSE_FLOAT = _contextvars.ContextVar("composite_refuse_float", default=False)
+
+
+class FloatCoercionError(TypeError):
+    """A composite was converted to float where its infinitesimal is needed."""
+
+
+# See exp() and _exp_to_transseries.
+_EXP_TO_TS = _contextvars.ContextVar("composite_exp_to_transseries", default=False)
+
+
+@_contextlib.contextmanager
+def _exp_to_transseries():
+    """For the duration, exp of an infinite argument returns a Transseries.
+
+    exp(-1/h) is nonzero and below every power, and the powers-and-logs group
+    has no slot for it, so exp() refuses it.  composite.transseries gives it
+    one: sector n carries exp(-n/h).  Inside this scope exp() hands such an
+    argument to ts_exp instead of raising -- which is what lets an integrand
+    like exp(-x) be evaluated at the node x = 1/h.  Outside it nothing changes.
+    """
+    token = _EXP_TO_TS.set(True)
+    try:
+        yield
+    finally:
+        _EXP_TO_TS.reset(token)
+
+
+def _exp_level_one(x):
+    """ts_exp, imported late: composite.transseries imports this module."""
+    from composite.transseries import ts_exp
+    return ts_exp(x)
+
+
+@_contextlib.contextmanager
+def _refusing_float():
+    """For the duration, converting a composite to float raises."""
+    token = _REFUSE_FLOAT.set(True)
+    try:
+        yield
+    finally:
+        _REFUSE_FLOAT.reset(token)
+
 #: PROTOTYPE. The trigger: once a number carries an infinitesimal source, every
 #: further zero it meets behaves conventionally. Per NUMBER, not per scope, so a
 #: value cannot escape the regime by leaving a block.
@@ -1488,7 +1532,19 @@ class Composite:
         Deliberately NOT the IEEE754 projection: this keeps raising on an
         unbounded composite, because that exception is what catches an
         accidental coercion through `math.*`.  See `to_ieee754`.
+
+        Inside `_refusing_float()` it raises instead, for every composite.
+        `math.cos(t)` on a seeded t calls this and silently hands back a float
+        with the infinitesimal gone; a routine that reads the infinitesimal
+        (a line integral's tangent) must know that happened, and a value
+        comparison cannot tell it -- cos and sin take the same values at 0
+        and 2*pi, so a coerced circle looks constant.
         """
+        if _REFUSE_FLOAT.get():
+            raise FloatCoercionError(
+                "a composite was converted to float -- math.* or float() on a "
+                "value carrying an infinitesimal.  Use the composite functions "
+                "(composite.cos, sin, exp, ...) so the infinitesimal survives.")
         return float(self.st())
 
     def __int__(self):
@@ -3372,14 +3428,33 @@ def cos(x, terms=12):
 
 
 @_honours_terms
+def _exp_float(a):
+    """math.exp, refusing an underflow.
+
+    e**a for a below about -745 is a positive real that float64 cannot hold,
+    and math.exp returns 0.0 for it.  Built into a composite that 0.0 is a
+    WRITTEN zero, R1 converts it, and exp(-(800 + h)) came back as
+    h - h**2 + h**3/2 - ...: an infinitesimal of coefficient one where the
+    value is e**-800.  So it is refused, as exp(-1/h) is: the value exists and
+    this representation cannot carry it.
+    """
+    v = math.exp(a)
+    if v == 0.0:
+        raise NotRepresentableError(
+            "exp(%r) underflows float64: the value is positive but below the "
+            "smallest representable number, and a 0.0 standing in for it would "
+            "be a written zero that converts to an infinitesimal." % (a,))
+    return v
+
+
 def exp(x, terms=15):
     """Exponential function for Composite numbers."""
     terms = _effective_terms(terms)
     if isinstance(x, (int, float)):
-        return Composite({0: math.exp(float(x))})
+        return Composite({0: _exp_float(float(x))})
 
     if not isinstance(x, Composite):
-        return Composite({0: math.exp(float(x))})
+        return Composite({0: _exp_float(float(x))})
 
     if _is_nothing(x):
         # R6: adding nothing is a no-op, so f(nothing) is whatever term
@@ -3458,7 +3533,7 @@ def exp(x, terms=15):
                 _zero = tuple(0 for _ in range(_w))
                 if set(_rest) <= {_zero}:
                     out = out * _vec_composite(
-                        {_zero: math.exp(_rest.get(_zero, 0.0))})
+                        {_zero: _exp_float(_rest.get(_zero, 0.0))})
                 else:
                     out = out * exp(_vec_composite(_rest), terms)
             return out
@@ -3480,6 +3555,8 @@ def exp(x, terms=15):
     # the argument is (finite standard part) + (strictly negative grade), and
     # that is what is checked here.
     if _has_positive_dims(x):
+        if _EXP_TO_TS.get():
+            return _exp_level_one(x)
         raise NotRepresentableError(
             f"exp of a positive grade is outside this value group: "
             f"exp(1/h) is above every power and exp(-1/h) is below every "
@@ -3498,9 +3575,9 @@ def exp(x, terms=15):
     non_zero = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
 
     if not non_zero:
-        return Composite({0: math.exp(a)})
+        return Composite({0: _exp_float(a)})
 
-    base = math.exp(a)
+    base = _exp_float(a)
     h = _like(x, non_zero)
     one = _like(x, {_unit_dim(x): 1.0})
 
@@ -4957,36 +5034,100 @@ def taylor_coefficients(f: Callable, at: float, up_to: int = 5, terms: int = 12)
 # FIXED: antiderivative, _ensure_composite, _detect_singularity
 # =============================================================================
 
+def _antiderivative_term(dim, coeff):
+    """Integrate ONE term with respect to h.  Returns {dim: coeff}, or None.
+
+    A term is c * h**p * L**l with L = ln(1/h), p = -(power component) and l
+    the first log component -- the reading `ln(h) = <-1_(0,1)>` fixes.  With
+    q = p + 1, integration by parts gives a FINITE sum, since dL/dh = -1/h:
+
+        q != 0:  int h**p L**l dh = h**q * sum_{j=0..l} l!/(l-j)! L**(l-j) / q**(j+1)
+        q == 0:  int h**-1 L**l dh = -L**(l+1) / (l+1)
+
+    With l = 0 and p a non-negative integer this is the old rule
+    |c|_-n -> |c/(n+1)|_-(n+1).  It also covers what the old rule skipped: a
+    FRACTIONAL grade (1/sqrt(h) -> 2 sqrt(h)), a POLE (1/h**2 -> -1/h), the
+    simple pole 1/h (-> -ln(1/h)), and log-carrying terms (ln h -> h ln h - h).
+
+    Grades keep their own type: a Fraction on the exact backend must not pass
+    through float(), or 7/10 - 1 stops being -3/10.
+
+    None for a negative or fractional log power (int h**p / L is the
+    logarithmic integral, not a finite sum) or content on a deeper axis; the
+    caller keeps the old behaviour there.
+    """
+    if isinstance(dim, tuple):
+        d0, rest = dim[0], dim[1:]
+        l = rest[0] if rest else 0
+        if any(c != 0 for c in rest[1:]) or l < 0 or l != int(l):
+            return None
+        l = int(l)
+    else:
+        d0, l = dim, 0
+    q = 1 - d0                                # p + 1, with p = -d0
+
+    def key(power, logp):
+        if logp == 0 and not isinstance(dim, tuple):
+            return power
+        from composite.backends.vector_dim_backend import canon
+        return canon((power, logp))
+
+    if q == 0:
+        return {key(0, l + 1): -coeff / (l + 1)}
+    out = {}
+    fall = 1.0                                # l!/(l-j)!
+    for j in range(l + 1):
+        out[key(_dim_shift(d0, -1), l - j)] = coeff * fall / float(q) ** (j + 1)
+        fall *= (l - j)
+    return out
+
+
 def antiderivative(f_composite: Composite, constant: float = 0) -> Composite:
     """Compute antiderivative via dimensional shift.
-    Each |c|_{-n} -> |c/(n+1)|_{-(n+1)}
 
-    FIXED: Only processes dim <= 0. The old code let positive dims through:
-      dim=2 -> new_dim=1 -> divisor=1 -> silently created a dim+1 term.
-    Now skips all positive dims (INF components, etc.).
+    Each |c|_{-n} -> |c/(n+1)|_{-(n+1)}, and in general _antiderivative_term:
+    every grade, fractional or positive, and the first log axis.  Positive
+    grades used to be skipped because the old divisor abs(_dim_order(new_dim))
+    was wrong for them (dim 2 -> divisor 1); the right divisor is q = 1 - dim,
+    signed, so 1/h**2 integrates to -1/h, |1|_2 -> |-1|_1.
     """
-    # The constant's key has to be the same KIND as the dimensions it will sit
-    # beside: sorted() cannot order a tuple against an int, so a scalar 0 mixed
-    # with vector dims raised "'<' not supported between tuple and int" the
-    # moment erf integrated a log-axis argument.
-    _dims = list(f_composite.c)
-    _zero = 0
-    for _d in _dims:
-        if isinstance(_d, tuple):
-            _zero = tuple(0 for _ in range(len(_d)))
-            break
-    result = {_zero: constant}
+    terms = {}
     for dim, coeff in f_composite.c.items():
-        if not _dim_positive(dim):
+        piece = _antiderivative_term(dim, coeff)
+        if piece is None:
+            # Outside the closed form: the old power-axis shift, positive
+            # grades still skipped as they were.
+            if _dim_positive(dim):
+                continue
             new_dim = _dim_shift(dim, -1)
-            divisor = abs(_dim_order(new_dim))
-            result[new_dim] = coeff / divisor
+            piece = {new_dim: coeff / abs(_dim_order(new_dim))}
+        for k, v in piece.items():
+            terms[k] = terms.get(k, 0.0) + v
+    # The constant's key has to be the same KIND as the dimensions it sits
+    # beside: sorted() cannot order a tuple against an int.
+    vector = any(isinstance(k, tuple) for k in terms) or any(
+        isinstance(d, tuple) for d in f_composite.c)
+    if vector:
+        from composite.backends.vector_dim_backend import canon, as_vec
+        terms = {canon(as_vec(k) if isinstance(k, tuple) else (k, 0)): v
+                 for k, v in terms.items()}
+        zero = canon((0, 0))
+    else:
+        terms = {(int(k) if not isinstance(k, _Fraction)
+                  and float(k).is_integer() else k): v
+                 for k, v in terms.items()}
+        zero = 0
+    result = {zero: constant}
+    result.update({k: v for k, v in terms.items() if k != zero})
     # Every order moves up by one, so a f sound to K integrates to one sound to
     # K+1.  Building the dict directly skips _truncate_order, which is where
     # the bound would otherwise be recorded -- dropping it here made asin, atan
     # and the derivative round trip all claim to be exact.
     _c = getattr(f_composite, "_complete", None)
-    out = _like(f_composite, result)
+    if vector and not getattr(f_composite._backend, "VECTOR_DIMS", False):
+        out = _join(_vec_composite(result), f_composite)   # a log out of a scalar input
+    else:
+        out = _like(f_composite, result)
     if _c is not None:
         out._complete = _c + 1
     return out
@@ -5065,9 +5206,12 @@ def _detect_singularity(f, x_near, x_away, panel_dx):
 
 
 def definite_integral(f: Callable, a: float, b: float, terms: int = 12) -> float:
-    """Compute ∫ₐᵇ f(x) dx."""
-    result, _ = integrate_adaptive(f, a, b, tol=1e-10, terms=terms)
-    return result.st()
+    """Compute ∫ₐᵇ f(x) dx, by meeting composites (integrate_jets).
+
+    `terms` is kept for the signature and no longer used: jet depth is
+    integrate_jets' own.
+    """
+    return integrate(f, a, b)
 
 # =============================================================================
 # MULTI-POINT STEPPED INTEGRATION
@@ -5425,95 +5569,53 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
         return v.st() if isinstance(v, Composite) else float(v)
 
     # --- LINE INTEGRAL ---
+    # The integrand along the curve is a 1D integral in t, read by meeting
+    # composites.  The tangent is Composite.D() -- the derivative as a grade
+    # shift -- divided by t's own D(): the right end is seeded inward, t = b - h,
+    # so d/dh there is -d/dt.  The speed is a composite sqrt.  A component whose
+    # D() is all zeros does not move and is skipped BEFORE any arithmetic: a
+    # wholly zero operand would be converted by R1 into an infinitesimal the
+    # curve never had.
+    #
+    # The curve must be composite.  math.cos(t) turns the seed into a float and
+    # loses the tangent, so it is refused, not differenced.
     if curve is not None:
         t_range = args[0] if args else (0, 1)
         a_t, b_t = t_range
         is_vector = isinstance(f, list)
 
-        t_mid = (a_t + b_t) / 2
-        try:
-            probe = curve(_seeded(t_mid))
-            if isinstance(probe, (list, tuple)):
-                # A non-composite component is safe to freeze as a constant
-                # ONLY if it is genuinely constant.  One probe cannot tell
-                # "0" from "math.cos(t)" -- both come back as plain floats --
-                # so probe a second t and see which ones move.
-                #
-                # Judging by probe[0] alone sent [0, t] down the 2000-step
-                # finite-difference fallback because its FIRST component was
-                # constant.  Accepting ANY composite component instead froze
-                # math.cos(t)/math.sin(t) at their midpoint values and made the
-                # helix arc length come out 2*pi instead of 2*pi*sqrt(2): the
-                # z-component was the only one left with a tangent.
-                other = curve(_seeded(t_mid + 0.25 * (b_t - a_t) + 1e-3))
-                composite_curve = True
-                for pa, pb in zip(probe, other):
-                    if isinstance(pa, Composite):
+        def _line_integrand(t_comp):
+            pos = [p if isinstance(p, Composite) else Composite({0: float(p)})
+                   for p in curve(t_comp)]
+            dt = t_comp.D()
+            tangent = []
+            for p in pos:
+                d = p.D()
+                tangent.append(d / dt if any(v != 0.0 for v in d.c.values())
+                               else None)
+            acc = None
+            if is_vector:
+                for comp, tv in zip(f, tangent):
+                    if tv is None:
                         continue
-                    if float(pa) != float(pb):
-                        composite_curve = False      # varies, but opaque
-                        break
-            else:
-                composite_curve = isinstance(probe, Composite)
-        except (TypeError, AttributeError):
-            composite_curve = False
+                    term = _ensure_composite(comp(*pos)) * tv
+                    acc = term if acc is None else acc + term
+                return acc if acc is not None else Composite({0: 0.0})
+            for tv in tangent:
+                if tv is None:
+                    continue
+                acc = tv * tv if acc is None else acc + tv * tv
+            if acc is None:
+                return Composite({0: 0.0})
+            return _ensure_composite(f(*pos)) * sqrt(acc)
 
-        if composite_curve:
-            def _line_integrand(t_comp):
-                pos_comp = curve(t_comp)
-                pos_comp = [p if isinstance(p, Composite) else Composite({0: float(p)})
-                            for p in pos_comp]
-                tangent = [_lane_d1(p) for p in pos_comp]
-
-                if is_vector:
-                    F_comp = [comp(*pos_comp) for comp in f]
-                    F_comp = [Composite({0: float(fc)}) if isinstance(fc, (int, float)) else fc
-                              for fc in F_comp]
-                    # A component of the curve that does not move contributes
-                    # nothing to F.dr, so skip it rather than multiply by its
-                    # zero tangent.  Both operands are then zeros, R1 converts
-                    # each, and |0|_0 * 0.0 comes back as |1|_-2 -- an
-                    # infinitesimal injected into the integrand.  The standard
-                    # part survives that, but integrate_adaptive builds its
-                    # antiderivative from the Taylor coefficients, so it
-                    # integrates a series whose derivatives are fabricated:
-                    # work of F=[1,0] along [t,0] returned 3.140625, not 3.
-                    # Python's sum() is avoided for the same reason -- it
-                    # starts from the int 0, which is another zero operand.
-                    acc = None
-                    for fc, tv in zip(F_comp, tangent):
-                        if tv == 0.0:
-                            continue
-                        term = fc * tv
-                        acc = term if acc is None else acc + term
-                    return acc if acc is not None else Composite({0: 0.0})
-                else:
-                    f_comp = f(*pos_comp)
-                    if isinstance(f_comp, (int, float)):
-                        f_comp = Composite({0: float(f_comp)})
-                    speed = math.sqrt(sum(tv**2 for tv in tangent))
-                    return f_comp * speed
-        else:
-            N = 2000
-            dt = (b_t - a_t) / N
-            total = 0.0
-            for i in range(N):
-                t_mid = a_t + (i + 0.5) * dt
-                pt = curve(t_mid)
-                eps_fd = 1e-7
-                pt_fwd = curve(t_mid + eps_fd)
-                tangent = [(float(pt_fwd[j]) - float(pt[j])) / eps_fd
-                            for j in range(len(pt))]
-                if is_vector:
-                    F_vals = [_st(comp(*[float(p) for p in pt])) for comp in f]
-                    total += sum(fv * tv for fv, tv in zip(F_vals, tangent)) * dt
-                else:
-                    speed = math.sqrt(sum(tv**2 for tv in tangent))
-                    total += _st(f(*[float(p) for p in pt])) * speed * dt
-            return total
-        result, err = integrate_adaptive(_line_integrand, a_t, b_t, tol=tol,
-                                         terms=terms, lane=1)
-        return result.st()
+        try:
+            with _refusing_float():
+                return integrate_jets(_line_integrand, a_t, b_t, tol=tol).to_ieee754()
+        except FloatCoercionError as e:
+            raise ValueError(
+                "integrate: the curve or the integrand is not composite -- %s"
+                % e) from None
 
     # --- SURFACE INTEGRAL ---
     if surface is not None:
@@ -5609,17 +5711,30 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
         a_val, b_val = args
         a_inf = math.isinf(a_val) and a_val < 0
         b_inf = math.isinf(b_val) and b_val > 0
-        if a_inf and b_inf:
-            val, _ = improper_integral_both(f, tol=tol)
+        if a_inf or b_inf:
+            # Composite first: the node at infinity is x = 1/h, an algebraic
+            # tail an ordinary composite there and an exponential one a
+            # transseries sector.  Where the library says the tail is not
+            # representable -- a Gaussian (exp(-1/h**2), level two), a rate
+            # that is not an integer sector, an oscillation (sin(1/h) is a
+            # range) -- it falls back to the panel path.  The
+            # trigger is the library's own refusal, not a probe.
+            try:
+                return _improper_jets(f, a_val, b_val, tol)
+            except (NotRepresentableError, NotImplementedError):
+                pass
+            if a_inf and b_inf:
+                val, _ = _improper_integral_panels_both(f, tol=tol)
+                return val.st()
+            if b_inf:
+                val, _ = _improper_integral_panels(f, a_val, tol=tol)
+                return val.st()
+            val, _ = _improper_integral_panels(lambda x: f(-x), -b_val, tol=tol)
             return val.st()
-        if b_inf:
-            val, _ = improper_integral(f, a_val, tol=tol)
-            return val.st()
-        if a_inf:
-            val, _ = improper_integral(lambda x: f(-x), -b_val, tol=tol)
-            return val.st()
-        result, _ = integrate_adaptive(f, a_val, b_val, tol=tol, terms=terms)
-        return result.st()
+        # Integrated by meeting composites (integrate_jets).  The standard
+        # part, or +-inf for a divergent integral -- the IEEE754 projection,
+        # where .st() of the old path returned nan.
+        return integrate_jets(f, a_val, b_val, tol=tol).to_ieee754()
 
     # --- 2D BOX ---
     if len(args) == 2 and isinstance(args[0], tuple):
@@ -5661,28 +5776,37 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
     raise ValueError(f"Could not determine integral type from arguments: {args}")
 
 def integrate_stepped(f: Callable, a: float, b: float, step: float = 0.5, terms: int = 15):
-    """Multi-point stepped integration with error estimate."""
-    total = Composite({})
-    total_error = 0.0
-    x0 = a
-    while x0 < b:
-        dx = min(step, b - x0)
-        fx = f(_seeded(x0))
-        Fx = antiderivative(fx)
-        neg_terms = {d: c for d, c in Fx.c.items() if _dim_negative(d)}
-        contribution = sum(
-            coeff * dx ** abs(dim)
-            for dim, coeff in neg_terms.items()
-        )
-        if neg_terms:
-            min_dim = min(neg_terms.keys())
-            step_error = abs(neg_terms[min_dim] * dx ** abs(min_dim))
-        else:
-            step_error = 0.0
-        total = total + Composite({0: contribution})
-        total_error += step_error
-        x0 += dx
-    return total, total_error
+    """Integral over [a, b] with nodes at every `step`, each step read by
+    integrate_jets.  Returns (Composite, error).
+
+    Each step used to be one jet evaluated against real powers of its width --
+    h given the value dx -- with the deepest term as the error.  Now each step
+    is read by meeting composites, and integrate_jets adds nodes inside a step
+    where its two ends disagree.  There is no error estimate any more, so the
+    error slot is nan rather than a number that would look like a bound.
+    `terms` is kept for the signature and no longer used.
+
+    The steps are joined as terms of ONE number, not as a sum of operands:
+    adding step results to a running total could cancel to a written zero,
+    which R1 would convert.
+    """
+    from composite.backends.vector_dim_backend import as_vec, canon
+    a, b = float(a), float(b)
+    edges = [a]
+    while edges[-1] < b:
+        edges.append(min(edges[-1] + step, b))
+    terms_ = {}
+    for x0, x1 in zip(edges, edges[1:]):
+        for d, v in integrate_jets(f, x0, x1).coeffs_dict().items():
+            key = canon(as_vec(d)) if isinstance(d, tuple) else d
+            terms_[key] = terms_.get(key, 0.0) + v
+    if not terms_:
+        return Composite({0: 0.0}), float("nan")
+    if any(isinstance(d, tuple) for d in terms_):
+        terms_ = {(d if isinstance(d, tuple) else canon((d, 0))): v
+                  for d, v in terms_.items()}
+        return _vec_composite(terms_), float("nan")
+    return Composite(terms_), float("nan")
 
 
 # =============================================================================
@@ -6006,6 +6130,415 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4,
 
 
 # =============================================================================
+# INTEGRATION BY MEETING COMPOSITES
+# =============================================================================
+#
+# A composite at a node x is the integrand's exact local behaviour, and
+# antiderivative() of it is F - F(x) around x, exact grade by grade.  What it
+# cannot hold is the constant F(x) -- and the difference of two constants is
+# the integral.  Two nodes give it by SUBTRACTION:
+#
+#   carry both antiderivatives to the same composite point m + h, by putting
+#   the composite (m - x) + h into each one's series:
+#
+#       G0((m - x0) + h) = F(m + h) - F(x0)
+#       G1((m - x1) + h) = F(m + h) - F(x1)
+#
+#   subtract: grade 0 is F(x1) - F(x0), and every other grade cancels.
+#
+# h is never given a real value.  What goes into a series is a composite whose
+# standard part is the real distance between two points and whose
+# infinitesimal part is h; that is composition, exact grade by grade.
+#
+# The subtraction checks itself.  Both sides are the same function's jet at the
+# same point, so the integrand and its slope at m -- grades -1 and -2 -- must
+# agree from both sides.  Value alone is fooled by symmetry: an even integrand
+# met at its centre gives the same wrong value from both mirror images, while
+# the slope flips sign.  Where they disagree, one side's series did not reach
+# m, and the panel's midpoint becomes a node: one more evaluation.
+#
+# A node's jet is made as deep as `order` by the scope derivative extraction
+# uses, so every transcendental in the integrand builds its series that far.
+# Depth is cheap; an evaluation is what is being saved.
+
+def _integer_jet(c):
+    """An ordinary Taylor jet: integer grades at or below zero, power axis only."""
+    for d, v in c.c.items():
+        if v == 0.0:
+            continue
+        if isinstance(d, tuple):
+            return False
+        d = float(d)
+        if d > 0 or not d.is_integer():
+            return False
+    return True
+
+
+def _compose(G, u):
+    """G's series in its variable, with the composite u put in for it.
+
+    A term c * u**p * ln(1/u)**l becomes c * u**p * (-ln(u))**l in composite
+    arithmetic.  Non-negative integer orders go through Horner; poles,
+    fractional orders and log factors term by term with composite power and
+    ln.  u's standard part is a real distance, never zero.
+    """
+    ints, rest = {}, []
+    for d, v in G.c.items():
+        if v == 0.0:
+            continue
+        if isinstance(d, tuple):
+            if any(float(e) != 0 for e in d[2:]):
+                raise ValueError("integrate_jets: no composition for a deeper log axis")
+            p, l = -float(d[0]), (int(float(d[1])) if len(d) > 1 else 0)
+        else:
+            p, l = -float(d), 0
+        if l == 0 and p.is_integer() and p >= 0:
+            ints[int(p)] = ints.get(int(p), 0.0) + v
+        else:
+            rest.append((p, l, v))
+    out = None
+    if ints:
+        N = max(ints)
+        out = Composite({0: ints.get(N, 0.0)})
+        for k in range(N - 1, -1, -1):
+            out = out * u
+            if ints.get(k, 0.0) != 0.0:
+                out = out + Composite({0: ints[k]})
+    for p, l, v in rest:
+        # u**0 is not computed: through exp(0 * ln u) the 0 is a WRITTEN zero,
+        # R1 makes it an infinitesimal, and ln(1/u) came back as ln(1/u) + h.
+        # Integer powers take the integer path, which never meets exp.
+        if p == 0.0:
+            t = Composite({0: v})
+        elif p.is_integer():
+            t = (u ** int(p)) * v
+        else:
+            t = (u ** p) * v
+        if l:
+            t = t * (-ln(u)) ** l
+        out = t if out is None else out + t
+    return out if out is not None else Composite({})
+
+
+def _sector_antiderivative(C, n, order):
+    """P with d/du[exp(-n/u) P(u)] = exp(-n/u) C(u).
+
+    Differentiating gives exp(-n/u) (n P/u**2 + P'), so P = (u**2/n)(C - P').
+    Each pass of that recursion fixes one more order of P -- u**2 raises the
+    grade by two and d/du lowers it by one -- so `order + 2` passes settle
+    every grade kept.  The series is often asymptotic rather than convergent
+    (exp(-1/u)/u gives 1, -1!, 2!, ...); where it does not reach the meeting
+    point, the two sides disagree there and the panel is split.
+
+    C - P' is formed coefficient by coefficient, as terms of one series:
+    through Composite.__sub__ an exact cancellation would deposit a residue,
+    which is a cancellation event this series does not have.
+    """
+    shift = Composite({-2: 1.0 / n})                  # u**2 / n
+    keep = lambda d: -float(d[0] if isinstance(d, tuple) else d) <= order
+    cd = {d: v for d, v in C.c.items() if v != 0.0}
+    P = Composite({})
+    for _ in range(order + 2):
+        q = dict(cd)
+        if P.c:
+            for d, v in P.D().c.items():
+                if v != 0.0:
+                    q[d] = q.get(d, 0.0) - v
+        q = {d: v for d, v in q.items() if v != 0.0}
+        if not q:
+            nxt = Composite({})
+        else:
+            nxt = shift * Composite(q)
+            nxt = Composite({d: v for d, v in nxt.c.items() if v != 0.0 and keep(d)})
+        if nxt.coeffs_dict() == P.coeffs_dict():
+            break
+        P = nxt
+    return P
+
+
+def _ts_antiderivative(T, order):
+    """antiderivative() of a Transseries, sector by sector."""
+    from composite.transseries import Transseries
+    out = {}
+    for n, C in T.sectors.items():
+        out[n] = antiderivative(C) if n == 0 else _sector_antiderivative(C, n, order)
+    return Transseries(out)
+
+
+def _compose_ts(G, u):
+    """A transseries antiderivative carried to the finite composite point u:
+    sector n contributes compose(P_n, u) * exp(-n/u), and with u finite that
+    exp is an ordinary composite -- the flat term is flat only AT u = h."""
+    out = None
+    for n, P in G.sectors.items():
+        if not P.c:
+            continue
+        if n != 0 and math.exp(-float(n) / u.st()) == 0.0:
+            # exp(-n/u) underflows float64 to exactly 0.0 here (u = 0.001:
+            # e**-1000).  Built anyway, that 0.0 is a WRITTEN zero, R1 converts
+            # it, and the manufactured infinitesimal surfaced as the integrand's
+            # value -- 0.027 where it is e**-1000 -- so the two sides of the meet
+            # never agreed.  Below float64 the sector contributes nothing a
+            # float can hold, so it is left out: absent, not zero.
+            continue
+        t = _compose(P, u)
+        if n != 0:
+            t = t * exp(R(-float(n)) / u)
+        out = t if out is None else out + t
+    return out if out is not None else Composite({})
+
+
+def integrate_jets(f, a, b, tol=1e-10, order=50, max_nodes=200, max_depth=60,
+                   scale=1.0):
+    """int_a^b f(x) dx by meeting composites.  Returns a Composite whose grade 0
+    is the integral.
+
+    Starts with the two ends.  Each panel's two node antiderivatives are carried
+    to the composite midpoint and subtracted; where value or slope disagree
+    there, the midpoint becomes a node.  Each node is one evaluation, its jet
+    built to `order`.  The right end is seeded toward the interior, f(b - h).
+
+    A node whose jet is not an ordinary Taylor jet -- a pole, a fractional
+    grade, a log, which is what a singular endpoint looks like -- is handled by
+    the same construction: antiderivative() integrates those grades exactly and
+    composition carries them to m.  Such a node keeps what its limit leaves, so
+    int_0^1 dx/x**2 is <|1|_1 |-1|_0>, 1/h - 1, and sqrt keeps its tail.
+
+    Raises ValueError when the integrand returns no composite, and when
+    max_nodes evaluations have not resolved [a, b] -- an integrand carrying an
+    infinitesimal of its own never agrees, and is refused rather than summed.
+    """
+    a, b = float(a), float(b)
+    if b < a:
+        return -integrate_jets(f, b, a, tol, order, max_nodes, max_depth, scale)
+    if b == a:
+        return Composite({0: 0.0})
+    nodes = {}
+
+    def G(x, s):
+        """antiderivative(f(x + s h)) = s * (F(x + s u) - F(x)), a series in u."""
+        if (x, s) not in nodes:
+            if len(nodes) >= max_nodes:
+                raise ValueError(
+                    "integrate_jets: %d nodes evaluated and [%r, %r] still "
+                    "unresolved.  The usual cause is an integrand carrying an "
+                    "infinitesimal of its own -- a parameter built with ZERO "
+                    "or R(0), a written 0 such as 0*x -- whose composite "
+                    "denotes a different function at every node, so the two "
+                    "sides never agree.  That case is not supported yet."
+                    % (len(nodes), a, b))
+            # `scale` is the seed's quantity: the jet's grade -k then carries
+            # scale**k, keeping coefficients of order one on a short interval
+            # beside a singularity (the seed carries the chain rule).
+            seed = (_mint(Composite({-1: s * scale})) if x == 0 else
+                    _mint(Composite({0: x, -1: s * scale})))
+            with _derivative_scope(order, order), _exp_to_transseries():
+                c = f(seed)
+            from composite.transseries import Transseries
+            if isinstance(c, Transseries):
+                if set(c.sectors) <= {0}:
+                    c = c.sectors.get(0, Composite({}))
+                else:
+                    # A flat term at this node -- exp(-1/h) where x = 1/h --
+                    # integrated sector by sector.
+                    nodes[(x, s)] = (_ts_antiderivative(c, order) * scale, False)
+                    return nodes[(x, s)]
+            if not isinstance(c, Composite):
+                raise ValueError(
+                    "integrate_jets: the integrand returned %r, not a composite"
+                    % type(c).__name__)
+            G_ = antiderivative(c)
+            nodes[(x, s)] = (G_ * scale if scale != 1.0 else G_, _integer_jet(c))
+        return nodes[(x, s)]
+
+    def right(x):
+        """The node at the RIGHT of a panel, read toward the panel.  At b, and
+        at a singular interior node, that is f(x - h); a regular interior node
+        reuses its one forward jet."""
+        if x == b:
+            return G(x, -1.0), -1.0
+        g = G(x, 1.0)
+        if not g[1]:
+            return G(x, -1.0), -1.0             # one more evaluation, singular only
+        return g, 1.0
+
+    def panel(x0, x1, depth=0):
+        (G0, plain0), ((G1, plain1), s1) = G(x0, 1.0), right(x1)
+        m = 0.5 * (x0 + x1)
+        carry = lambda Gx, u: (_compose(Gx, u) if isinstance(Gx, Composite)
+                               else _compose_ts(Gx, u))
+        with _derivative_scope(order, order):
+            # distances in the seed's units
+            A = carry(G0, R((m - x0) / scale) + ZERO)                 # F(m+h) - F(x0)
+            B = carry(G1, R(s1 * (m - x1) / scale) + ZERO * s1)       # s1 (F(m+h) - F(x1))
+        fa, fb = A.coeff(-1), s1 * B.coeff(-1)
+        da, db = A.coeff(-2), s1 * B.coeff(-2)
+        value = A.coeff(0) - s1 * B.coeff(0)
+        size = max(1.0, abs(fa), abs(da))
+        if (all(math.isfinite(v) for v in (value, fa, fb, da, db))
+                and abs(fa - fb) <= tol * size and abs(da - db) <= tol * size):
+            kept = []
+            # A singular node keeps what its limit leaves: the panel runs from
+            # x0 + h, or to x1 - h -- the written endpoint 0 is h, never 0.001.
+            # A divergence stays a graded infinity; two cancelling ones around
+            # an interior pole cancel as terms.
+            if not plain0:
+                kept.append(G0 * -1.0)
+            if not plain1:
+                kept.append(G1 * -1.0)
+            return [(A - B * s1, kept)]         # grade 0 is this panel's integral
+        if not x0 < m < x1 or depth >= max_depth:
+            # No float strictly between the two nodes, or max_depth halvings
+            # toward one point: a split would make no progress, and recursing
+            # toward a point the two sides never agree at ran into Python's
+            # recursion limit before max_nodes.
+            raise ValueError(
+                "integrate_jets: [%r, %r] unresolved after %d bisections"
+                % (x0, x1, depth))
+        return panel(x0, m, depth + 1) + panel(m, x1, depth + 1)
+
+    parts = panel(a, b)
+    total = parts[0][0]
+    for p, _ in parts[1:]:
+        total = total + p
+    # ONE number assembled from its terms, not a sum of operands: adding kept
+    # terms to Composite({0: value}) would make a written zero of a finite
+    # part that is exactly 0, and R1 would convert it.
+    from composite.backends.vector_dim_backend import as_vec, canon
+    from composite.transseries import Transseries
+    terms = {0: total.coeff(_zero_dim_like(total))}
+    flat = {}                                   # sector n -> {grade: coeff}
+    for _, kept in parts:
+        for k in kept:
+            pieces = (k.sectors.items() if isinstance(k, Transseries)
+                      else [(0, k)])
+            for n, c in pieces:
+                into = terms if n == 0 else flat.setdefault(n, {})
+                for d, v in c.c.items():
+                    if n == 0 and ((not any(d)) if isinstance(d, tuple) else d == 0):
+                        continue                # G's own constant slot
+                    if v == 0.0:
+                        continue
+                    key = canon(as_vec(d)) if isinstance(d, tuple) else d
+                    into[key] = into.get(key, 0.0) + v
+
+    def one(t):
+        if any(isinstance(d, tuple) for d in t):
+            return _vec_composite({(d if isinstance(d, tuple) else canon((d, 0))): v
+                                   for d, v in t.items()})
+        return Composite(t)
+
+    if flat:
+        # What the node at infinity leaves: exp(-n/h) * P(h), below every
+        # power -- kept, as the lower limit's tail is kept elsewhere.
+        return Transseries({0: one(terms), **{n: one(t) for n, t in flat.items()}})
+    return one(terms)
+
+
+def integrate_jets_tail(f, a, tol=1e-10, order=50, max_nodes=200):
+    """int_a^inf f(x) dx, a > 0, as int_0^(1/a) f(1/u) / u**2 du by meeting
+    composites.  The u = 0 node is x = 1/h: an algebraic tail is an ordinary
+    composite there, an exponential one exp(-n/h) a transseries sector.
+
+    The seed's quantity is the interval, 1/a, so jet coefficients are in units
+    of it.  With an integer a the node at infinity is x = a/h and exp(-x)
+    lands on sector a -- an integer, as ts_exp requires; so a should be one.
+    """
+    if a <= 0:
+        raise ValueError("integrate_jets_tail needs a > 0")
+    return integrate_jets(lambda u: f(R(1) / u) * (R(1) / (u * u)),
+                          0.0, 1.0 / a, tol=tol, order=order, max_nodes=max_nodes,
+                          scale=1.0 / a)
+
+
+def _tail_start(f, a, order=50):
+    """Where the tail should start: far enough out that the node at infinity's
+    own series reaches across it.
+
+    In u = 1/x the tail [c, inf) is [0, 1/c], and the jet at u = 0 converges
+    only out to its nearest singularity -- a pole of the integrand at x = p
+    lands at u = 1/p, so a rational with poles at |x| = 36 leaves that jet a
+    radius of 1/36.  Started at x = 1, the meeting point sat outside it and the
+    two sides never agreed.  The radius is read off the same jet by its
+    coefficient growth (composite.singularity.radius -- an estimate from the
+    last coefficients, not a bound), and the tail starts at its inverse: the
+    u-interval is then the radius and the meeting point sits at half of it,
+    the same margin every panel has.  Everything from a to there is an
+    ordinary finite piece.
+    """
+    from composite.singularity import radius
+    from composite.transseries import Transseries
+    seed = _mint(Composite({-1: 1.0}))
+    with _derivative_scope(order, order), _exp_to_transseries():
+        g = f(R(1) / seed) * (R(1) / (seed * seed))
+    series = (list(g.sectors.values()) if isinstance(g, Transseries) else [g])
+    rs = []
+    for c in series:
+        k = {int(-float(d)): v for d, v in c.c.items()
+             if v != 0.0 and not isinstance(d, tuple) and float(d).is_integer()}
+        if len(k) < 3:
+            continue                        # a finite expansion reaches everywhere
+        lo = min(k)
+        r = radius([k.get(i, 0.0) for i in range(lo, max(k) + 1)])
+        if r and math.isfinite(r) and r > 0:
+            rs.append(r)
+    start = max(a, 1.0)
+    if rs:
+        start = max(start, 1.0 / min(rs))
+    # An integer, so the tail's node at infinity, x = start/h, puts exp(-x)
+    # on an integer sector.
+    return float(math.ceil(start))
+
+
+def _half_line_jets(f, a, tol):
+    """int_a^inf f by meeting composites: [a, c] + the tail from c, with c
+    where the node at infinity's series reaches (_tail_start)."""
+    c = _tail_start(f, a)
+    if c <= a:
+        return [integrate_jets_tail(f, a, tol=tol)]
+    return [integrate_jets(f, a, c, tol=tol), integrate_jets_tail(f, c, tol=tol)]
+
+
+def _improper_jets(f, a, b, tol):
+    """An improper integral by meeting composites, as a float: the standard
+    part, or +-inf when it diverges."""
+    return _improper_jets_composite(f, a, b, tol).to_ieee754()
+
+
+def _improper_jets_composite(f, a, b, tol):
+    """An improper integral by meeting composites, as ONE composite.
+
+    The pieces are read together as terms of ONE number before projecting, so
+    a divergence keeps its sign and two infinities of one sign add.  Only the
+    standard sector is read: a kept exp(-n/h) term is below every power and
+    contributes nothing to a float.  Raises NotRepresentableError or
+    NotImplementedError when the library cannot represent the tail.
+    """
+    from composite.transseries import Transseries
+    neg = lambda x: f(-x)
+    if math.isinf(a) and math.isinf(b):
+        pieces = _half_line_jets(f, 0.0, tol) + _half_line_jets(neg, 0.0, tol)
+    elif math.isinf(b):
+        pieces = _half_line_jets(f, a, tol)
+    else:
+        pieces = _half_line_jets(neg, -b, tol)
+    terms = {}
+    for p in pieces:
+        c = p.sectors.get(0, Composite({})) if isinstance(p, Transseries) else p
+        for d, v in c.c.items():
+            if v != 0.0:
+                terms[d] = terms.get(d, 0.0) + v
+    if not terms:
+        return Composite({0: 0.0})
+    vector = any(isinstance(d, tuple) for d in terms)
+    if vector:
+        from composite.backends.vector_dim_backend import canon
+        terms = {(d if isinstance(d, tuple) else canon((d, 0))): v
+                 for d, v in terms.items()}
+    return _vec_composite(terms) if vector else Composite(terms)
+
+
+# =============================================================================
 # IMPROPER INTEGRALS
 # =============================================================================
 
@@ -6013,8 +6546,11 @@ def integrate_adaptive(f, a, b, tol=1e-10, terms=15, max_depth=20, min_panels=4,
 # FIXED: Improper integrals with composite tail analysis
 # =============================================================================
 
-def improper_integral(f, a, tol=1e-8, cutoff=20):
-    """Compute integral from a to +infinity. Returns (Composite, float).
+def _improper_integral_panels(f, a, tol=1e-8, cutoff=20):
+    """The panel path to +infinity, kept as the fallback for tails the library
+    cannot represent.  Returns (Composite, float).
+
+    Formerly the public improper_integral.  Compute integral from a to +infinity. Returns (Composite, float).
 
     Uses composite tail analysis with power-law VERIFICATION:
     two probes at M and M/2 — true power laws give the same exponent,
@@ -6134,50 +6670,54 @@ def improper_integral(f, a, tol=1e-8, cutoff=20):
     return Composite({0: acc}), bulk_err
 
 
-def improper_integral_both(f, tol=1e-8):
-    """Compute integral from -inf to +inf. Splits at 0.
+def _improper_integral_panels_both(f, tol=1e-8):
+    """The panel path over the whole line, split at 0: the fallback.
     Returns (Composite, float)."""
-    left, left_err = improper_integral(lambda x: f(-x), 0, tol=tol)
-    right, right_err = improper_integral(f, 0, tol=tol)
+    left, left_err = _improper_integral_panels(lambda x: f(-x), 0, tol=tol)
+    right, right_err = _improper_integral_panels(f, 0, tol=tol)
     return left + right, left_err + right_err
 
 
+def improper_integral(f, a, tol=1e-8, cutoff=20):
+    """int_a^inf f(x) dx.  Returns (Composite, error).
+
+    Composite first, as integrate() does: the node at infinity is x = 1/h,
+    an algebraic tail an ordinary composite there and an exponential one a
+    transseries sector, and the tail starts where that node's jet reaches.
+    The result is the composite with the pieces joined as terms of one number,
+    and the error slot is nan -- nothing estimates one.
+
+    Where the library says the tail is not representable (a Gaussian, a rate
+    that is not an integer sector, an oscillation, float64 underflow) it falls
+    back to the panel path, whose error estimate is returned as before.
+    `cutoff` belongs to that path.
+    """
+    try:
+        return _improper_jets_composite(f, a, math.inf, tol), float("nan")
+    except (NotRepresentableError, NotImplementedError):
+        return _improper_integral_panels(f, a, tol=tol, cutoff=cutoff)
+
+
+def improper_integral_both(f, tol=1e-8):
+    """int over the whole line, composite first, as improper_integral.
+    Returns (Composite, error)."""
+    try:
+        return _improper_jets_composite(f, -math.inf, math.inf, tol), float("nan")
+    except (NotRepresentableError, NotImplementedError):
+        return _improper_integral_panels_both(f, tol=tol)
+
+
 def improper_integral_to(f, a, b, tol=1e-8):
-    """Compute integral from a to b where f may have singularities
-    at boundaries. Uses singularity detection at both endpoints.
+    """Integral from a to b where f may be singular at either end.  Returns
+    (Composite, error).
 
-    Splits at a fraction of the interval: analytical C*t^alpha integral
-    covers the singular sub-interval, bulk integration covers the rest.
-    No overlap.
-
-    Returns (Composite, float)."""
-    dx = b - a
-    singular_val = 0.0
-    int_a, int_b = a, b
-    split_frac = 0.1
-
-    # Check left boundary
-    handled_left, _, C_left, alpha_left = _detect_singularity(f, a, b, dx)
-    if handled_left:
-        split_dist = abs(dx) * split_frac
-        ap1 = alpha_left + 1
-        # Analytical integral over [0, split_dist] only
-        singular_val += C_left * (split_dist ** ap1) / ap1
-        int_a = a + split_dist
-
-    # Check right boundary
-    handled_right, _, C_right, alpha_right = _detect_singularity(f, b, a, dx)
-    if handled_right:
-        split_dist = abs(dx) * split_frac
-        ap1 = alpha_right + 1
-        singular_val += C_right * (split_dist ** ap1) / ap1
-        int_b = b - split_dist
-
-    if int_a >= int_b:
-        return Composite({0: singular_val}), 0.0
-
-    bulk, bulk_err = integrate_adaptive(f, int_a, int_b, tol=tol)
-    return Composite({0: bulk.st() + singular_val}), bulk_err
+    A singular end needs nothing special any more: integrate_jets reads the
+    endpoint's jet by grade, so a power law, a log or a pole there is
+    integrated exactly instead of having an exponent fitted from one nearby
+    point.  The error slot is nan: integrate_jets accepts a panel when its two
+    sides agree within tol, it does not estimate an error.
+    """
+    return integrate_jets(f, a, b, tol=tol), float("nan")
 
 # =============================================================================
 # UTILITY FUNCTIONS

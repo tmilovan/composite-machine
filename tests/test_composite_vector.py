@@ -40,7 +40,7 @@ import sys
 #
 # These shims keep the 25 call sites intact while routing them through the live
 # path, so whatever fails below is a feature integrate() never received.
-from composite.composite_lib import integrate
+from composite.composite_lib import integrate, cos, sin
 
 
 def triple_integral(f, x_range, y_range, z_range, tol=1e-8):
@@ -208,7 +208,7 @@ def test_line_integrals_scalar():
     total += 1
     result = line_integral_scalar(
         lambda x, y: 1,
-        lambda t: [math.cos(t), math.sin(t)],
+        lambda t: [cos(t), sin(t)],
         (0, 2*math.pi)
     )
     expected = 2*math.pi
@@ -219,7 +219,7 @@ def test_line_integrals_scalar():
     total += 1
     result = line_integral_scalar(
         lambda x, y, z: 1,
-        lambda t: [math.cos(t), math.sin(t), t],
+        lambda t: [cos(t), sin(t), t],
         (0, 2*math.pi)
     )
     expected = 2*math.pi * math.sqrt(2)  # √(1² + 1²) × 2π
@@ -266,7 +266,7 @@ def test_line_integrals_vector():
     result = line_integral_vector(
         [lambda x, y: -y,
          lambda x, y: x],
-        lambda t: [math.cos(t), math.sin(t)],
+        lambda t: [cos(t), sin(t)],
         (0, 2*math.pi)
     )
     expected = 2*math.pi  # Circulation = ∫ r² dθ = 2π for r=1
@@ -278,7 +278,7 @@ def test_line_integrals_vector():
     result = line_integral_vector(
         [lambda x, y: x,
          lambda x, y: y],
-        lambda t: [math.cos(t), math.sin(t)],
+        lambda t: [cos(t), sin(t)],
         (0, 2*math.pi)
     )
     expected = 0.0  # Conservative field around closed loop

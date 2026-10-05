@@ -536,7 +536,9 @@ available through this API even though the arithmetic underneath supports it.
 
 #### `definite_integral(f, a, b, terms=12)`
 
-The plain definite case, without the form dispatch above.
+The plain definite case, without the form dispatch above. Read by meeting
+composites, as `integrate(f, a, b)` is; `terms` is kept for the signature and
+no longer used.
 
 ---
 
@@ -565,22 +567,25 @@ F = antiderivative(f)  # Antiderivative
 
 #### `integrate_stepped(f, a, b, step=0.5, terms=15)`
 
-Multi-point stepped integration with error estimate.
+Integration with a node at every `step`, each step read by meeting
+composites; nodes are added inside a step only where its two ends disagree.
 
 **Parameters:**
 
 - `f`: Callable
 - `a`, `b`: float - Integration bounds
-- `step`: float - Step size
-- `terms`: int - Taylor series terms
+- `step`: float - Spacing of the starting nodes
+- `terms`: int - kept for the signature, no longer used
 
-**Returns:** Tuple[float, float] - (value, error_estimate)
+**Returns:** Tuple[Composite, float] - (value, nan). There is no error
+estimate: a step is accepted when its two sides agree within tol, so the slot
+is nan rather than a number that would look like a bound.
 
 **Example:**
 
 ```python
 val, err = integrate_stepped(lambda x: x**2, 0, 1)
-# val ≈ 0.333, err ≈ 0 (exact for polynomials)
+# val.st() == 1/3 exactly, err is nan
 ```
 
 ---
@@ -609,19 +614,29 @@ val, err = integrate_adaptive(lambda x: exp(-(x*x)), 1, 2)
 
 #### `improper_integral(f, a, tol=1e-8, cutoff=20)`
 
-Compute ∫ₐ^∞ f(x) dx.
+Compute ∫ₐ^∞ f(x) dx. Returns (Composite, error).
+
+Composite first: the node at infinity is x = 1/h, where an algebraic tail is an
+ordinary composite and an exponential one with an integer rate is a transseries
+sector; the tail starts where that node's jet reaches. The error slot is then
+nan, since nothing estimates one. Tails the library cannot represent (a
+Gaussian, a non-integer rate, an oscillation, float64 underflow) fall back to
+the panel path, which returns its error estimate as before; `cutoff` belongs
+to that path.
 
 **Example:**
 
 ```python
-val, err = improper_integral(lambda x: exp(-x), 0)  # ≈ 1.0
+val, err = improper_integral(lambda x: exp(-x), 0)          # <|1|_0>, nan
+val, err = improper_integral(lambda x: exp(-(x*x)), 0)      # Gaussian: panel path
 ```
 
 ---
 
 #### `improper_integral_both(f, tol=1e-8)`
 
-Compute ∫₋∞^∞ f(x) dx.
+Compute ∫₋∞^∞ f(x) dx, split at 0, composite first with the same fallback
+as `improper_integral`. Returns (Composite, error).
 
 **Example:**
 
@@ -633,12 +648,15 @@ val, err = improper_integral_both(lambda x: exp(-(x*x)))  # ≈ √π
 
 #### `improper_integral_to(f, a, b, tol=1e-8)`
 
-Integrate when f has a singularity at a or b.
+Integrate when f has a singularity at a or b. The endpoint's jet is read by
+grade, so a power law, a log or a pole there is integrated exactly rather than
+fitted. Returns (Composite, nan): no error is estimated.
 
 **Example:**
 
 ```python
-val, err = improper_integral_to(lambda x: 1/sqrt(x), 0, 1)  # ≈ 2.0
+val, err = improper_integral_to(lambda x: 1/sqrt(x), 0, 1)
+# val is <2_0 -2_-0.5>: 2, and the -2 sqrt(h) its lower limit h leaves
 ```
 
 ---

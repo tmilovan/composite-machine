@@ -371,6 +371,21 @@ class Transseries:
 
     __rmul__ = __mul__
 
+    def __truediv__(self, other):
+        """Division by an ordinary value, sector by sector: exp(-n/h) is a
+        common factor of its own sector and the divisor has none.
+
+        Division BY a transseries with more than sector 0 needs its inverse,
+        which is not built, and is refused.
+        """
+        if isinstance(other, Transseries):
+            if set(other.sectors) - {0}:
+                raise NotImplementedError(
+                    "division by a transseries with a non-zero sector needs its "
+                    "inverse, which is not built")
+            other = other.sectors.get(0, R(0))
+        return Transseries({n: c / other for n, c in self._r1().sectors.items()})
+
     # -- ordering: the whole point ------------------------------------------
     def _r1(self):
         """R1 for a transseries: a WHOLLY zero operand converts.
@@ -648,7 +663,11 @@ def ts_exp(x):
             f"(level one).  Anything faster than 1/h needs a further level.")
     k = list(inf.values())[0]
     if abs(k - round(k)) > 0:
-        raise ValueError(
+        # NotRepresentableError, a ValueError: callers catching ValueError are
+        # unchanged, and one that falls back on "not representable" can tell
+        # this apart from a genuine failure.
+        from .composite_lib import NotRepresentableError
+        raise NotRepresentableError(
             f"exp({k}/h) would sit at sector {-k}, and a non-integer sector "
             f"cannot be added exactly -- 3*{k} is not representable, and "
             f"inexact grade addition is refused.  Measure the exponent in "

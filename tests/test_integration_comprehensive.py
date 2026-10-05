@@ -81,6 +81,20 @@ class TestRunner:
             self.results.append((tag, False))
             print(f"  ⚠️  {tag}  ERROR: {e}")
 
+    def raises(self, tag, thunk, exc):
+        """The call must raise exc -- a refusal that is the specified behaviour."""
+        try:
+            thunk()
+            ok, what = False, "returned instead of raising"
+        except exc as e:
+            ok, what = True, "raised %s: %s" % (type(e).__name__, str(e)[:70])
+        except Exception as e:
+            ok, what = False, "raised %s instead: %s" % (type(e).__name__, e)
+        self.passed += ok
+        self.failed += (not ok)
+        self.results.append((tag, ok))
+        print(f"  {'✅' if ok else '❌'} {tag}  {what}")
+
     def summary(self):
         total = self.passed + self.failed + self.errors
         print(f"\n{'='*65}")
@@ -334,21 +348,25 @@ def test_line(t: TestRunner):
     t.check("L04 Circumference of unit circle = 2π",
             integrate(lambda x, y: 1,
                       (0, 2*pi),
-                      curve=lambda t: [math.cos(t), math.sin(t)]),
+                      curve=lambda t: [cos(t), sin(t)]),
             2*pi, tol=1e-8)
 
     t.check("L05 Helix arc length = 2π√2",
             integrate(lambda x, y, z: 1,
                       (0, 2*pi),
-                      curve=lambda t: [math.cos(t), math.sin(t), t]),
+                      curve=lambda t: [cos(t), sin(t), t]),
             2*pi*math.sqrt(2), tol=1e-8)
 
     # --- Vector line integrals: f is a list of component callables ---
 
-    t.check("L06 Constant force work = 3",
-            integrate([lambda x, y: 3, lambda x, y: 0],
-                      (0, 1), curve=lambda t: [t, 0*t]),
-            3.0, tol=1e-12)
+    # [t, 0*t]: in composite arithmetic 0*t is not 0 -- the written 0 is an
+    # infinitesimal, so the curve's y component carries one of its own and
+    # denotes a different curve at every node.  Integrands carrying their own
+    # infinitesimal are refused for now; [t, 0] is the constant component.
+    t.raises("L06 [t, 0*t] carries its own infinitesimal: refused for now",
+             lambda: integrate([lambda x, y: 3, lambda x, y: 0],
+                               (0, 1), curve=lambda t: [t, 0*t]),
+             ValueError)
 
     t.check("L07 Conservative field work = 1",
             integrate([lambda x, y: y, lambda x, y: x],
@@ -358,13 +376,13 @@ def test_line(t: TestRunner):
     t.check("L08 Rotation field circulation = 2π",
             integrate([lambda x, y: -y, lambda x, y: x],
                       (0, 2*pi),
-                      curve=lambda t: [math.cos(t), math.sin(t)]),
+                      curve=lambda t: [cos(t), sin(t)]),
             2*pi, tol=1e-8)
 
     t.check("L09 Conservative field (closed loop) = 0",
             integrate([lambda x, y: 2*x, lambda x, y: 2*y],
                       (0, 2*pi),
-                      curve=lambda t: [math.cos(t), math.sin(t)]),
+                      curve=lambda t: [cos(t), sin(t)]),
             0.0, tol=1e-6)   # closed loop cancelling to 0; measured 6.3e-7
 
     t.check("L10 3D constant field work = 6",

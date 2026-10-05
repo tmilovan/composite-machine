@@ -84,7 +84,15 @@ def _smart_exp(x, terms=15):
     """
     if isinstance(x, (int, float)):
         # Pure scalar: just use math.exp
-        return Composite({0: math.exp(float(x))})
+        return Composite({0: _clib._exp_float(float(x))})
+
+    # The same route composite_lib.exp takes inside _exp_to_transseries: an
+    # infinite argument goes to the transseries level instead of x.st(),
+    # which has no standard part to give.  Without it the scope would depend
+    # on whether this module had been imported.
+    if (isinstance(x, Composite) and _clib._EXP_TO_TS.get()
+            and _clib._has_positive_dims(x)):
+        return _clib._exp_level_one(x)
 
     if isinstance(x, Composite):
         a = x.st()  # Dimension-0 coefficient
@@ -97,12 +105,12 @@ def _smart_exp(x, terms=15):
 
         if not non_zero:
             # Pure scalar Composite (only dim 0): use math.exp directly
-            return Composite({0: math.exp(a)})
+            return Composite({0: _clib._exp_float(a)})
 
         # Split: exp(a + h) = exp(a) * exp(h)
         # exp(a) is exact via math.exp
         # exp(h) is Taylor on the SMALL infinitesimal part (converges fast)
-        base = math.exp(a)
+        base = _clib._exp_float(a)
         # _like, not the bare constructor: Composite({...}) binds whatever
         # backend is globally ACTIVE, so a vector dimension got handed to numpy
         # -- "setting an array element with a sequence".  Once the integrator
@@ -120,7 +128,7 @@ def _smart_exp(x, terms=15):
         return base * exp_h
 
     # Fallback for unexpected types
-    return Composite({0: math.exp(float(x))})
+    return Composite({0: _clib._exp_float(float(x))})
 
 
 # Monkey-patch composite_lib so ALL downstream code gets the fix.
@@ -444,43 +452,20 @@ def solve_ode(f, x_range, y0, steps=1000, composite=False):
 # FIX 7: exp monkey-patch makes this accurate for all arguments.
 
 def improper_integral(f, a, tol=1e-8, cutoff=20):
+    """int_a^inf f(x) dx as (float, error): composite_lib.improper_integral,
+    read as a float -- the standard part, or +-inf for a divergent integral.
+
+    This module kept its own copy on integrate_adaptive; it now delegates, so
+    there is one implementation, composite first with the panel fallback.
     """
-    Compute integral from a to inf of f(x) dx.
-
-    Strategy: find a suitable upper bound M where f(x) is negligible,
-    then integrate [a, M] via integrate_adaptive.
-
-    The lift-at-the-gate mechanism in integrate_adaptive handles
-    integrands that don't propagate composite structure.
-
-    Accuracy depends on FIX 7 (smart exp): without the math.exp
-    splitting, Taylor-series exp gives garbage for |x| > ~6.
-    """
-    M = cutoff
-    while M < 1000:
-        fx = f(R(M) + ZERO)
-        if abs(fx.st()) < tol * 0.01:
-            break
-        M *= 2
-
-    bulk, bulk_err = integrate_adaptive(f, a, min(M, cutoff), tol=tol)
-
-    if M > cutoff:
-        tail, tail_err = integrate_adaptive(f, cutoff, M, tol=tol)
-        bulk = bulk + tail
-        bulk_err += tail_err
-
-    return bulk.st(), bulk_err
+    val, err = _clib.improper_integral(f, a, tol=tol, cutoff=cutoff)
+    return val.to_ieee754(), err
 
 
 def improper_integral_both(f, tol=1e-8):
-    """
-    Compute integral from -inf to inf of f(x) dx.
-    Splits at 0 and computes two improper integrals.
-    """
-    left, left_err = improper_integral(lambda x: f(-x), 0, tol=tol)
-    right, right_err = improper_integral(f, 0, tol=tol)
-    return left + right, left_err + right_err
+    """int over the whole line as (float, error), delegating as above."""
+    val, err = _clib.improper_integral_both(f, tol=tol)
+    return val.to_ieee754(), err
 
 
 # =============================================================================
