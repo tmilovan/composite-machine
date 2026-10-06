@@ -346,9 +346,32 @@ compared as numbers:
 | `a × b = b × a` | **0** |
 | `(a·b)·c = a·(b·c)` | **0** |
 | `a + b = b + a` | **0** |
-| `(a+b)+c = a+(b+c)` | **0** |
+| `(a+b)+c = a+(b+c)` | **23 of 2000** (re-measured 2026-10-06, see below) |
 
-This is the first rule set in the investigation for which all of them hold.
+**Associativity of addition fails exactly where a sum cancels to zero.** The 0
+above was measured before cancellation carried the annihilated quantity
+(`a - a = a*h`, §1). Re-measured on the same construction (operands built as
+sums of one to three single terms, zeros included, N = 2000, sparse-dense
+backend): 23 failures. In 21 of them a partial sum, `a+b` or `b+c`, is exactly
+zero; every such case in the sample failed (21 of 21). In the other 2 the whole
+sum `a+b+c` is exactly zero, and the residue is read from a different left
+operand on each side (`a+b` against `a`). No failure occurred without a
+cancellation to zero. The standard part is the same either way; the difference
+is in the residue's grades:
+
+```
+(1 + -1) + 2   ->  <|2|_0 |1|_-1>      the partial sum cancelled: an event, kept
+1 + (-1 + 2)   ->  <|2|_0>             no partial sum was zero
+```
+
+It is the same cost as `a + (-a)` against `(-a) + a` in §1, met through a
+grouping instead of an order: a cancellation reads the annihilated quantity off
+its operands, and regrouping changes which operands those are. In an
+accumulator it means a partial sum that reaches exactly zero is remembered, and
+the result's tail can depend on the order the data arrived in.
+
+Multiplication keeps its identity, commutativity and associativity, and
+distributivity holds: those rows are unchanged.
 
 ---
 
@@ -394,24 +417,58 @@ Read the markers with `[d for d, v in c.c.items() if v == 0.0]`.
 - **The cancellation record**, at its own dimension, carried through
   subsequent arithmetic.
 
-**A correction to the paper's framing**
+**What the residue of a cancellation holds**
 
-The README states that the residue of `1 − 1` "contains the derivative of every
-operation that produced it." That is not what happens:
+The README states that the residue of `1 - 1` "contains the derivative of every
+operation that produced it." Measured against the code, it does, in both the
+partial and the whole case, because a composite is the jet of the function the
+expression denotes and the subtraction is one of the operations in it.
 
 ```
-(3+h)²      =  <9_0 6_-1 1_-2>      the 6 is already present
-minus 9     =  <0_0 6_-1 1_-2>      the subtraction only adds the 0_0
+(3+h)^2            =  <9_0 6_-1 1_-2>
+minus 9            =  <0_0 6_-1 1_-2>       partial: the jet of x^2 - 9 at 3
+minus (3+h)^2      =  <9_-1 6_-2 1_-3>      whole:   a - a = a*0, the jet of a*(x - 3)
 ```
 
-The derivative is in the tower **before** any subtraction. The residue records
-only that a subtraction occurred. This matters: earlier rule sets let the
-residue merge into dimension −1, where the derivative lives, and that is
-precisely what produced `d/dx x² = 7`. Under R2 the residue keeps its own
-dimension and the derivative is untouched.
+**Partial cancellation.** A tail survives, so nothing converts (R2). The
+result is the full jet of `x^2 - 9` at 3: value 0, derivative 6. Subtracting a
+constant contributes nothing to the derivative, so d(1) is classical. The `0_0`
+is a term and records that the values cancelled. Earlier rule sets let that
+term merge into dimension -1, where the derivative lives, and that is precisely
+what produced `d/dx x^2 = 7`. Under R2 it keeps its own dimension.
 
-The accurate claim is: **`×0` is information-preserving and reversible**, and
-**derivatives arise from dimensional convolution** — both untouched here.
+**Whole cancellation.** Every grade goes to zero, and the rule in section 1 is
+`a - a = a*0`. As numbers, `(a - a) == (a * R(0)) == (a * ZERO)`, and
+`(a - a) / 0 == a` recovers the operand; measured on `6`, `3+h`, `(3+h)^2` and
+`exp(3+h)`, all three equalities hold (`test_standalone`, `test_zero_coercion`
+Z4c pin the first). The residue is `a` convolved with `h`, so its coefficients
+are those of `a` shifted one grade down, and the derivatives read off it are
+the derivatives of the product `a*(x - x0)`, `d(k) = k * a^(k-1)(x0)`, not the
+derivatives of `a`:
+
+```
+a = exp(3+h)
+a.coeffs       :  [20.0855_0  20.0855_-1  10.0428_-2  3.34759_-3 ...]
+(a-a).coeffs   :  [20.0855_-1 20.0855_-2  10.0428_-3  3.34759_-4 ...]
+a.d(k)         :  [e^3, e^3, e^3, e^3, e^3]
+(a-a).d(k)     :  [0, e^3, 2 e^3, 3 e^3, 4 e^3]
+```
+
+The factor `k` is the derivative of the zero that was multiplied in. The
+library marks the result denoted from order 1 (`_denot`) and `d(k)` raises
+`NotConventionalWarning`, because the function whose jet this is, is
+`a*(x - x0)` and not `a`. That is the README sentence read literally: the
+cancellation is an operation, and its derivative is in the residue.
+
+Two modes keep the ordinary reading instead, and both are measured:
+`conventional()` leaves `6 - 6` at `<0_0>` and `x - x` at `<0_0 0_-1>`; under
+`TAG`, a cancellation between unblessed operands stays `<0_0>` (`R(2) - R(2)`)
+while the tagged lineage still converts (`x - x` gives `<3_-1 1_-2>`).
+
+The claims that hold throughout: **`*0` is information-preserving and
+reversible**, and **derivatives arise from dimensional convolution**. A whole
+cancellation is both at once: a convolution with `h`, undone by dividing by
+`h`.
 
 ---
 

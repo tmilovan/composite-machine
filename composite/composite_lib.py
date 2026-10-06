@@ -5618,93 +5618,12 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
                 % e) from None
 
     # --- SURFACE INTEGRAL ---
+    # Read by meeting composites over the (u, v) rectangle: each node is
+    # order+2 merged composites of the surface, separated from parts into its
+    # 2D jet; see integrate_surface.  A float surface (math.sin) is refused.
     if surface is not None:
         uv = args[0] if args else ((0, 1), (0, 1))
-        (a_u, b_u), (a_v, b_v) = uv
-        is_vector = isinstance(f, list)
-
-        _exact = _surface_exact(f, uv, surface, is_vector, tol=tol)
-        if _exact is not None:
-            return _exact
-
-        from composite.composite_multivar import MC
-        composite_surface = True
-        try:
-            u_mid = (a_u + b_u) / 2.0
-            v_mid = (a_v + b_v) / 2.0
-            u_test = MC.var(0, 2, val=u_mid)
-            v_test = MC.var(1, 2, val=v_mid)
-            test_result = surface(u_test, v_test)
-            if not isinstance(test_result, (list, tuple)) or len(test_result) < 3:
-                composite_surface = False
-            else:
-                for comp in test_result:
-                    if not isinstance(comp, MC):
-                        composite_surface = False
-                        break
-        except Exception:
-            composite_surface = False
-
-        if composite_surface:
-            def _surface_integrand(u_val, v_val):
-                u_mc = MC.var(0, 2, val=u_val)
-                v_mc = MC.var(1, 2, val=v_val)
-                S = surface(u_mc, v_mc)
-                dSdu = [S[i].d(1, 0) for i in range(3)]
-                dSdv = [S[i].d(1, 1) for i in range(3)]
-                nx = dSdu[1] * dSdv[2] - dSdu[2] * dSdv[1]
-                ny = dSdu[2] * dSdv[0] - dSdu[0] * dSdv[2]
-                nz = dSdu[0] * dSdv[1] - dSdu[1] * dSdv[0]
-                norm = math.sqrt(float(nx)**2 + float(ny)**2 + float(nz)**2)
-                if norm < 1e-30:
-                    return 0.0
-                pos = [float(S[i].st()) for i in range(3)]
-                if is_vector:
-                    F_vals = [_st(comp(*pos)) for comp in f]
-                    return F_vals[0]*float(nx) + F_vals[1]*float(ny) + F_vals[2]*float(nz)
-                else:
-                    return _st(f(*pos)) * norm
-
-            def _inner_v(u_val):
-                def g(v_val):
-                    return _surface_integrand(u_val, v_val)
-                result, _ = integrate_adaptive(
-                    lambda v_comp: R(g(v_comp.st())),
-                    a_v, b_v, tol=tol, terms=terms
-                )
-                return result.st()
-
-            outer, _ = integrate_adaptive(
-                lambda u_comp: R(_inner_v(u_comp.st())),
-                a_u, b_u, tol=tol, terms=terms
-            )
-            return outer.st()
-
-        else:
-            Nu, Nv = 300, 300
-            du = (b_u - a_u) / Nu
-            dv = (b_v - a_v) / Nv
-            total = 0.0
-            eps = 1e-7
-            for i in range(Nu):
-                u = a_u + (i + 0.5) * du
-                for j in range(Nv):
-                    v = a_v + (j + 0.5) * dv
-                    p0 = [float(x) for x in surface(u, v)]
-                    pu = [float(x) for x in surface(u + eps, v)]
-                    pv = [float(x) for x in surface(u, v + eps)]
-                    du_vec = [(pu[k] - p0[k]) / eps for k in range(3)]
-                    dv_vec = [(pv[k] - p0[k]) / eps for k in range(3)]
-                    nx = du_vec[1]*dv_vec[2] - du_vec[2]*dv_vec[1]
-                    ny = du_vec[2]*dv_vec[0] - du_vec[0]*dv_vec[2]
-                    nz = du_vec[0]*dv_vec[1] - du_vec[1]*dv_vec[0]
-                    if is_vector:
-                        F_vals = [_st(comp(*p0)) for comp in f]
-                        total += (F_vals[0]*nx + F_vals[1]*ny + F_vals[2]*nz) * du * dv
-                    else:
-                        dS = math.sqrt(nx**2 + ny**2 + nz**2)
-                        total += _st(f(*p0)) * dS * du * dv
-            return total
+        return integrate_surface(f, uv, surface, tol=tol)
 
     # --- 1D DEFINITE / IMPROPER ---
     if len(args) == 2 and isinstance(args[0], (int, float)):
@@ -5737,21 +5656,10 @@ def integrate(f, *args, curve=None, surface=None, tol=1e-10, terms=15):
         return integrate_jets(f, a_val, b_val, tol=tol).to_ieee754()
 
     # --- 2D BOX ---
+    # Read by meeting composites: each node is order+1 merged composites of
+    # f(x + h, y + c h), separated from parts into the 2D jet; see _meet2d.
     if len(args) == 2 and isinstance(args[0], tuple):
-        exact = _box_exact(f, list(args), tol=tol)
-        if exact is not None:
-            return exact
-        (a_x, b_x), (a_y, b_y) = args
-        N = 200
-        dx = (b_x - a_x) / N
-        dy = (b_y - a_y) / N
-        total = 0.0
-        for i in range(N):
-            x = a_x + (i + 0.5) * dx
-            for j in range(N):
-                y = a_y + (j + 0.5) * dy
-                total += _st(f(x, y)) * dx * dy
-        return total
+        return integrate_box2d(f, args[0], args[1], tol=tol)
 
     # --- 3D BOX ---
     if len(args) == 3 and isinstance(args[0], tuple):
@@ -6536,6 +6444,279 @@ def _improper_jets_composite(f, a, b, tol):
         terms = {(d if isinstance(d, tuple) else canon((d, 0))): v
                  for d, v in terms.items()}
     return _vec_composite(terms) if vector else Composite(terms)
+
+
+# =============================================================================
+# TWO VARIABLES: MERGED COMPOSITES, SEPARATED FROM PARTS
+# =============================================================================
+#
+# One composite carries one infinitesimal, so at a node it holds ONE number per
+# grade -- and grade k of a function of (u, v) has k+1 Taylor terms T_ij,
+# i + j = k.  The node therefore evaluates K+1 MERGED composites,
+#
+#     f(u + h, v + c h)          grade k  =  sum_j  T_{k-j, j} c**j
+#
+# for K+1 seed quantities c, and reads the full 2D jet off them with fixed
+# weights: the inverse Vandermonde of the c's, exact rationals, so that
+# sum_m w_m c_m**j picks out one v-order.  The weights are applied to the
+# composites' PARTS -- their coefficients -- never as composite sums: a partial
+# sum that is wholly zero is a cancellation, R1 deposits a residue one grade
+# down (a - a = a*h), and that wrote spurious terms into the jet of u*v.
+#
+# The seed quantities are Chebyshev points in [-0.95, 0.95] rounded to odd
+# multiples of 1/1024: exact in float64, never 0 (a plain coordinate at 0 would
+# be a written zero), and never a simple ratio such as -1, which made u + v
+# cancel exactly at the origin along that direction and corrupted that node.
+#
+# A rectangle is integrated by meeting its four corners' double antiderivatives
+# at the composite centre, as integrate_jets meets two nodes: each corner
+# covers its quadrant, and the four quadrants with signs make the rectangle.
+# The corners must agree on the integrand and its diagonal slope at the
+# centre; where they do not, the rectangle splits in four.  Nodes are shared.
+
+@_functools.lru_cache(maxsize=None)
+def _seed_quantities(n):
+    """n seed quantities: Chebyshev points in [-0.95, 0.95], odd multiples of 1/1024."""
+    out = []
+    for k in range(n):
+        x = 0.95 * math.cos(math.pi * (k + 0.5) / n)
+        num = round(x * 512) * 2 + (1 if x >= 0 else -1)
+        out.append(_Fraction(num, 1024))
+    if len(set(out)) != n:
+        raise ValueError("_seed_quantities: %d points collide at 1/1024 spacing" % n)
+    return tuple(out)
+
+
+@_functools.lru_cache(maxsize=None)
+def _separation_weights(n):
+    """W[J][m]: sum_m W[J][m] c_m**j = [j == J], j = 0..n-1, exact rationals."""
+    cs = _seed_quantities(n)
+    W = []
+    for J in range(n):
+        A = [[c ** j for c in cs] + [_Fraction(int(j == J))] for j in range(n)]
+        for col in range(n):
+            piv = next(r for r in range(col, n) if A[r][col] != 0)
+            A[col], A[piv] = A[piv], A[col]
+            A[col] = [x / A[col][col] for x in A[col]]
+            for r in range(n):
+                if r != col and A[r][col] != 0:
+                    A[r] = [x - A[r][col] * y for x, y in zip(A[r], A[col])]
+        W.append(tuple(float(A[m][n]) for m in range(n)))
+    return tuple(W)
+
+
+def _seed_at(x0, q):
+    """x0 + q h, without writing a zero at x0 = 0."""
+    return _mint(Composite({-1: float(q)}) if x0 == 0 else
+                 Composite({0: float(x0), -1: float(q)}))
+
+
+def _parts(x):
+    """A composite's coefficients, or a plain number's, as {grade: value}."""
+    if isinstance(x, Composite):
+        return x.coeffs_dict()
+    return {0: float(x)} if x != 0 else {}
+
+
+def _separate2d(values, order):
+    """T[i][j], i + j <= order, from the parts of composites along the seed quantities."""
+    n = len(values)
+    W = _separation_weights(n)
+    parts = [_parts(v) for v in values]
+    T = [[0.0] * (order + 1) for _ in range(order + 1)]
+    for J in range(order + 1):
+        for i in range(order + 1 - J):
+            T[i][J] = sum(w * p.get(-(i + J), 0.0) for w, p in zip(W[J], parts))
+    return T
+
+
+def _along2d(T, c, order):
+    """The composite along direction (1, c), built from a 2D jet's parts; None if empty."""
+    acc = {}
+    for k in range(order + 1):
+        v = sum(T[k - j][j] * c ** j for j in range(k + 1))
+        if v != 0.0:
+            acc[-k] = v
+    return Composite(acc) if acc else None
+
+
+def _parts_sum(terms, signs=None):
+    """A sum assembled from parts: one number, no operand can cancel to zero."""
+    acc = {}
+    for t, s in zip(terms, signs or [1.0] * len(terms)):
+        if t is None:
+            continue
+        for d, v in t.coeffs_dict().items():
+            acc[d] = acc.get(d, 0.0) + s * v
+    acc = {d: v for d, v in acc.items() if v != 0.0}
+    return Composite(acc) if acc else None
+
+
+def _series2d(T, P, Q, order, anti):
+    """sum T_ij P**i Q**j, or the double antiderivative, with composite P, Q;
+    assembled from parts, zero coefficients never written."""
+    top = order + 1 if anti else order
+    Pp, Qp = [None, P], [None, Q]
+    for _ in range(top - 1):
+        Pp.append(Pp[-1] * P)
+        Qp.append(Qp[-1] * Q)
+    acc = {}
+    for i in range(order + 1):
+        for j in range(order + 1 - i):
+            c = T[i][j]
+            if c == 0.0:
+                continue
+            if anti:
+                t = Pp[i + 1] * Qp[j + 1] * (c / ((i + 1) * (j + 1)))
+            elif i == 0 and j == 0:
+                acc[0] = acc.get(0, 0.0) + c
+                continue
+            else:
+                t = (Pp[i] if j == 0 else Qp[j] if i == 0 else Pp[i] * Qp[j]) * c
+            for d, v in t.coeffs_dict().items():
+                acc[d] = acc.get(d, 0.0) + v
+    return Composite(acc) if acc else Composite({})
+
+
+def _meet2d(jet_at, u0, u1, v0, v1, order, tol, max_nodes, max_depth=40):
+    """int over [u0,u1] x [v0,v1] from 2D jets at the nodes, by meeting corners.
+
+    jet_at(a, b) returns the integrand's 2D jet T[i][j] at (a, b); it is called
+    once per node.  Raises ValueError when max_nodes or max_depth is reached.
+    """
+    nodes = {}
+
+    def jet(a, b):
+        if (a, b) not in nodes:
+            if len(nodes) >= max_nodes:
+                raise ValueError(
+                    "2D integral: %d nodes evaluated and the region is still "
+                    "unresolved" % len(nodes))
+            nodes[(a, b)] = jet_at(a, b)
+        return nodes[(a, b)]
+
+    def panel(a0, a1, b0, b1, depth):
+        m, n = 0.5 * (a0 + a1), 0.5 * (b0 + b1)
+        value, fs = 0.0, []
+        with _derivative_scope(order + 2, order + 2):
+            for a, b, sgn in ((a0, b0, 1.0), (a1, b0, -1.0), (a0, b1, -1.0), (a1, b1, 1.0)):
+                T = jet(a, b)
+                P, Q = R(m - a) + ZERO, R(n - b) + ZERO      # real distances as standard parts
+                value += sgn * _series2d(T, P, Q, order, True).coeff(0)
+                fc = _series2d(T, P, Q, order, False)
+                fs.append((fc.coeff(0), fc.coeff(-1)))
+        f0 = [x for x, _ in fs]
+        f1 = [y for _, y in fs]
+        size = max(1.0, max(abs(x) for x in f0 + f1))
+        if (all(math.isfinite(x) for x in f0 + f1 + [value])
+                and max(f0) - min(f0) <= tol * size and max(f1) - min(f1) <= tol * size):
+            return value
+        if depth >= max_depth or not (a0 < m < a1 and b0 < n < b1):
+            raise ValueError(
+                "2D integral: [%r, %r] x [%r, %r] unresolved after %d splits"
+                % (a0, a1, b0, b1, depth))
+        return (panel(a0, m, b0, n, depth + 1) + panel(m, a1, b0, n, depth + 1)
+                + panel(a0, m, n, b1, depth + 1) + panel(m, a1, n, b1, depth + 1))
+
+    return panel(float(u0), float(u1), float(v0), float(v1), 0)
+
+
+def _surface_jet_at(f, surface, vector, order):
+    """A node provider for the surface integrand, f(sigma)|sigma_u x sigma_v| or
+    F . (sigma_u x sigma_v).
+
+    sigma is evaluated along order+2 merged directions and separated to order+1;
+    sigma_u and sigma_v come from its jet by coefficient shift and are rebuilt
+    along each direction from those parts.  The integrand is computed along each
+    direction in composite arithmetic, its differences and sums assembled from
+    parts, and separated to order.  A field component the caller wrote as the
+    number 0 contributes nothing: multiplied by a normal component it would hand
+    R1 a written zero the caller never used as an operand.
+    """
+    n = order + 2
+    cs = _seed_quantities(n)
+
+    def jet_at(a, b):
+        with _derivative_scope(order + 3, order + 3):
+            S = [surface(_seed_at(a, 1.0), _seed_at(b, c)) for c in cs]
+        if any(not isinstance(s, (list, tuple)) or len(s) < 3 for s in S):
+            raise ValueError("integrate: a surface must return three components")
+        Ts = [_separate2d([S[r][comp] for r in range(n)], order + 1) for comp in range(3)]
+        Tu = [[[(i + 1) * T[i + 1][j] for j in range(order + 1)] for i in range(order + 1)] for T in Ts]
+        Tv = [[[(j + 1) * T[i][j + 1] for j in range(order + 1)] for i in range(order + 1)] for T in Ts]
+        g = []
+        for m, c in enumerate(cs):
+            cf = float(c)
+            Su = [_along2d(T, cf, order) for T in Tu]
+            Sv = [_along2d(T, cf, order) for T in Tv]
+            mul = lambda x, y: None if x is None or y is None else x * y
+            nrm = [_parts_sum([mul(Su[1], Sv[2]), mul(Su[2], Sv[1])], [1.0, -1.0]),
+                   _parts_sum([mul(Su[2], Sv[0]), mul(Su[0], Sv[2])], [1.0, -1.0]),
+                   _parts_sum([mul(Su[0], Sv[1]), mul(Su[1], Sv[0])], [1.0, -1.0])]
+            pos = S[m]
+            with _derivative_scope(order + 3, order + 3):
+                if vector:
+                    terms = []
+                    for Fi, ni in zip(f, nrm):
+                        val = Fi(*pos)
+                        if ni is None or (isinstance(val, (int, float)) and val == 0):
+                            continue
+                        terms.append(_ensure_composite(val) * ni)
+                    gm = _parts_sum(terms)
+                else:
+                    sq = _parts_sum([mul(x, x) for x in nrm])
+                    gm = None if sq is None else _ensure_composite(f(*pos)) * sqrt(sq)
+            g.append(gm if gm is not None else Composite({}))
+        T = _separate2d(g, order + 1)
+        return [row[:order + 1] for row in T[:order + 1]]
+
+    return jet_at
+
+
+def _box_jet_at(f, order):
+    """A node provider for f(x, y): order+1 merged composites, separated from parts."""
+    cs = _seed_quantities(order + 1)
+
+    def jet_at(a, b):
+        with _derivative_scope(order + 2, order + 2):
+            vals = [f(_seed_at(a, 1.0), _seed_at(b, c)) for c in cs]
+        return _separate2d(vals, order)
+
+    return jet_at
+
+
+def integrate_box2d(f, xr, yr, tol=1e-10, order=12, max_nodes=400):
+    """int over [x0,x1] x [y0,y1] of f(x, y) by meeting composites.  Returns a float.
+
+    The integrand must be composite: a float coercion (math.*) is refused.
+    Raises ValueError when the region is not resolved within max_nodes -- an
+    integrand carrying an infinitesimal of its own, such as x*0 + 1, denotes a
+    different function at every node and the corners never agree.
+    """
+    jet_at = _box_jet_at(f, order)
+    try:
+        with _refusing_float():
+            return _meet2d(jet_at, xr[0], xr[1], yr[0], yr[1], order, tol, max_nodes)
+    except FloatCoercionError as e:
+        raise ValueError("integrate: the integrand is not composite -- %s" % e) from None
+
+
+def integrate_surface(f, uv, surface, tol=1e-10, order=12, max_nodes=400):
+    """Surface integral by meeting composites.  f is a scalar callable, or a list
+    of three component callables for a flux.  Returns a float.
+
+    The surface must be composite: math.sin(u) turns the seed into a float and
+    loses the tangent, so a float coercion is refused, not worked around.
+    Raises ValueError when the region is not resolved within max_nodes.
+    """
+    (a_u, b_u), (a_v, b_v) = uv
+    jet_at = _surface_jet_at(f, surface, isinstance(f, list), order)
+    try:
+        with _refusing_float():
+            return _meet2d(jet_at, a_u, b_u, a_v, b_v, order, tol, max_nodes)
+    except FloatCoercionError as e:
+        raise ValueError("integrate: the surface or the integrand is not composite -- %s"
+                         % e) from None
 
 
 # =============================================================================

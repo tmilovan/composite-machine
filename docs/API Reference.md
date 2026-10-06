@@ -874,6 +874,13 @@ R(-6) - R(-6)                # |-6|₋₁      the quantity, so the sign comes t
 (R(3)+ZERO) - (R(3)+ZERO)    # <|3|₋₁ |1|₋₂>
 ```
 
+The same number as a multiplication by zero: `(a - a) == a * R(0) == a * ZERO`,
+and `(a - a) / R(0) == a` recovers the operand. So the residue is the jet of
+`a*(x - x0)`, not of `a`: its coefficients are those of `a` one grade down, and
+`d(k)` reads `k * a^(k-1)(x0)`. For `a = exp(3+h)`, `a.d(k)` is `e^3` at every
+order and `(a - a).d(k)` is `0, e^3, 2e^3, 3e^3`. The result is marked denoted
+from order 1 and `d(k)` warns, because the function it is the jet of is not `a`.
+
 Equivalently, grade by grade: each dimension that cancels converts where it
 stands, carrying its own coefficient. Multiplying by `h` shifts every grade down
 by one, which is the shift R1 already prescribes, so this is R1 with the

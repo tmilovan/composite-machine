@@ -345,3 +345,88 @@ def test_tail_starts_where_the_jet_at_infinity_reaches():
     print(f"\n  tail start {start} (pole modulus 36);  integral got {got!r}")
     assert start >= 36
     assert math.isfinite(got)
+
+
+# --- two variables: merged composites, separated from parts -------------------------
+
+def test_2d_jet_separated_from_parts():
+    """K+1 merged composites f(u+h, v+c h) give every T_ij; the weights act on the
+    composites' PARTS, so a cancelling partial sum cannot deposit a residue.
+    Composite sums were measured to write spurious T_03, T_21 into u*v."""
+    from composite.composite_lib import _seed_quantities, _seed_at, _separate2d, _derivative_scope
+    K = 12
+    with _derivative_scope(K + 2, K + 2):
+        M = [_seed_at(1.0, 1.0) * _seed_at(1.0, c) for c in _seed_quantities(K + 1)]
+    T = _separate2d(M, K)
+    got = {(i, j): T[i][j] for i in range(K + 1) for j in range(K + 1 - i) if abs(T[i][j]) > 1e-13}
+    print(f"\n  u*v jet at (1,1): got {got}  known {{(0,0): 1, (1,0): 1, (0,1): 1, (1,1): 1}}")
+    assert set(got) == {(0, 0), (1, 0), (0, 1), (1, 1)}
+    assert all(abs(v - 1.0) <= 1e-13 for v in got.values())
+
+
+SURFACES = [
+    ("cylinder lateral area", lambda x, y, z: 1, lambda u, v: [cos(u), sin(u), v],
+     ((0, 2 * PI), (0, 2)), 4 * PI, 1e-13),
+    ("radial flux through the sphere", [lambda x, y, z: x, lambda x, y, z: y, lambda x, y, z: z],
+     lambda u, v: [sin(u) * cos(v), sin(u) * sin(v), cos(u)], ((0, PI), (0, 2 * PI)), 4 * PI, 1e-12),
+    ("flux through a tilted plane", [lambda x, y, z: 0, lambda x, y, z: 0, lambda x, y, z: 1],
+     lambda u, v: [u, v, u + v], ((0, 1), (0, 1)), 1.0, 1e-14),
+]
+
+
+@pytest.mark.parametrize("name,f,surface,uv,known,tol", SURFACES, ids=[c[0] for c in SURFACES])
+def test_surface(name, f, surface, uv, known, tol):
+    got = integrate(f, uv, surface=surface)
+    print(f"\n  {name}: got {got!r}  known {known!r}  err {abs(got - known):.1e}")
+    assert abs(got - known) <= tol
+
+
+def test_a_float_surface_is_refused():
+    with pytest.raises(ValueError, match="not composite"):
+        integrate(lambda x, y, z: 1, ((0, 1), (0, 1)),
+                  surface=lambda u, v: [math.cos(u), math.sin(u), v])
+
+
+def test_sphere_area_is_refused_for_now():
+    """sqrt(|n|^2) = sqrt(sin(u)^2): composite sqrt loses digits near the pole
+    (about 1e-9 at u = 0.5), so the pole panels never agree.  Refused, not
+    returned unconverged."""
+    with pytest.raises(ValueError):
+        integrate(lambda x, y, z: 1, ((0, PI), (0, 2 * PI)),
+                  surface=lambda u, v: [sin(u) * cos(v), sin(u) * sin(v), cos(u)])
+
+
+# --- 2D boxes: the same meet, the integrand's own merged composites ------------------
+
+BOXES = [
+    # name, f, x range, y range, known, tol, evaluation ceiling (measured 2026-10-06, sparse-dense, order 12)
+    ("x*y [0,1]^2", lambda x, y: x * y, (0, 1), (0, 1), 0.25, 1e-15, 52),
+    ("1 [0,2]x[0,3]", lambda x, y: 1, (0, 2), (0, 3), 6.0, 0.0, 52),
+    ("x^2 y^3 [0,1]x[0,2]", lambda x, y: x * x * y * y * y, (0, 1), (0, 2), 4 / 3, 1e-13, 52),
+    ("exp(xy) [0,1]^2", lambda x, y: exp(x * y), (0, 1), (0, 1), 1.3179021514544038, 1e-14, 325),
+    ("sin(x+y) [0,1]^2", lambda x, y: sin(x + y), (0, 1), (0, 1),
+     2 * math.sin(1) - math.sin(2), 1e-14, 117),
+    ("1/(1+x+y) [0,1]^2", lambda x, y: R(1) / (R(1) + x + y), (0, 1), (0, 1),
+     3 * math.log(3) - 4 * math.log(2), 1e-14, 884),
+]
+
+
+@pytest.mark.parametrize("name,f,xr,yr,known,tol,ceiling", BOXES, ids=[c[0] for c in BOXES])
+def test_box2d(name, f, xr, yr, known, tol, ceiling):
+    n = [0]
+
+    def g(x, y):
+        n[0] += 1
+        return f(x, y)
+    got = integrate(g, xr, yr)
+    print(f"\n  {name:22s} got {got!r:22} known {known!r:22} err {abs(got - known):.1e}"
+          f"  evaluations {n[0]} (ceiling {ceiling})")
+    assert abs(got - known) <= tol
+    assert n[0] <= ceiling
+
+
+def test_box2d_refusals():
+    with pytest.raises(ValueError, match="not composite"):
+        integrate(lambda x, y: math.exp(x * y), (0, 1), (0, 1))
+    with pytest.raises(ValueError):                       # x*0 + 1 carries its own infinitesimal
+        integrate(lambda x, y: x * 0 + 1, (0, 1), (0, 1))
