@@ -2,15 +2,15 @@
 
 ## Announcements
 
-### New release (September 2026)
+### New changes (September and October 2026)
 
-After months of experimenting, learning (finding about Levi Civita fields etc.), building and testing different implementations, here is the new release that contains the accumulated findings. This release contains results of trying out different approaches and results of numeruos experiments. The more experimental stuff still relies to external support, oracles etc. (as it should), the more tested features are tending to become more and more self reliant with additional iterations (eg, derivations and integrals.).
+After months of experimenting, learning (finding about Levi Civita fields etc.), building and testing different implementations, here is the new release that contains the accumulated findings. This release contains results of trying out different approaches and results of numerous experiments. The more experimental stuff still relies to external support, oracles etc. (as it should), the more tested features are tending to become more and more self reliant with additional iterations (eg, derivations and integrals.).
 
 What it tries to achieve:
 
 - thinning the reliance on external libraries, trying to express as much as we can through composite tooling
 - performance enhancements
-- isolation end elimination of trucation errors
+- isolation and elimination of truncation errors
 - add more depth, reach and precision to the toolkit by adding the transseries support for initial experimentation (can of worms)
 
 What it adds:
@@ -25,7 +25,7 @@ Note of caution: this is still highly experimental and most likely (for sure) st
 
 ### Library release (April 2026)
 
-The first proper pypy library based on this experimental features has been released. A standalone tool to evaluate Python functions at points where they're undefined and get exact limit values if they exists.
+The first proper PyPI library based on this experimental features has been released. A standalone tool to evaluate Python functions at points where they're undefined and get exact limit values if they exists.
 
 - **[https://github.com/FWDhr/composite-resolve](https://github.com/FWDhr/composite-resolve)**
 
@@ -67,13 +67,36 @@ keeps their ratios. Euler tracked the ratio by reasoning about it next to the ca
 Here it is kept in the number, so it is still there for the next operation. In §88 he also
 orders zeros by how fast they vanish, d*x*² before d*x*, which is the dimension ladder.
 
-Euler states infinitesimal iz zero, so it follows that zero is infinitesimal.
+Euler states infinitesimal is zero, so it follows that zero is infinitesimal.
 
-Alpha stage. Research code. The math works, ~~performance doesn't (yet)~~. AGPL-licensed. A PyTorch/CUDA backend is available under commercial license."
+The whole system is that identification, made uniformly: `0` is `|1|₋₁`, the
+infinitesimal `h`, and every operation is ordinary arithmetic on series in `h`
+with that one substitution. Measured on the code:
+
+```
+a - a           ==  a * 0                a cancellation is a multiplication by h
+(a - a) / 0     ==  a                    and it is reversible
+x = R(3) + ZERO
+x**2 - R(9)      ->  <|0|₀ |6|₋₁ |1|₋₂>                       the jet of x^2 - 9 at 3
+exp(x) - exp(x)  ->  <|20.0855|₋₁ |20.0855|₋₂ |10.0428|₋₃ ...>  the jet of e^x * (x - 3)
+```
+
+A composite is the jet of the function the expression denotes, and a written
+constant is a germ too: a written `0` denotes `x - a`. That is what lets the
+residue of `1 - 1` carry the derivative of the operation that produced it, and
+it is also the one habit to unlearn. `x*x + 0` is the jet of `x^2 + (x - a)`,
+derivative 5 at 2, and the library says so with `NotConventionalWarning`. Spell
+an absence as `Composite({})`, or use `conventional()` or `TAG()` for the
+classical reading. The price, stated plainly: there is no additive identity,
+and `a + (-a)` does not commute on a cancelling pair. Zero Rules v2 has the
+rules and the measured laws.
+
+Alpha stage. Research code. The math works, ~~performance doesn't (yet)~~. AGPL-licensed. A PyTorch/CUDA backend is available under commercial license.
 
 ---
 
 ## What's this
+
 
 Numbers are sparse dicts mapping dimensions to coefficients. A dimension is an integer, or a vector over an iterated-logarithm basis when log-scale terms are in play. Dimension 0 is the value. Negative dimensions store derivative info. Multiply dimensions - turns out that's the same thing as the product rule and chain rule, just expressed as data structure operations.
 
@@ -96,17 +119,23 @@ One evaluation. All derivatives fall out. No separate differentiation pass.
 
 ## Background
 
-The derivative computation part builds on well-known work: Clifford's **dual numbers** (1873), Wengert's **forward-mode AD** (1964), Rall's **Taylor arithmetic** (1981), Griewank's framework (2000).
+The system builds on the ideas and work of Euler, Levi-Civita, Laurent, Robinson and many others. Without their work on formalizing those ideas and standardizing the methods and proofs for working with them, implementation of this system's main proposition would not be possible.
 
-The number system has a separate and older lineage. A sparse map from exponents to coefficients, with non-integer exponents and finitely many terms below any given one, is the shape of the **Levi-Civita field** (Levi-Civita, 1892-1898) - the smallest non-Archimedean ordered field extension of the reals that is real-closed and Cauchy-complete. Letting an exponent be a *vector* ordered lexicographically instead of a single number gives **Hahn series** (Hahn, 1907), which is what the iterated-logarithm basis here amounts to: dimensions valued in an ordered group, compared componentwise. The scale those vectors index - *x*, log *x*, log log *x*, ranked by eventual dominance - is du Bois-Reymond's *Infinitärcalcül* as set out in Hardy's **Orders of Infinity** (1910), and the **Hardy fields** built on it. Expansions that mix powers, exponentials and iterated logs are **transseries** (Écalle, 1992; van der Hoeven, 2006). The infinitesimals themselves are made rigorous by Robinson's **non-standard analysis** (1966), and the surreals (Conway, 1976) contain the Levi-Civita field as a subfield.
+The derivative computation part builds on well-known work: Clifford's **dual numbers** (1873), Wengert's **forward-mode AD** (1964), Rall's **Taylor arithmetic** (1981), **Griewank's framework** (2000). The multivariable derivatives use univariate Taylor propagation with interpolation (Griewank, Utke and Walther, 2000).
 
-Computing in such a field, rather than reasoning about it, also has prior art. Berz framed **automatic differentiation as non-Archimedean analysis** (1992), and Shamseddine and Berz developed numerical analysis directly on the Levi-Civita field, including derivatives of functions where classical AD breaks down. Sergeyev's **grossone** (2003 onward) is the closest in representation: a positional numeral system in powers of an infinite unit ①, with the infinitesimal ①⁻¹, used on an "Infinity Computer" for exact higher-order differentiation, ODE solvers and lexicographic optimization - the same records as the dimensions here, written in a different notation. Grossone keeps the ordinary zero (0·① = 0, ① − ① = 0); this library does not, and that is where the two part ways. The overlap is worth stating plainly: the algebra here is not new, and where this library's structures coincide with those, the credit is theirs.
+The number system has a separate and older lineage. A sparse map from exponents to coefficients, with non-integer exponents and finitely many terms below any given one, is the shape of the **Levi-Civita field** (Levi-Civita, 1892-1898), the smallest non-Archimedean ordered field extension of the reals that is real-closed and Cauchy-complete. Letting an exponent be a vector ordered lexicographically instead of a single number gives **Hahn series** (Hahn, 1907), which is what the iterated-logarithm basis here amounts to: dimensions valued in an ordered group, compared lexicographically. The scale those vectors index, x, log x, log log x, ranked by eventual dominance, is **du Bois-Reymond's Infinitarcalcul** as set out in **Hardy's Orders of Infinity** (1910), and the **Hardy fields** built on it. Expansions that mix powers, exponentials and iterated logs are **transseries** (Ecalle, 1992; van der Hoeven, 2006). The infinitesimals themselves are made rigorous by Robinson's **non-standard analysis** (1966), and the **surreals** (Conway, 1976) contain the Levi-Civita field as a subfield.
 
-What this library explores is a different algebraic context for that mechanism. Higher-order terms are preserved instead of truncated. Subtraction retains provenance instead of collapsing to zero. Multiplication by zero shifts structure instead of destroying it. The idea is that if you stop throwing away information at each step, calculus operations become extractable from the algebra.
+Computing in such a field, rather than reasoning about it, also has prior art. Berz framed automatic differentiation as non-Archimedean analysis (1992), and Shamseddine and Berz developed numerical analysis directly on the Levi-Civita field, including derivatives of functions where classical AD breaks down. **Sergeyev's grossone** (2003 onward) is the closest in representation: a positional numeral system in powers of an infinite unit, with its reciprocal as the infinitesimal, used on an "Infinity Computer" for exact higher-order differentiation, ODE solvers and lexicographic optimization. Those are the same records as the dimensions here, written in a different notation. Grossone keeps the ordinary zero (0 times grossone is 0, grossone minus grossone is 0); this library does not, and that is where the two part ways. The overlap is worth stating plainly: the algebra here is not new, and where this library's structures coincide with those, the credit is theirs.
 
-Does this generalize to everything? Open question. The test suite covers a wide range of standard problems and the results match. Finding the boundaries is the point of this project.
+Total division has its own prior art, adjacent rather than overlapping. **Wheel theory** (Carlstrom, 2004) extends a commutative ring with one extra element, bottom, so that x/0 is always defined. **Meadows** (Bergstra and Tucker, 2007) take the convention 1/0 = 0 and keep the field equations. The projective reals add one point at infinity. IEEE 754 has signed inf and nan. All of these make division total by adding a point or by adopting a convention for 1/0. None grades the infinity or keeps what was divided: 1/0 and 2/0 are the same element in each of them, and in inf - inf the operands are gone. Here 1/0 is |1|_1 and 2/0 is |2|_1, |2|_1 - |1|_1 is |1|_1, and |2|_1 * |1|_-1 is 2 again. That is the difference, and a reader who knows those systems should expect it to be named.
 
-For the theoretical framing, see the paper.
+The word provenance comes from **Provenance semirings** (Green, Karvounarakis and Tannen, 2007) which annotate every query result in a database with a polynomial recording which source tuples produced it and how; the annotation is a separate algebraic object carried beside the value. Here the record is numerical and lives in the same number as the value: the residue of a - a is a itself one grade down, so the provenance of a cancellation is read with the same arithmetic that produced it, and dividing by 0 recovers the operand. The aim is the same, knowing where a result came from; the mechanism is the number rather than an annotation on it.
+
+**What this library explores is a different algebraic context for that mechanism. Higher-order terms are kept, and where they are cut off the cut is explicit and tracked. Subtraction retains provenance instead of collapsing to zero. Multiplication by zero shifts structure instead of destroying it. The idea is that if you stop throwing away information at each step, calculus operations become extractable from the algebra.**
+
+Does this generalize to everything? Open question. The test suite covers a wide range of standard problems and the results match, apart from the failures listed under Testing. Finding the boundaries is the point of this project.
+
+For the theoretical framing, see the paper but keep in mind paper was a starting blueprint and currently lagging behind the implementation.
 
 ---
 
@@ -191,10 +220,17 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 ## Modules
 
 - **[composite_lib.py](composite/composite_lib.py)** - Core engine. Composite class, all arithmetic, transcendentals, derivatives, limits, integration.
-- **[composite_multivar.py](composite/composite_multivar.py)** - Multivariable calculus. MC class, partial derivatives, gradient, Hessian, Jacobian, Laplacian, divergence, curl.
+- **[composite_multivar.py](composite/composite_multivar.py)** - Multivariable calculus by directional composites: ordinary composites evaluated along several directions. Partial derivatives, gradient, Hessian, Jacobian, Laplacian, divergence, curl, limits. (The former MC class is parked in `composite_multivar_mc.py`.)
 - **[composite_extended.py](composite/composite_extended.py)** - Complex analysis. Complex composites, residues, poles, contour integrals, asymptotics, ODE solver.
 - **[composite_vector.py](composite/composite_vector.py)** - Vector calculus. Triple integrals, line integrals, surface integrals.
-- **[backends/](composite/backends/)** - Interchangeable storage for the dimension map: dict, sparse-dense, vector-dimension, dense-series.
+- **[backends/](composite/backends/)** - Interchangeable storage for the dimension map: dict, sparse-dense, vector-dimension, dense-series, and fractional (exact rational lattice; dict, NumPy and PyTorch flavours).
+- **[forensics.py](composite/forensics.py)** - Cancellation forensics. Condition number and forward error bound from one seeded evaluation: is the formula bad, or is the problem hard?
+- **[uncertainty.py](composite/uncertainty.py)** - GUM uncertainty budgets with the bias and higher-order variance terms, and the GUM-S1 admissibility check, from composite derivatives.
+- **[singularity.py](composite/singularity.py)** - Location and exponent of a series' nearest singularity: blow-up time of an ODE, critical point of a lattice model, coefficient growth.
+- **[resummation.py](composite/resummation.py)** - Borel-Pade resummation of divergent series, with the Pade approximant computed as composite Euclidean division.
+- **[transseries.py](composite/transseries.py)** - The `exp(-1/h)` scale below every power, carried as a sector index outside the dimension.
+- **[explain.py](composite/explain.py)** - `explain(f, at)`: what a function does at a point (pole, corner, log growth, value and slope), from one evaluation.
+- **[display.py](composite/display.py)** - Notebook display: the grades as a table, with completeness and denotation shown.
 
 ---
 
@@ -217,7 +253,7 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 
 **Experimental:**
 
-- Multivariable calculus (MC class, partial derivatives, differential operators)
+- Multivariable calculus (directional composites: partial derivatives, differential operators)
 - Vector calculus (line integrals, surface integrals, triple integrals)
 - Complex analysis (residues, contour integrals, analytic continuation, convergence radius)
 - ODE solver via RK4 with composite evaluation
@@ -249,7 +285,7 @@ order and has run out of digits by order 10.
 A *single* first derivative goes the other way: NumPy does it in **0.2 µs** against **35 µs** here,
 roughly 140x. The crossover is around the third derivative.
 
-**Batches.** NumPy vectorises and this does not - four orders of magnitude per point. Pythorch and CUDA backends not present here support batching.
+**Batches.** NumPy vectorises and this does not - four orders of magnitude per point. PyTorch and CUDA backends not present here support batching.
 
 **Sparse grids.** An explicit PDE whose active front stays at 121 cells: **24x faster** than a
 dense NumPy grid at 200,000 cells, **260x** at 2,000,000. Composite time is flat; the dense grid
@@ -276,7 +312,24 @@ cd composite-machine
 pip install -e .
 ```
 
-Python 3.7+. NumPy is optional (used for FFT-accelerated multiplication).
+Python 3.8+ (the fractional backends need 3.9+, for `math.lcm`). NumPy is required.
+
+---
+
+## Notebooks
+
+Executed Jupyter notebooks, each starting from the beginning and printing what it
+computed against what it should be.
+
+| notebook | what it covers |
+|---|---|
+| [`0 Arithmetic`](notebooks/0%20Arithmetic.ipynb) | Ordinary `+ - * /` on composites: the same floats back, plus what arithmetic throws away at zero, what that costs, and how to switch it off. |
+| [`1 Basic concepts`](notebooks/1%20Basic%20concepts.ipynb) | A number that carries its own metadata: grades, the zero that does not annihilate, and division by zero. |
+| [`2 Simple usage`](notebooks/2%20Simple%20usage.ipynb) | Five one-call tasks: `explain`, every derivative from one evaluation, `0/0` without L'Hopital, `audit`, and `TAG` / `to_ieee754`. |
+| [`3 Advanced concepts`](notebooks/3%20Advanced%20concepts.ipynb) | Residues, root multiplicity, limits at infinity, branch points, the log axis, divergent series, uncertainty budgets, and what this does not do. |
+| [`4 Derivatives conventional and composite`](notebooks/4%20Derivatives%20conventional%20and%20composite.ipynb) | The derivative of the function you meant against the function the expression denotes, and how to ask for either. |
+| [`5 Integration`](notebooks/5%20Integration.ipynb) | Integration as the opposite grade shift: definite integrals from two composites, singular endpoints, and infinite ranges. |
+| [`6 Worked example - bond risk`](notebooks/6%20Worked%20example%20-%20bond%20risk.ipynb) | One ordinary task, duration and convexity of a bond pricer, and what changes when the formula's derivatives come from the number. |
 
 ---
 
@@ -296,6 +349,7 @@ python demos/composite_forensics.py        # start here
 | [`composite_roots.py`](demos/composite_roots.py) | Global root finding: intervals *proved* empty by a Taylor bound rather than sampled and hoped for, then Householder polishing that costs nothing because the derivatives are already there. |
 | [`composite_singularity.py`](demos/composite_singularity.py) | A power series locating its own nearest singularity and exponent, which is the blow-up time of an ODE and the critical point of a lattice model. |
 | [`composite_stability_radius.py`](demos/composite_stability_radius.py) | How much can one road get slower before the best route changes? One solve instead of one re-solve per edge. |
+| [`composite_fractional_dynamics.py`](demos/composite_fractional_dynamics.py) | How fractional (lattice) dimensions behave while operations run: what the canonical lattice does along a chain, term growth, and what a fractional backend costs when no fractional order is present. |
 | [`calculus_tutor.py`](demos/calculus_tutor.py) | An interactive console tutor: what the dimensions are doing while calculus happens. |
 
 The forensics demo prints a few warnings before its first table. They are part of
@@ -323,24 +377,60 @@ PYTHONPATH=. python tests/test_integration_comprehensive.py # every integral for
 import path rather than the repo root, so `composite` resolves to whatever is
 installed instead of the working copy.
 
-**839 tests across thirteen suites, all passing.**
+Measured 2026-10-07 on `composite-env-arm`: **739 pytest tests, plus 23
+script suites totalling 1627 checks**, the script suites run under pytest by
+`test_suites.py`. Three checks fail:
+`test_resummation` R4.11 asserts that a finite Laplace cutoff is inexact and it
+no longer is, and two `test_singularity` S3 exponents miss their tolerance by
+4e-14 and 1.2e-12.
 
-| suite | tests | covers |
+Script suites (each prints its own tally):
+
+| suite | checks | covers |
 |---|---|---|
-| `test_standalone.py` | 167 | paper theorems T1-T8, algebra, derivatives, limits, zero division |
+| `test_resummation.py` | 177 | Borel-Pade resummation of divergent series: Euler-Stieltjes, Painleve I |
+| `test_standalone.py` | 172 | paper theorems T1-T8, algebra, derivatives, limits, zero division |
+| `test_zero_coercion.py` | 168 | a written zero is an expressed zero: R1-R6, the algebraic laws, cancelling pairs |
 | `test_vector_dimensions.py` | 150 | vector dimensions, depth genericity, log-axis transcendentals |
 | `test_dimension_scales.py` | 131 | dimensions that are not integers, and not scalars |
+| `test_forensics.py` | 124 | kappa against predicted error: is the formula bad or the problem hard |
 | `test_limits.py` | 105 | indeterminate forms, oscillatory, at infinity, directional, domain errors |
-| `test_multivar_disprove.py` | 68 | multivariable vs single-variable, Black-Scholes Greeks |
+| `test_transseries.py` | 95 | the `exp(-1/h)` sector below every power: ordering first, then arithmetic |
+| `test_singularity.py` | 91 | location and exponent of a series' nearest singularity, against known answers |
+| `test_uncertainty.py` | 64 | GUM budgets with bias and higher-order terms, against closed forms |
 | `test_integration_comprehensive.py` | 54 | definite, improper, triple, line, surface |
+| `test_backend_agreement.py` | 52 | dict, sparse-dense and vector backends must not disagree about a number |
 | `test_multivar_extended.py` | 50 | gradients, Hessians, Jacobians, complex analysis, ODEs |
+| `test_singularity_handling.py` | 36 | what every operation must do when its argument is not finite |
+| `test_derivatives.py` | 35 | one evaluation, every derivative, tested where it can fail |
+| `test_series_completeness.py` | 32 | every transcendental returns only the orders it completes |
 | `test_composite_vector.py` | 25 | vector calculus |
-| `test_series_completeness.py` | 22 | every transcendental returns only the orders it completes |
 | `test_identities.py` | 20 | identities computed through independent paths |
 | `test_stress.py` | 20 | hard limits, derivatives, integrals |
 | `test_stress_hard_edge.py` | 20 | 3rd/4th order, deep composition chains |
+| `turing_completeness/` | 3 files | Turing-completeness experiments (6 checks plus two staged scripts) |
+
+Pytest modules:
+
+| module | tests | covers |
+|---|---|---|
+| `test_fractional_backend.py` | 122 | fractional dimensions on an exact rational lattice |
+| `test_integrate_jets.py` | 84 | the integral by meeting composites, one per node |
+| `test_degeneracy.py` | 70 | flagging a Taylor reading that a second infinitesimal source has entered |
+| `test_multivar_disprove.py` | 71 | multivariable vs single-variable, Black-Scholes Greeks |
+| `test_multivar_jets.py` | 85 | directional composites against 50-digit mpmath |
+| `test_multivar_backends.py` | 65 | the multivariable functions on every storage backend |
+| `test_conventional_zero.py` | 51 | `conventional()`: an expressed zero as the ordinary zero, in scope |
+| `test_single_infinitesimal.py` | 37 | `TAG()` and `single_infinitesimal()`: one blessed infinitesimal, conventional rest |
+| `test_derivative_grade_shift.py` | 30 | differentiation as a grade shift |
+| `test_offorigin_and_ordering.py` | 28 | residue and pole order off the origin, mixed-grade ordering on the dict backend |
+| `test_integrate_quotient.py` | 25 | integrands that divide by a composite |
+| `test_display.py` | 24 | the grade table, and the three states a reader must not miss |
+| `test_truncation.py` | 13 | the dimension cap is a default; an explicit request overrides it |
+| `test_explain.py` | 12 | `explain()` and `lead_order()`: what a function does at a point |
+| `test_ieee754_projection.py` | 9 | `to_ieee754`: the one exit to a system with an additive identity |
 | `test_composite_metadata.py` | 7 | one number carrying data and metadata |
-| `turing_completeness/` | 3 files | Turing-completeness experiments |
+| `test_written_zero_disclosure.py` | 6 | a written zero discloses itself however it is spelled |
 
 ---
 
