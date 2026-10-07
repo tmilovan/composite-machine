@@ -10,7 +10,7 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/tmilovan/composite-machine",
     packages=find_packages(),
-    python_requires=">=3.7",
+    python_requires=">=3.8",
     install_requires=[
         "numpy",
     ],

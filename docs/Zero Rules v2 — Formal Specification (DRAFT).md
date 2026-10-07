@@ -571,9 +571,13 @@ a smaller one.
 chains accumulate them. Measured cost is ~1.2x with no growth in
 active-dimension count. Revisit if a workload shows otherwise.
 
-**7.5 — scope.** *Left for now.* The rules apply to `Composite`. `MC` and the
+**7.5 — scope.** *Left for now.* The rules apply to `Composite`. The
 complex composites in `composite_extended.py` have their own arithmetic. `MC`
-did receive the division fix below, but not R1--R6.
+had its own too (it received the division fix below, but not R1--R6); since
+2026-10-06 it is parked in `composite_multivar_mc.py` and `composite_multivar`
+evaluates ordinary composites, so the rules now apply to multivariable work as
+well. There an R1 residue is refused (`ResidueError`), because which variable
+it denotes is not defined.
 
 ---
 

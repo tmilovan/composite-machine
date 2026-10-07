@@ -382,11 +382,19 @@ def _taylor_segment(f, at, moving, order):
     # actual value and the biggest single term of the prediction.
     e = [float(c) for c in _check_direction(m)]
     for k in range(order + 1):
-        terms = [t * math.prod(q ** ai for q, ai in zip(e, a)) for a, t in T.items() if sum(a) == k]
+        terms = [t * _product(q ** ai for q, ai in zip(e, a)) for a, t in T.items() if sum(a) == k]
         actual = check.get(-k, 0.0)
         scale = max([abs(actual)] + [abs(x) for x in terms])
         _refuse_non_smooth(_disagreement(actual, sum(terms), scale), k, at)
     return T, len(dirs) + 1
+
+
+def _product(values):
+    """The product of an iterable of floats (math.prod needs Python 3.8)."""
+    out = 1.0
+    for v in values:
+        out *= v
+    return out
 
 
 def _fact(a):

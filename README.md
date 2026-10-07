@@ -4,16 +4,16 @@
 
 ### New changes (September and October 2026)
 
-After months of experimenting, learning (finding about Levi Civita fields etc.), building and testing different implementations, here is the new release that contains the accumulated findings. This release contains results of trying out different approaches and results of numerous experiments. The more experimental stuff still relies to external support, oracles etc. (as it should), the more tested features are tending to become more and more self reliant with additional iterations (eg, derivations and integrals.).
+After months of experimenting, learning, building and testing different implementations, here is the new release that contains the accumulated findings. This release contains results of trying out different approaches and results of numerous experiments. The more experimental stuff still relies to external support, oracles etc. (as it should), the more tested features are tending to become more and more self reliant with additional iterations (eg, derivations and integrals.).
 
-What it tries to achieve:
+**What it tries to achieve:**
 
 - thinning the reliance on external libraries, trying to express as much as we can through composite tooling
 - performance enhancements
 - isolation and elimination of truncation errors
 - add more depth, reach and precision to the toolkit by adding the transseries support for initial experimentation (can of worms)
 
-What it adds:
+**What it adds:**
 
 - refinements to zero handling edge cases
 - adds float dimensions, so we can finally take a square roots on composites with exact precision and remain composite
@@ -32,13 +32,21 @@ The first proper PyPI library based on this experimental features has been relea
 
 # Composite Machine
 
-**Automatic calculus via dimensional arithmetic... and a bit more.**
+**A computational system that does not lose data on operations with zeros, giving automatic calculus via dimensional arithmetic... and a bit more.**
 
-A data structure that implements a number system, letting different parts of non-standard (and standard) math work together.
+## Why all this? ##
+
+Out of a desire to create a computational system that doesn't lose data on operations with 0, where a * 0 will be invertible and where a / 0 will not crash, but that will still give accurate results. All of this builds on Euler's notion that infinitesimals are actually zeros with different ratios.
+
+In essence this system converts zeros to infinitesimals and tries to do arithmetic with them.
+
+## What does it give? ##
+ 
+The implementation leads to a data structure that implements a number system, letting different parts of non-standard (and standard) math work together.
 
 For example, it gives you derivatives, integrals, and limits as a side effect of normal computation. No symbolic engine, no computation graph, no tape. Tag a number, do your math, read the results off the dimensional coefficients.
 
-> *1 − 1 ≠ 0*
+> Here *1 − 1 ≠ 0 - it is zero with residue* 
 >
 
 > *The residue is infinitesimal, structured, and it contains the derivative of every operation that produced it.*
@@ -67,7 +75,7 @@ keeps their ratios. Euler tracked the ratio by reasoning about it next to the ca
 Here it is kept in the number, so it is still there for the next operation. In §88 he also
 orders zeros by how fast they vanish, d*x*² before d*x*, which is the dimension ladder.
 
-Euler states infinitesimal is zero, so it follows that zero is infinitesimal.
+Euler states infinitesimal is zero, so this system follows that with proposition that zero is infinitesimal too.
 
 The whole system is that identification, made uniformly: `0` is `|1|₋₁`, the
 infinitesimal `h`, and every operation is ordinary arithmetic on series in `h`
@@ -95,7 +103,7 @@ Alpha stage. Research code. The math works, ~~performance doesn't (yet)~~. AGPL-
 
 ---
 
-## What's this
+## In short?
 
 
 Numbers are sparse dicts mapping dimensions to coefficients. A dimension is an integer, or a vector over an iterated-logarithm basis when log-scale terms are in play. Dimension 0 is the value. Negative dimensions store derivative info. Multiply dimensions - turns out that's the same thing as the product rule and chain rule, just expressed as data structure operations.
@@ -321,15 +329,15 @@ Python 3.8+ (the fractional backends need 3.9+, for `math.lcm`). NumPy is requir
 Executed Jupyter notebooks, each starting from the beginning and printing what it
 computed against what it should be.
 
-| notebook | what it covers |
-|---|---|
-| [`0 Arithmetic`](notebooks/0%20Arithmetic.ipynb) | Ordinary `+ - * /` on composites: the same floats back, plus what arithmetic throws away at zero, what that costs, and how to switch it off. |
-| [`1 Basic concepts`](notebooks/1%20Basic%20concepts.ipynb) | A number that carries its own metadata: grades, the zero that does not annihilate, and division by zero. |
-| [`2 Simple usage`](notebooks/2%20Simple%20usage.ipynb) | Five one-call tasks: `explain`, every derivative from one evaluation, `0/0` without L'Hopital, `audit`, and `TAG` / `to_ieee754`. |
-| [`3 Advanced concepts`](notebooks/3%20Advanced%20concepts.ipynb) | Residues, root multiplicity, limits at infinity, branch points, the log axis, divergent series, uncertainty budgets, and what this does not do. |
-| [`4 Derivatives conventional and composite`](notebooks/4%20Derivatives%20conventional%20and%20composite.ipynb) | The derivative of the function you meant against the function the expression denotes, and how to ask for either. |
-| [`5 Integration`](notebooks/5%20Integration.ipynb) | Integration as the opposite grade shift: definite integrals from two composites, singular endpoints, and infinite ranges. |
-| [`6 Worked example - bond risk`](notebooks/6%20Worked%20example%20-%20bond%20risk.ipynb) | One ordinary task, duration and convexity of a bond pricer, and what changes when the formula's derivatives come from the number. |
+| notebook                                                                                                       | what it covers                                                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`0 Arithmetic`](notebooks/0%20Arithmetic.ipynb)                                                               | Ordinary `+ - * /` on composites: the same floats back, plus what arithmetic throws away at zero, what that costs, and how to switch it off.    |
+| [`1 Basic concepts`](notebooks/1%20Basic%20concepts.ipynb)                                                     | A number that carries its own metadata: grades, the zero that does not annihilate, and division by zero.                                        |
+| [`2 Simple usage`](notebooks/2%20Simple%20usage.ipynb)                                                         | Five one-call tasks: `explain`, every derivative from one evaluation, `0/0` without L'Hopital, `audit`, and `TAG` / `to_ieee754`.               |
+| [`3 Advanced concepts`](notebooks/3%20Advanced%20concepts.ipynb)                                               | Residues, root multiplicity, limits at infinity, branch points, the log axis, divergent series, uncertainty budgets, and what this does not do. |
+| [`4 Derivatives conventional and composite`](notebooks/4%20Derivatives%20conventional%20and%20composite.ipynb) | The derivative of the function you meant against the function the expression denotes, and how to ask for either.                                |
+| [`5 Integration`](notebooks/5%20Integration.ipynb)                                                             | Integration as the opposite grade shift: definite integrals from two composites, singular endpoints, and infinite ranges.                       |
+
 
 ---
 
