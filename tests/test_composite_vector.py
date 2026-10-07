@@ -27,40 +27,17 @@ Author: Toni Milovan
 
 import math
 import sys
-# Repointed onto composite_lib.integrate().
-#
-# composite/composite_vector.py is stale: surface_integral_scalar is a fixed
-# 30x30 midpoint rule that calls _to_float() on every sample and returns a bare
-# float -- no composite arithmetic anywhere -- and it accepts a `tol` argument
-# it never reads.  That is why the same integrals came out 100x less accurate
-# here than in test_integration_comprehensive: unit sphere area at 5.4e-03
-# against 5.7e-05.  Both suites passed because neither ever compared against
-# the other; each checked its own path against a constant with a tolerance
-# sized to fit.
-#
-# These shims keep the 25 call sites intact while routing them through the live
-# path, so whatever fails below is a feature integrate() never received.
-from composite.composite_lib import integrate, cos, sin
-
-
-def triple_integral(f, x_range, y_range, z_range, tol=1e-8):
-    return integrate(f, x_range, y_range, z_range)
-
-
-def line_integral_scalar(f, curve, t_range, tol=1e-8):
-    return integrate(f, t_range, curve=curve)
-
-
-def line_integral_vector(F, curve, t_range, tol=1e-8):
-    return integrate(F, t_range, curve=curve)
-
-
-def surface_integral_scalar(f, surface, u_range, v_range, tol=1e-6):
-    return integrate(f, (u_range, v_range), surface=surface)
-
-
-def surface_integral_vector(F, surface, u_range, v_range, tol=1e-6):
-    return integrate(F, (u_range, v_range), surface=surface)
+# The integrals come from composite/composite_vector.py, which since v4
+# (2026-10-06) routes them through the library's composite integrators:
+# integrate(..., curve=) for line integrals, integrate_surface (the 2D meet)
+# for surface integrals, and integrate()'s 3D box path for triple integrals.
+# Before that the module was a fixed midpoint rule on floats and these tests
+# called integrate() through local shims instead.
+from composite.composite_lib import cos, sin
+from composite.composite_vector import (
+    triple_integral, line_integral_scalar, line_integral_vector,
+    surface_integral_scalar, surface_integral_vector,
+)
 
 # Test tolerance
 # TOLERANCES ARE SET FROM THE METHOD, NOT FROM THE MEASURED ERROR.

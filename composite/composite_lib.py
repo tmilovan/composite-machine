@@ -175,6 +175,40 @@ class FloatCoercionError(TypeError):
     """A composite was converted to float where its infinitesimal is needed."""
 
 
+# See _refusing_residue.
+_REFUSE_RESIDUE = _contextvars.ContextVar("composite_refuse_residue", default=False)
+
+
+class ResidueError(ValueError):
+    """A zero converted under R1 where its denotation is not defined.
+
+    In one variable a cancellation or a written zero denotes x - x0.  Evaluated
+    along a direction in several variables, the one infinitesimal is the
+    direction's own parameter, and which variable the residue belongs to is a
+    convention, not a property of the function.  Inside _refusing_residue()
+    such an evaluation raises this instead of choosing.
+    """
+
+
+@_contextlib.contextmanager
+def _refusing_residue():
+    """For the duration, a zero that would convert under R1 raises ResidueError:
+    a cancellation (`f - f`) and a written or manufactured zero (`0 * f`)."""
+    token = _REFUSE_RESIDUE.set(True)
+    try:
+        yield
+    finally:
+        _REFUSE_RESIDUE.reset(token)
+
+
+def _refuse_residue(what):
+    if _REFUSE_RESIDUE.get():
+        raise ResidueError(
+            "%s would leave an R1 residue, and in several variables which "
+            "variable it denotes is not defined; write the zero as a plain 0 "
+            "or remove the cancellation" % what)
+
+
 # See exp() and _exp_to_transseries.
 _EXP_TO_TS = _contextvars.ContextVar("composite_exp_to_transseries", default=False)
 
@@ -594,6 +628,7 @@ def _r1(c, sibling=None):
     dims, vals = c._backend.to_arrays(c._data)
     if len(dims) == 0:
         return c                       # NOTHING has no dimension to convert
+    _refuse_residue("a zero used as an operand")
     _warn_zero_operand()
     dims = dims.copy()
     vals = vals.copy()
@@ -860,6 +895,7 @@ def _cancellation_residue(a, b, result):
     dims, vals = result._backend.to_arrays(result._data)
     if len(dims) == 0:
         return result                       # NOTHING has no grade to convert
+    _refuse_residue("a cancellation")
     if CANCELLATION_CARRIES == "quantity":
         # a - a = a * h.  Every grade of the annihilated quantity moves down
         # one, so the residue IS that quantity and the ratio of two zeros is

@@ -24,8 +24,10 @@ Comprehensive tests for both:
   - composite_extended.py (20 tests: EX01-EX20)
 
 Libraries are IMPORTED, not included.
-Uses only MC class methods (RR, .partial(), .gradient(), .hessian(),
-.laplacian(), .divergence_of()) — no high-level API wrappers required.
+Part 1 uses composite_multivar, which since 2026-10-06 reads every partial off
+ordinary composites evaluated along several directions.  It used the MC class
+before (now parked in composite_multivar_mc.py); see docs/MC Replacement -
+Directional Composites (DRAFT).md.
 
 Requires on Python path:
   - composite_lib.py      (fixed version)
@@ -50,8 +52,9 @@ import time
 
 try:
     from composite.composite_multivar import (
-        MC, RR, RR_const,
-        mc_sin, mc_cos, mc_exp, mc_ln, mc_sqrt, mc_tan, mc_power,
+        partial_derivative, gradient_at, hessian_at,
+        jacobian_at, laplacian_at, multivar_limit,
+        divergence_at, curl_at,
     )
     MULTIVAR_OK = True
     print("✅ composite_multivar imported successfully")
@@ -178,46 +181,15 @@ class TestRunner:
 
 
 # =============================================================================
-# HELPERS: inline equivalents of high-level API (uses only MC class methods)
+# HELPERS: directional composites
 # =============================================================================
+# The functions take ordinary composites and use composite_lib functions
+# (sin, exp), not MC ones.  A zero field component is written as a plain 0:
+# `0 * x` is a written zero times x, an R1 residue, which composite_multivar
+# refuses (ResidueError) because in several variables its denotation is not
+# defined.
 
-def _eval_f(f, at):
-    """Evaluate f on RR composite args and return the MC result."""
-    nvars = len(at)
-    args = [RR(at[i], var=i, nvars=nvars) for i in range(nvars)]
-    return f(*args)
-
-
-def _jacobian_at(fs, at):
-    """Compute Jacobian matrix using MC.gradient() on each component."""
-    nvars = len(at)
-    args = [RR(at[i], var=i, nvars=nvars) for i in range(nvars)]
-    return [f(*args).gradient() for f in fs]
-
-
-def _curl_at(F, at):
-    """Compute curl of 3D vector field using RR + .partial()."""
-    nvars = 3
-    args = [RR(at[i], var=i, nvars=nvars) for i in range(nvars)]
-    Fx = F[0](*args)
-    Fy = F[1](*args)
-    Fz = F[2](*args)
-    curl_x = Fz.partial(0, 1, 0) - Fy.partial(0, 0, 1)
-    curl_y = Fx.partial(0, 0, 1) - Fz.partial(1, 0, 0)
-    curl_z = Fy.partial(1, 0, 0) - Fx.partial(0, 1, 0)
-    return [curl_x, curl_y, curl_z]
-
-
-def _multivar_limit(f, as_vars_to):
-    """Compute multivar limit using MC.zero_var + RR + .st()."""
-    nvars = len(as_vars_to)
-    args = []
-    for i, val in enumerate(as_vars_to):
-        if val == 0:
-            args.append(MC.zero_var(i, nvars))
-        else:
-            args.append(RR(val, var=i, nvars=nvars))
-    return f(*args).st()
+from composite.composite_lib import R, sin, cos, exp, ln, sqrt
 
 
 # =============================================================================
@@ -230,218 +202,103 @@ def run_multivar_tests(t: TestRunner):
             t.skip(f"MV{i:02d}", "composite_multivar not available")
         return
 
-    print("\n" + "="*60)
-    print("PART 1: MULTI-VARIABLE CALCULUS — 30 Tests")
-    print("="*60)
+    P = partial_derivative
 
     # -------------------------------------------------------------------------
     print("\n--- Partial Derivatives (MV01-MV05) ---")
     # -------------------------------------------------------------------------
-
-    # MV01: f(x,y) = x²y at (3,2) → ∂f/∂x = 2xy = 12
-    r = _eval_f(lambda x, y: x**2 * y, [3, 2])
-    t.check("MV01 ∂/∂x[x²y] at (3,2)", r.partial(1, 0), 12.0)
-
-    # MV02: f(x,y) = x²y at (3,2) → ∂f/∂y = x² = 9
-    t.check("MV02 ∂/∂y[x²y] at (3,2)", r.partial(0, 1), 9.0)
-
-    # MV03: f(x,y) = x²y at (3,2) → ∂²f/∂x∂y = 2x = 6
-    t.check("MV03 ∂²/∂x∂y[x²y] at (3,2)", r.partial(1, 1), 6.0)
-
-    # MV04: f(x,y) = x³y² at (2,1) → ∂²f/∂x² = 6xy² = 12
-    r4 = _eval_f(lambda x, y: x**3 * y**2, [2, 1])
-    t.check("MV04 ∂²/∂x²[x³y²] at (2,1)", r4.partial(2, 0), 12.0)
-
-    # MV05: f(x,y) = x⁴ + y⁴ at (1,1) → ∂⁴f/∂x²∂y² = 0
-    r5 = _eval_f(lambda x, y: x**4 + y**4, [1, 1])
-    t.check("MV05 ∂⁴/∂x²∂y²[x⁴+y⁴] at (1,1)", r5.partial(2, 2), 0.0)
+    t.check("MV01 ∂/∂x[x²y] at (3,2)", P(lambda x, y: x**2 * y, [3, 2], [1, 0]), 12.0)
+    t.check("MV02 ∂/∂y[x²y] at (3,2)", P(lambda x, y: x**2 * y, [3, 2], [0, 1]), 9.0)
+    t.check("MV03 ∂²/∂x∂y[x²y] at (3,2)", P(lambda x, y: x**2 * y, [3, 2], [1, 1]), 6.0)
+    t.check("MV04 ∂²/∂x²[x³y²] at (2,1)", P(lambda x, y: x**3 * y**2, [2, 1], [2, 0]), 12.0)
+    t.check("MV05 ∂⁴/∂x²∂y²[x⁴+y⁴] at (1,1)", P(lambda x, y: x**4 + y**4, [1, 1], [2, 2]), 0.0)
 
     # -------------------------------------------------------------------------
     print("\n--- Gradients (MV06-MV08) ---")
     # -------------------------------------------------------------------------
-
-    # MV06: f(x,y) = x² + y² at (3,4) → ∇f = [6, 8]
-    r6 = _eval_f(lambda x, y: x**2 + y**2, [3, 4])
-    t.check_list("MV06 ∇[x²+y²] at (3,4)", r6.gradient(), [6.0, 8.0])
-
-    # MV07: f(x,y) = x·y at (5,7) → ∇f = [7, 5]
-    r7 = _eval_f(lambda x, y: x * y, [5, 7])
-    t.check_list("MV07 ∇[xy] at (5,7)", r7.gradient(), [7.0, 5.0])
-
-    # MV08: f(x,y,z) = xyz at (2,3,4) → ∇f = [12, 8, 6]
-    r8 = _eval_f(lambda x, y, z: x * y * z, [2, 3, 4])
-    t.check_list("MV08 ∇[xyz] at (2,3,4)", r8.gradient(), [12.0, 8.0, 6.0])
+    t.check_list("MV06 ∇[x²+y²] at (3,4)", gradient_at(lambda x, y: x**2 + y**2, [3, 4]), [6.0, 8.0])
+    t.check_list("MV07 ∇[xy] at (5,7)", gradient_at(lambda x, y: x * y, [5, 7]), [7.0, 5.0])
+    t.check_list("MV08 ∇[xyz] at (2,3,4)", gradient_at(lambda x, y, z: x * y * z, [2, 3, 4]), [12.0, 8.0, 6.0])
 
     # -------------------------------------------------------------------------
     print("\n--- Hessians (MV09-MV11) ---")
     # -------------------------------------------------------------------------
-
-    # MV09: f(x,y) = x²+y² at (1,1) → H = [[2,0],[0,2]]
-    r9 = _eval_f(lambda x, y: x**2 + y**2, [1, 1])
-    t.check_matrix("MV09 H[x²+y²] at (1,1)", r9.hessian(), [[2, 0], [0, 2]])
-
-    # MV10: f(x,y) = x²y+y³ at (1,2) → H = [[4,2],[2,12]]
-    r10 = _eval_f(lambda x, y: x**2 * y + y**3, [1, 2])
-    t.check_matrix("MV10 H[x²y+y³] at (1,2)", r10.hessian(), [[4, 2], [2, 12]])
-
-    # MV11: f(x,y) = x³y³ at (1,1) → H = [[6,9],[9,6]]
-    r11 = _eval_f(lambda x, y: x**3 * y**3, [1, 1])
-    t.check_matrix("MV11 H[x³y³] at (1,1)", r11.hessian(), [[6, 9], [9, 6]])
+    t.check_matrix("MV09 H[x²+y²] at (1,1)", hessian_at(lambda x, y: x**2 + y**2, [1, 1]), [[2, 0], [0, 2]])
+    t.check_matrix("MV10 H[x²y+y³] at (1,2)", hessian_at(lambda x, y: x**2 * y + y**3, [1, 2]), [[4, 2], [2, 12]])
+    t.check_matrix("MV11 H[x³y³] at (1,1)", hessian_at(lambda x, y: x**3 * y**3, [1, 1]), [[6, 9], [9, 6]])
 
     # -------------------------------------------------------------------------
     print("\n--- Jacobians (MV12-MV14) ---")
     # -------------------------------------------------------------------------
-
-    # MV12: F(x,y) = [x²+y, xy²] at (1,2) → J = [[2,1],[4,4]]
     t.check_matrix("MV12 J[x²+y, xy²] at (1,2)",
-                   _jacobian_at(
-                       [lambda x, y: x**2 + y, lambda x, y: x * y**2],
-                       [1, 2]),
+                   jacobian_at([lambda x, y: x**2 + y, lambda x, y: x * y**2], [1, 2]),
                    [[2, 1], [4, 4]])
-
-    # MV13: F(x,y) = [x+y, x-y] at (3,5) → J = [[1,1],[1,-1]]
     t.check_matrix("MV13 J[x+y, x-y] at (3,5)",
-                   _jacobian_at(
-                       [lambda x, y: x + y, lambda x, y: x - y],
-                       [3, 5]),
+                   jacobian_at([lambda x, y: x + y, lambda x, y: x - y], [3, 5]),
                    [[1, 1], [1, -1]])
-
-    # MV14: Polar transform F(r,θ) = [r·cos(θ), r·sin(θ)] at (2, π/4)
     theta = math.pi / 4
     s2 = math.sqrt(2) / 2
     t.check_matrix("MV14 J[r·cosθ, r·sinθ] at (2,π/4)",
-                   _jacobian_at(
-                       [lambda r, th: r * mc_cos(th),
-                        lambda r, th: r * mc_sin(th)],
-                       [2, theta]),
-                   [[s2, -2 * s2], [s2, 2 * s2]],
-                   tol=1e-6)
+                   jacobian_at([lambda r, th: r * cos(th), lambda r, th: r * sin(th)], [2, theta]),
+                   [[s2, -2 * s2], [s2, 2 * s2]], tol=1e-6)
 
     # -------------------------------------------------------------------------
     print("\n--- Laplacians (MV15-MV16) ---")
     # -------------------------------------------------------------------------
-
-    # MV15: f(x,y) = x² + y² → ∇²f = 4
-    r15 = _eval_f(lambda x, y: x**2 + y**2, [1, 1])
-    t.check("MV15 ∇²[x²+y²] at (1,1)", r15.laplacian(), 4.0)
-
-    # MV16: f(x,y) = x³y + xy³ at (2,3) → ∇²f = 6xy + 6xy = 72
-    r16 = _eval_f(lambda x, y: x**3 * y + x * y**3, [2, 3])
-    t.check("MV16 ∇²[x³y+xy³] at (2,3)", r16.laplacian(), 72.0)
+    t.check("MV15 ∇²[x²+y²] at (1,1)", laplacian_at(lambda x, y: x**2 + y**2, [1, 1]), 4.0)
+    t.check("MV16 ∇²[x³y+xy³] at (2,3)", laplacian_at(lambda x, y: x**3 * y + x * y**3, [2, 3]), 72.0)
 
     # -------------------------------------------------------------------------
     print("\n--- Multi-Variable Limits (MV17-MV18) ---")
     # -------------------------------------------------------------------------
-
-    # MV17: lim (x²+y²)/(x²+y²) → (0,0) = 1
     t.check("MV17 lim (x²+y²)/(x²+y²) → (0,0)",
-            _multivar_limit(lambda x, y: (x**2 + y**2) / (x**2 + y**2), [0, 0]),
-            1.0)
-
-    # MV18: lim (x²y-2x²)/(y-2) → (1,2) = x² = 1
+            multivar_limit(lambda x, y: (x**2 + y**2) / (x**2 + y**2), [0, 0]), 1.0)
     t.check("MV18 lim (x²y-2x²)/(y-2) → (1,2)",
-            _multivar_limit(
-                lambda x, y: (x**2 * y - 2 * x**2) / (y - 2),
-                [1, 2]),
-            1.0)
+            multivar_limit(lambda x, y: (x**2 * y - 2 * x**2) / (y - 2), [1, 2]), 1.0)
 
     # -------------------------------------------------------------------------
     print("\n--- Transcendental Compositions (MV19-MV20) ---")
     # -------------------------------------------------------------------------
-
-    # MV19: ∂/∂x[sin(x)cos(y)] at (π/6,π/3) = cos(π/6)cos(π/3) = √3/4
-    r19 = _eval_f(lambda x, y: mc_sin(x) * mc_cos(y),
-                  [math.pi / 6, math.pi / 3])
     t.check("MV19 ∂/∂x[sin(x)cos(y)] at (π/6,π/3)",
-            r19.partial(1, 0), math.sqrt(3) / 4, tol=1e-6)
-
-    # MV20: ∂²/∂x∂y[exp(xy)] at (1,1) = (1+xy)e^(xy) = 2e
-    r20 = _eval_f(lambda x, y: mc_exp(x * y), [1, 1])
+            P(lambda x, y: sin(x) * cos(y), [math.pi / 6, math.pi / 3], [1, 0]), math.sqrt(3) / 4, tol=1e-6)
     t.check("MV20 ∂²/∂x∂y[exp(xy)] at (1,1)",
-            r20.partial(1, 1), 2 * math.e, tol=1e-5)
+            P(lambda x, y: exp(x * y), [1, 1], [1, 1]), 2 * math.e, tol=1e-5)
 
     # -------------------------------------------------------------------------
     print("\n--- Divergence (MV21-MV23) ---")
     # -------------------------------------------------------------------------
-
-    # MV21: div(F) where F = [x², y²] at (3,4) → 2x + 2y = 14
-    hx = MC.zero_var(0, nvars=2)
-    hy = MC.zero_var(1, nvars=2)
-    x21 = MC.real(3, nvars=2) + hx
-    y21 = MC.real(4, nvars=2) + hy
-    t.check("MV21 div[x², y²] at (3,4)",
-            MC.divergence_of([x21**2, y21**2]), 14.0)
-
-    # MV22: div(F) where F = [xy, x+y] at (2,3) → y + 1 = 4
-    x22 = MC.real(2, nvars=2) + hx
-    y22 = MC.real(3, nvars=2) + hy
-    t.check("MV22 div[xy, x+y] at (2,3)",
-            MC.divergence_of([x22 * y22, x22 + y22]), 4.0)
-
-    # MV23: div(F) where F = [x, y, z] at any point → 3
-    hx3 = MC.zero_var(0, nvars=3)
-    hy3 = MC.zero_var(1, nvars=3)
-    hz3 = MC.zero_var(2, nvars=3)
-    x23 = MC.real(5, nvars=3) + hx3
-    y23 = MC.real(7, nvars=3) + hy3
-    z23 = MC.real(2, nvars=3) + hz3
+    t.check("MV21 div[x², y²] at (3,4)", divergence_at([lambda x, y: x**2, lambda x, y: y**2], [3, 4]), 14.0)
+    t.check("MV22 div[xy, x+y] at (2,3)", divergence_at([lambda x, y: x * y, lambda x, y: x + y], [2, 3]), 4.0)
     t.check("MV23 div[x, y, z] = 3",
-            MC.divergence_of([x23, y23, z23]), 3.0)
+            divergence_at([lambda x, y, z: x, lambda x, y, z: y, lambda x, y, z: z], [5, 7, 2]), 3.0)
 
     # -------------------------------------------------------------------------
     print("\n--- Curl (MV24-MV26) ---")
     # -------------------------------------------------------------------------
-
-    # MV24: curl of F = [y, -x, 0] at (1,1,0) → [0, 0, -2]
     t.check_list("MV24 curl[y, -x, 0] at (1,1,0)",
-                 _curl_at(
-                     [lambda x, y, z: y,
-                      lambda x, y, z: -1 * x,
-                      lambda x, y, z: 0 * x],
-                     [1, 1, 0]),
+                 curl_at([lambda x, y, z: y, lambda x, y, z: -1 * x, lambda x, y, z: 0], [1, 1, 0]),
                  [0.0, 0.0, -2.0])
-
-    # MV25: curl of F = [0, 0, x] at (1,1,1) → [0, -1, 0]
     t.check_list("MV25 curl[0, 0, x] at (1,1,1)",
-                 _curl_at(
-                     [lambda x, y, z: 0 * x,
-                      lambda x, y, z: 0 * x,
-                      lambda x, y, z: x],
-                     [1, 1, 1]),
+                 curl_at([lambda x, y, z: 0, lambda x, y, z: 0, lambda x, y, z: x], [1, 1, 1]),
                  [0.0, -1.0, 0.0])
-
-    # MV26: curl(∇f) = 0 for f = x²y + yz²
     t.check_list("MV26 curl(∇f) = 0 for f=x²y+yz²",
-                 _curl_at(
-                     [lambda x, y, z: 2 * x * y,
-                      lambda x, y, z: x**2 + z**2,
-                      lambda x, y, z: 2 * y * z],
-                     [1, 2, 3]),
+                 curl_at([lambda x, y, z: 2 * x * y, lambda x, y, z: x**2 + z**2,
+                           lambda x, y, z: 2 * y * z], [1, 2, 3]),
                  [0.0, 0.0, 0.0], tol=1e-6)
 
     # -------------------------------------------------------------------------
-    print("\n--- Type Safety (MV27-MV30) ---")
+    print("\n--- Plain inputs (MV27-MV30) ---")
     # -------------------------------------------------------------------------
-
-    # MV27: mc_sin of plain float returns MC
-    result27 = mc_sin(1.0)
-    t.check_true("MV27 mc_sin(1.0) returns MC",
-                 isinstance(result27, MC),
-                 f"got {type(result27).__name__}")
-
-    # MV28: mc_exp of plain int returns MC
-    result28 = mc_exp(0)
-    t.check_true("MV28 mc_exp(0) returns MC",
-                 isinstance(result28, MC),
-                 f"got {type(result28).__name__}")
-
-    # MV29: abs() works on MC (tests __abs__)
-    val29 = MC.real(-5, nvars=2)
-    t.check("MV29 abs(MC.real(-5)) = 5", abs(val29), 5.0)
-
-    # MV30: float() works on MC (tests __float__)
-    val30 = MC.real(3.14, nvars=2)
-    t.check("MV30 float(MC.real(3.14)) = 3.14", float(val30), 3.14)
+    # These checked that MC's own functions accepted plain numbers.  The
+    # directional functions use composite_lib, so the checks are on it.
+    r27 = sin(1.0)
+    t.check_true("MV27 sin(1.0) returns a Composite", isinstance(r27, Composite),
+                 f"got {type(r27).__name__}")
+    r28 = exp(0)
+    t.check_true("MV28 exp(0) returns a Composite", isinstance(r28, Composite),
+                 f"got {type(r28).__name__}")
+    t.check("MV29 abs(R(-5)) = 5", abs(R(-5)), 5.0)
+    t.check("MV30 float(R(3.14)) = 3.14", float(R(3.14)), 3.14)
 
 
 # =============================================================================
