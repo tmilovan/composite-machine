@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.dirname(_HERE))
 sys.path.insert(0, _HERE)
 
 import composite.composite_lib as cl
+from composite.composite_lib import ResidueError
 from composite.composite_lib import Composite, R, ZERO
 from composite.uncertainty import (Quantity, budget, montecarlo,
                                    NORMAL, RECTANGULAR, SENSITIVITY_ALARM)
@@ -246,15 +247,17 @@ def u9_expressed_zero_trap(t):
         return x + prefactor * (x * x)     # mathematically just x
 
     x0 = 2.0
-    b = budget(trap, {"x": Quantity(x0, 0.1)})
-    t.close(f"U9.02 the VALUE is still exactly right: {b.value:.12g}", b.value, x0, tol=1e-15)
-    got = b.contributions[0].sensitivity
-    t.true(f"U9.03 but dy/dx reads {got:.12g} where the truth is 1.0 -- R1 converted "
-           f"the expressed zero and x^2 = {x0*x0:.6g} landed in the derivative",
-           abs(got - 1.0) > 1.0, f"got {got}")
-    t.true(f"U9.04 the cross-check caught it: {b.verdict!r}, "
-           f"disagreement {b.contributions[0].fd_check:.3e} > alarm {SENSITIVITY_ALARM:.0e}",
-           b.verdict == "SENSITIVITY SUSPECT", b.verdict)
+    # Until 2026-10-07 the budget read this model: the VALUE stayed exactly x0,
+    # dy/dx read 1 + x0^2 = 5 (R1 converted the expressed zero and x^2 landed in
+    # the derivative), and the difference-quotient cross-check flagged
+    # SENSITIVITY SUSPECT.  The derivatives now come from
+    # composite_multivar._taylor_segment, which refuses an R1 residue outright.
+    try:
+        budget(trap, {"x": Quantity(x0, 0.1)})
+        t.true("U9.02 the expressed zero is refused", False, "no exception raised")
+    except ResidueError as e:
+        t.true(f"U9.02 the expressed zero is refused: {str(e)[:60]}...", True, "")
+    t.close(f"U9.03 the VALUE alone is still exactly right: {trap(x0)!r}", trap(x0), x0, tol=1e-15)
 
     def guarded(x):
         return x + prefactor * (x * x) if prefactor else x
@@ -299,29 +302,22 @@ def u10_orifice(t):
         "p1":    Quantity.relative(5.0e5, 5e-3),
         "kappa": Quantity.relative(1.3, 1e-2),
     }
-    b = budget(_orifice, ins)
-    print(b.table())
-    t.close(f"U10.01 Q_m = {b.value:.8g} kg/s, scalar model {_orifice(**{k: v.value for k, v in ins.items()}):.8g}",
-            b.value, _orifice(**{k: v.value for k, v in ins.items()}), tol=1e-14)
-    worst = max(c.fd_check for c in b.contributions if c.fd_check is not None)
-    t.true(f"U10.02 every sensitivity agrees with a difference quotient, worst {worst:.2e}",
-           worst < SENSITIVITY_ALARM, f"worst {worst}")
-    dom = b.dominant()
-    t.true(f"U10.03 the bore dominates: {dom.name!r} at {dom.index:.2f}% of u_c^2",
-           dom.name == "d", f"{dom.name} {dom.index}")
-    t.true(f"U10.04 u_c = {b.u_linear:.6e} kg/s = {100*b.u_linear/b.value:.4f}% of reading",
-           0.0005 < b.u_linear / b.value < 0.01, f"{b.u_linear/b.value}")
-    mc = montecarlo(_orifice, ins, trials=20000)
-    t.close(f"U10.05 u_c analytic {b.u_higher:.6e} vs Monte Carlo {mc.u:.6e} "
-            f"({mc.trials} trials)", b.u_higher, mc.u, tol=3e-2)
-    t.true(f"U10.06 mean analytic {b.mean:.10g} vs Monte Carlo {mc.mean:.10g} "
-           f"+- {mc.stderr:.2e} (antithetic, {mc.trials} trials); "
-           f"bias {b.bias:+.3e}",
-           mc.mean_agrees(b.mean, 3.0),
-           f"analytic {b.mean} mc {mc.mean} stderr {mc.stderr}")
-    t.true(f"U10.07 verdict {b.verdict!r} -- a well-conditioned meter needs no "
-           f"Monte Carlo (skew {b.skewness:.3e})",
-           not b.verdict.startswith("MONTE CARLO"), b.verdict)
+    # The model starts its fixed-point iteration from Re = R(1.0e6) when d is a
+    # composite.  On the first pass 1.0e6 / Re is exactly 1, ln of it is an
+    # exact computed zero, and _pw multiplies it by 0.3: an expressed zero
+    # meeting an operand, which R1 converts.  Until 2026-10-07 only the input
+    # being differentiated was a composite, so this happened only for d, silently,
+    # and the iteration's contraction washed the residue out -- the budget read
+    # Q_m to 1e-14 and agreed with Monte Carlo.  The derivatives now come from
+    # composite_multivar._taylor_segment, every input is a composite, and the
+    # residue is refused.  The model is left as written.
+    try:
+        budget(_orifice, ins)
+        t.true("U10.01 the residue in the first iterate is refused", False, "no exception raised")
+    except ResidueError as e:
+        t.true(f"U10.01 the residue in the first iterate is refused: {str(e)[:60]}...", True, "")
+    q0 = _orifice(**{k: v.value for k, v in ins.items()})
+    t.true(f"U10.02 the scalar model still evaluates: Q_m = {q0:.8g} kg/s", 0.0 < q0 < 100.0, f"{q0}")
 
 
 # =============================================================================
@@ -396,6 +392,19 @@ def u12_zero_estimate_is_absent(t):
             _comparison_loss(**absent).d(2), -2.0, tol=1e-15)
 
 
+def u13_equal_inputs(t):
+    head("U13 equal inputs: b - c at b = c is not an expressed zero")
+    # Until 2026-10-07 the inputs not being differentiated were plain floats, so
+    # b - c at b = c was a written 0.0, R1 converted it against the seeded a, and
+    # c_a read +1 (true 0) with u_c 0.173 for 0.141.
+    ins = {"a": Quantity(1.0, 0.1), "b": Quantity(2.0, 0.1), "c": Quantity(2.0, 0.1)}
+    b = budget(lambda a, b, c: a * (b - c), ins)
+    got = {c.name: c.sensitivity for c in b.contributions}
+    for name, want in (("a", 0.0), ("b", 1.0), ("c", -1.0)):
+        t.close(f"U13.0{'abc'.index(name) + 1} c_{name} = {got[name]!r}", got[name], want, tol=1e-15)
+    t.close(f"U13.04 u_c linear = {b.u_linear!r}, exact 0.1*sqrt(2)", b.u_linear, 0.1 * math.sqrt(2.0), tol=1e-15)
+
+
 def _raises(fn):
     try:
         fn()
@@ -409,7 +418,8 @@ def run_all():
     for fn in (u1_linear_is_exact, u2_square_normal, u3_square_rectangular,
                u4_product_cross_terms, u5_lognormal, u6_verdict,
                u7_monte_carlo, u8_escape_to_float, u9_expressed_zero_trap,
-               u10_orifice, u11_flat_response, u12_zero_estimate_is_absent):
+               u10_orifice, u11_flat_response, u12_zero_estimate_is_absent,
+               u13_equal_inputs):
         try:
             fn(t)
         except Exception as e:

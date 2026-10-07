@@ -34,14 +34,13 @@ cross-checks the analytic moments against it.
 
 Derivatives without a multivariate number
 -----------------------------------------
-Mixed partials are needed for the cross terms, but they are obtained from
-DIRECTIONAL derivatives along a line -- one infinitesimal, seeded into two
-inputs at once -- not from a multivariate composite:
-
-    D2 along (e_i + e_j)  =  f_ii + 2 f_ij + f_jj        ->  f_ij
-    D3 along (e_i +- e_j) =  f_iii +- 3 f_iij + 3 f_ijj +- f_jjj
-
-so f_ij, f_ijj and f_iij fall out of ordinary single-axis seeding.
+Every derivative is read from ordinary one-infinitesimal composites by
+composite_multivar._taylor_segment: the inputs a coefficient involves move along
+a few directions, the rest are held at x0 + c h**(K+1), an infinitesimal below
+every grade read.  Two composites give an input's derivatives to order 4; five
+give a pair's f_ij, f_ijj and f_iij.  (Until 2026-10-07 the other inputs were
+plain floats and the mixed terms came from directions e_i +- e_j, which
+cancelled equal inputs into an expressed zero.)
 
 References
 ----------
@@ -440,30 +439,54 @@ def budget(model: Callable[..., object],
                 ", ".join(repr(z) for z in zeros),))
     y0 = _model_value(model, values)
 
-    # -- diagonal derivatives, one seeded evaluation per input ------------
+    # -- derivatives, from the segment of the Taylor polynomial -------------
+    # composite_multivar._taylor_segment moves only the inputs a coefficient
+    # involves and holds the rest at x0 + c h**(K+1), an infinitesimal below
+    # every grade read.  The seeding this replaced held them as plain floats,
+    # and a plain value is arithmetic: two equal inputs cancel into a written
+    # zero -- a*(b - c) at b = c read c_a = +1, true 0, and u_c 0.173 for 0.141
+    # -- and the mixed directions (e_i +- e_j) cancel x_i -+ x_j the same way.
+    # Each diagonal is 2 composites to order 4; each pair 5 to order 3.
+    # Expressed zeros, poles and non-smooth points are refused (ResidueError,
+    # PoleError, NonSmoothError) instead of read.
+    from .composite_multivar import _taylor_segment
+    point = [values[n] for n in names]
+
+    def positional(*xs):
+        return model(**dict(zip(names, xs)))
+
+    def segment(moving, order):
+        try:
+            T, _ = _taylor_segment(positional, point, moving, order)
+        except ValueError as e:
+            if "not composite" in str(e):
+                raise TypeError(
+                    "the model left composite arithmetic -- a math.* call, an int() or "
+                    "float(), or a comparison that took the scalar path -- so the "
+                    "result is not a Composite and the derivative is lost.  Every "
+                    "operation on an input must stay in composite arithmetic.  (%s)"
+                    % e) from None
+            raise
+        return T
+
     f1: Dict[str, float] = {}
     f2: Dict[str, float] = {}
     f3: Dict[str, float] = {}
     f4: Dict[str, float] = {}
-    for n in names:
-        d1, d2, d3, d4 = _derivs(model, values, {n: 1.0}, 4, zero_absent)
-        f1[n], f2[n], f3[n], f4[n] = d1, d2, d3, d4
+    for idx, n in enumerate(names):
+        T = segment([idx], 4)
+        f1[n], f2[n], f3[n], f4[n] = (T[(k,)] * math.factorial(k) for k in range(1, 5))
 
-    # -- mixed partials, from directional derivatives --------------------
     fij: Dict[Tuple[str, str], float] = {}
     fijj: Dict[Tuple[str, str], float] = {}
     if cross_terms and len(names) > 1:
         for a in range(len(names)):
             for b in range(a + 1, len(names)):
                 i, j = names[a], names[b]
-                dp = _derivs(model, values, {i: 1.0, j: 1.0}, 3, zero_absent)
-                dm = _derivs(model, values, {i: 1.0, j: -1.0}, 3, zero_absent)
-                fij[(i, j)] = 0.5 * (dp[1] - f2[i] - f2[j])
-                # D3(+) = f_iii + 3f_iij + 3f_ijj + f_jjj
-                # D3(-) = f_iii - 3f_iij + 3f_ijj - f_jjj
-                s, d = dp[2] + dm[2], dp[2] - dm[2]
-                fijj[(i, j)] = (s - 2.0 * f3[i]) / 6.0
-                fijj[(j, i)] = (d - 2.0 * f3[j]) / 6.0
+                T = segment([a, b], 3)
+                fij[(i, j)] = T[(1, 1)]
+                fijj[(i, j)] = 2.0 * T[(1, 2)]       # d3f / dx_i dx_j dx_j
+                fijj[(j, i)] = 2.0 * T[(2, 1)]       # d3f / dx_j dx_i dx_i
 
     def mixed(i: str, j: str) -> float:
         if i == j:

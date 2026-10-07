@@ -537,8 +537,10 @@ def multivar_limit(f, as_vars_to: List[float], rel_tol=1e-12):
 
 
 def divergence_at(F: List[Callable], at: List[float]):
-    """sum dFi/dxi: one gradient per component."""
-    return sum(gradient_at(Fi, at)[i] for i, Fi in enumerate(F))
+    """sum dFi/dxi: one partial derivative per component, each read from the
+    segment in x_i alone (2 composites), not a full gradient (n + 1)."""
+    n = len(at)
+    return sum(partial_derivative(Fi, at, [int(j == i) for j in range(n)]) for i, Fi in enumerate(F))
 
 
 def curl_at(F: List[Callable], at: List[float]):
