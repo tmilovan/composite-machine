@@ -35,6 +35,11 @@ Taylor propagation with interpolation; Griewank, Utke and Walther, Math. Comp.
 gradient, n(n+1)/2 for a Hessian -- plus one check direction the jet must
 predict, which refuses a point where f is not smooth.
 
+partial_derivative reads only the SEGMENT in the variables it differentiates
+in: those move, the rest are held at y0 + c h**(K+1), an infinitesimal below
+every grade read (_taylor_segment).  A pure partial is 2 composites at any
+order; the cost depends on the variables involved, not on how many f has.
+
 Directions are (1, q_i2, ..., q_in) over the LOWER SET of index tuples with
 i2 + ... + in <= K, q the Chebyshev-dyadic seed quantities (never 0, exact in
 float64, never a simple ratio).  The ones with index sum <= k are unisolvent for
@@ -124,9 +129,11 @@ def _refuse_non_smooth(ratio, k, at):
         raise NonSmoothError(
             "a check direction disagrees with the jet at %r, order %d, by %.1e of the "
             "grade's size (tolerance %.0e): either the function is not smooth there "
-            "(a cone, a kink -- typically a disagreement near 1 at low order), or the "
-            "order is beyond what float64 separation resolves for this many variables "
-            "(a small disagreement at high order)" % (list(at), k, ratio, SMOOTHNESS_TOL))
+            "(a cone, a kink -- typically a disagreement near 1 at low order), or it is "
+            "singular across a coordinate partial_derivative holds fixed (y/x at (0, 0) "
+            "for d/dx), or the order is beyond what float64 separation resolves for "
+            "this many variables (a small disagreement at high order)"
+            % (list(at), k, ratio, SMOOTHNESS_TOL))
 
 
 def _mirror_check(plus, minus, at, upto):
@@ -157,9 +164,11 @@ def _reading_within_bounds():
         yield
 
 
-def _parts_of(v, at, need):
+def _parts_of(v, at, need, quote_grade=True):
     """A directional composite's coefficients, refusing an infinite part and a
-    jet that is not complete to order `need`."""
+    jet that is not complete to order `need`.  quote_grade=False leaves the
+    pole's grade out of the message: with fixed coordinates at h**(order+1) it
+    is theirs, not the pole's order (x/y at (1, 0) read "grade 2")."""
     from composite.composite_lib import Composite
     if not isinstance(v, Composite):
         return {0: float(v)} if v != 0 else {}
@@ -177,8 +186,9 @@ def _parts_of(v, at, need):
     up = sorted(g for g, c in p.items() if g > 0 and c != 0)
     if up:
         raise PoleError(
-            "the function is unbounded at %r: grade %s along a direction, so it has "
-            "no derivatives there" % (list(at), up[-1]))
+            ("the function is unbounded at %r: grade %s along a direction, so it has "
+             "no derivatives there" % (list(at), up[-1])) if quote_grade else
+            ("the function is unbounded at %r, so it has no derivatives there" % (list(at),)))
     complete = v.complete_order() if callable(getattr(v, "complete_order", None)) else getattr(v, "_complete", None)
     if complete is not None and complete < need:
         raise IncompleteJetError(
@@ -291,36 +301,86 @@ def taylor_jets(f, at, order):
     f takes ordinary composites and uses composite_lib functions.  A float
     coercion inside f (math.*) is refused with ValueError.
     """
-    from composite.composite_lib import (_seed_at, _derivative_scope,
+    return _taylor_segment(f, at, list(range(len(at))), order)
+
+
+@_functools_dir.lru_cache(maxsize=None)
+def _fixed_quantity(j, alt=False):
+    """The quantity a FIXED coordinate j carries at h**(order+1).
+
+    Odd multiples of 1/2**(8+j), so two fixed coordinates are never equal or
+    opposite: y - z at y0 = z0 leaves (c_y - c_z) h**(order+1), not a wholly zero
+    cancellation.  `alt` is a second set, about -0.56 against about 0.75, which
+    the check direction carries: see _taylor_segment."""
+    if alt:
+        return float(_Fraction_dir(-(9 * 2 ** (4 + j) + 1), 2 ** (8 + j)))
+    return float(_Fraction_dir(3 * 2 ** (6 + j) + 1, 2 ** (8 + j)))
+
+
+def _taylor_segment(f, at, moving, order):
+    """Taylor coefficients of f at `at` in the MOVING variables only, |a| <= order,
+    as ({a: T_a} with a over `moving`, evaluations).
+
+    The moving variables follow _direction_set(len(moving), order).  Every other
+    coordinate is held fixed -- but not as a plain value: a plain 0 is a written
+    zero (R1 converts it, so x*y at (2, 0) read d/dx = 2), and two equal plain
+    values cancel (x*(y - z) at (1, 2, 2) read 2).  A fixed coordinate is
+    y0 + c_y h**(order+1) instead: an infinitesimal below every grade read, so the
+    segment sees it fixed, while it stays a composite -- sin(y)/y at y0 = 0
+    closes, x/y at y0 = 0 is a pole.
+
+    It is the same h, though, so the function's own arithmetic can lower that
+    power into the grades read: y/x at (0, 0), x moving, puts c_y h**order at
+    grade -order, and once read 0.750977 -- c_y itself -- as a derivative.  So
+    the check direction carries the fixed coordinates at a DIFFERENT quantity
+    (_fixed_quantity alt).  Without a leak the grades read cannot depend on c,
+    and the check agrees as always; with one, c != c' is a disagreement and
+    NonSmoothError refuses.  It costs nothing beyond the check direction.
+
+    With every variable moving there is nothing fixed, and this is exactly the
+    full directional set.
+    """
+    from composite.composite_lib import (_seed_at, _derivative_scope, _mint,
                                          _refusing_float, _refusing_residue, FloatCoercionError, Composite)
-    n = len(at)
-    dirs = _direction_set(n, order)
+    n, m = len(at), len(moving)
+    fixed = [i for i in range(n) if i not in moving]
+    dirs = _direction_set(m, order)
+    # A division by a fixed coordinate at y0 = 0 shifts by order + 1, so room
+    # is left for it; with nothing fixed the cap is the usual order + 2.
+    cap = order + 2 if not fixed else 2 * order + 4
+
+    def args(d, alt=False):
+        out = [None] * n
+        for i in fixed:
+            terms = {-(order + 1): _fixed_quantity(i + 1, alt)}
+            if at[i] != 0:
+                terms[0] = float(at[i])
+            out[i] = _mint(Composite(terms))
+        for i, q in zip(moving, d):
+            out[i] = _seed_at(at[i], float(q))
+        return out
+
+    quote = not fixed           # a pole's grade is the seed's only when nothing is fixed
     # The check direction is evaluated after the others have been read, so a
     # branch point or pole is named by _parts_of first: at sqrt(x), x = 0, the
     # check direction moves x negative and sqrt would refuse it with a domain
     # error that says nothing about why.
-    scope = lambda: (_derivative_scope(order + 2, order + 2), _refusing_float(),
-                     _refusing_residue(), _reading_within_bounds())
     try:
-        with _contextlib_dir.ExitStack() as stack:
-            for cm in scope():
-                stack.enter_context(cm)
-            vals = [f(*[_seed_at(x, float(c)) for x, c in zip(at, d)]) for d in dirs]
-            parts = [_parts_of(v, at, order) for v in vals]
-            check = _parts_of(f(*[_seed_at(x, float(c)) for x, c in zip(at, _check_direction(n))]),
-                              at, order)
+        with _derivative_scope(cap, cap), _refusing_float(), _refusing_residue(), _reading_within_bounds():
+            parts = [_parts_of(f(*args(d)), at, order, quote) for d in dirs]
+            check = _parts_of(f(*args(_check_direction(m), alt=True)), at, order, quote)
     except FloatCoercionError as e:
         raise ValueError("the function is not composite -- %s" % e) from None
     T = {}
     for k in range(order + 1):
-        mons, W = _grade_weights(n, order, k)
+        mons, W = _grade_weights(m, order, k)
         g = [p.get(-k, 0.0) for p in parts[:len(mons)]]
         for a, row in zip(mons, W):
             T[a] = sum(w * x for w, x in zip(row, g))
     # The check direction, predicted from the jet: grade -k along e is the
     # degree-k part of the Taylor polynomial at e.  Scale: the larger of the
     # actual value and the biggest single term of the prediction.
-    e = [float(c) for c in _check_direction(n)]
+    e = [float(c) for c in _check_direction(m)]
     for k in range(order + 1):
         terms = [t * math.prod(q ** ai for q, ai in zip(e, a)) for a, t in T.items() if sum(a) == k]
         actual = check.get(-k, 0.0)
@@ -337,10 +397,22 @@ def _fact(a):
 
 
 def partial_derivative(f, at: List[float], wrt: List[int]):
-    """d^|wrt| f / dx1^wrt1 ... at `at`, from C(K+n-1, n-1) directional composites,
-    K = sum(wrt)."""
-    T, _ = taylor_jets(f, at, sum(wrt))
-    return T[tuple(wrt)] * _fact(wrt)
+    """d^|wrt| f / dx1^wrt1 ... at `at`, K = sum(wrt).
+
+    Reads the segment of the Taylor polynomial in the variables it involves
+    (_taylor_segment): only those move, so the cost is C(K+m-1, m-1) + 1
+    composites with m the number of variables differentiated in, whatever the
+    total.  A pure partial d^K/dx^K is 2 composites and reads exactly at any
+    order (measured to K = 28, where the full set refuses from K = 20); a mixed
+    partial in 2 of 4 variables at order 8 is 10 instead of 166.
+
+    It is the partial derivative along the coordinate segment, so f need only be
+    smooth in the moving variables: y**2/x at (0, 0) has d/dx = 0 along y = 0,
+    where gradient_at refuses because f is not jointly smooth."""
+    moving = [i for i, a in enumerate(wrt) if a] or list(range(len(at)))
+    T, _ = _taylor_segment(f, at, moving, sum(wrt))
+    a = tuple(wrt[i] for i in moving)
+    return T[a] * _fact(a)
 
 
 def gradient_at(f, at: List[float]):

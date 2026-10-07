@@ -17,7 +17,7 @@ mpmath = pytest.importorskip("mpmath")
 mpmath.mp.dps = 50
 
 from composite.composite_lib import R, cos, exp, ln, sin, sqrt
-from composite.composite_lib import LimitDoesNotExistError
+from composite.composite_lib import LimitDoesNotExistError, ResidueError
 from composite.composite_multivar import (_direction_set, _orthonormal_directions,
                                           _orthonormal_exact, curl_at, divergence_at,
                                           directional_derivative, gradient_at,
@@ -323,13 +323,74 @@ def test_smooth_neighbours_still_read():
 
 
 def test_high_order_beyond_float_separation_is_refused():
-    """d^20/dx^20 of exp(xy) came out 13% off with the check at 4.7e-8; the
-    tolerance is 1e-8, so it is refused.  Order 12 still reads (7.8e-10)."""
-    want = 0.5 ** 12 * math.exp(0.25)
-    got = partial_derivative(lambda x, y: exp(x * y), [0.5, 0.5], [12, 0])
-    err = abs(got - want) / want
-    print(f"\n  d^12/dx^12 exp(xy): got {got!r} known {want!r} rel err {err:.1e}")
+    """The full directional set at order 20 in two variables: d^20/dx^20 of
+    exp(xy) came out 13% off with the check at 4.7e-8; the tolerance is 1e-8, so
+    taylor_jets refuses.  Order 12 still reads (7.8e-10)."""
+    T, _ = taylor_jets(lambda x, y: exp(x * y), [0.5, 0.5], 12)
+    want = 0.5 ** 12 * math.exp(0.25) / math.factorial(12)
+    err = abs(T[(12, 0)] - want) / want
+    print(f"\n  taylor_jets order 12, T(12,0): rel err {err:.1e}")
     assert err <= 1e-8
     with pytest.raises(NonSmoothError) as e:
-        partial_derivative(lambda x, y: exp(x * y), [0.5, 0.5], [20, 0])
-    print(f"  d^20/dx^20 exp(xy): {type(e.value).__name__}: {str(e.value)[:90]}")
+        taylor_jets(lambda x, y: exp(x * y), [0.5, 0.5], 20)
+    print(f"  taylor_jets order 20: {type(e.value).__name__}: {str(e.value)[:90]}")
+
+
+# --- partial_derivative reads the segment in the variables it involves -----------------
+# Only those move; the rest are fixed at y0 + c_y h**(K+1), an infinitesimal below every
+# grade read.  The check direction carries the fixed coordinates at a different c, so a
+# function that pulls c into the read grades (y/x at the origin) is refused.
+
+
+SEGMENT_EXACT = [
+    # label, f, at, wrt, known, composites
+    ("d/dx x*y at (2,0)  [fixed 0 is not a written zero]", lambda x, y: x * y, [2, 0], [1, 0], 0.0, 2),
+    ("d/dx x*(y-z) at (1,2,2)  [equal fixed coordinates]", lambda x, y, z: x * (y - z), [1, 2, 2], [1, 0, 0], 0.0, 2),
+    ("d/dx x*(y+z) at (1,2,-2)  [opposite fixed coordinates]", lambda x, y, z: x * (y + z), [1, 2, -2], [1, 0, 0], 0.0, 2),
+    ("d/dz sin(x)cos(y)z at the origin", lambda x, y, z: sin(x) * cos(y) * z, [0, 0, 0], [0, 0, 1], 0.0, 2),
+    ("d/dx x*sin(y)/y at (1,0)  [0/0 in a fixed coordinate]", lambda x, y: x * sin(y) / y, [1, 0], [1, 0], 1.0, 2),
+    ("d2/dx2 e^x (e^y-1)/y at (0,0)", lambda x, y: exp(x) * (exp(y) - _R(1)) / y, [0, 0], [2, 0], 1.0, 2),
+    ("d/dy (x*y)/x at (0,2)", lambda x, y: (x * y) / x, [0, 2], [0, 1], 1.0, 2),
+    ("d/dx y^2/x at (0,0)  [0 along y = 0; not jointly smooth]", lambda x, y: y * y / x, [0, 0], [1, 0], 0.0, 2),
+    ("d20/dx20 exp(xy) at (.5,.5)", lambda x, y: exp(x * y), [0.5, 0.5], [20, 0], 0.5 ** 20 * math.exp(0.25), 2),
+    ("d28/dx28 exp(xy) at (.5,.5)", lambda x, y: exp(x * y), [0.5, 0.5], [28, 0], 0.5 ** 28 * math.exp(0.25), 2),
+]
+
+
+@pytest.mark.parametrize("label,f,at,wrt,want,count", SEGMENT_EXACT, ids=[c[0] for c in SEGMENT_EXACT])
+def test_segment_partials(label, f, at, wrt, want, count):
+    from composite.composite_multivar import _taylor_segment
+    moving = [i for i, a in enumerate(wrt) if a]
+    _, n = _taylor_segment(f, at, moving, sum(wrt))
+    check(f"{label} ({n} composites)", partial_derivative(f, at, wrt), want)
+    assert n == count
+
+
+def test_segment_mixed_partials_in_few_of_many_variables():
+    fc = lambda x, y, z, w: exp(x * y) * sin(z + 2 * w)
+    fm = lambda x, y, z, w: mpmath.exp(x * y) * mpmath.sin(z + 2 * w)
+    at = [0.3, 0.7, 1.1, 0.5]
+    for wrt in ([2, 2, 0, 0], [4, 4, 0, 0], [1, 0, 1, 0], [0, 3, 0, 3]):
+        check(f"d{wrt} exp(xy)sin(z+2w)", partial_derivative(fc, at, wrt), ref(fm, at, wrt))
+
+
+SEGMENT_REFUSED = [
+    ("d/dx y/x at (0,0)  [c would leak into the read grades]", lambda x, y: y / x, [0, 0], [1, 0], NonSmoothError),
+    ("d/dx sin(y)/x at (0,0)", lambda x, y: sin(y) / x, [0, 0], [1, 0], NonSmoothError),
+    ("d/dx x*y/(x^2+y^2) at (0,0)", lambda x, y: x * y / (x * x + y * y), [0, 0], [1, 0], NonSmoothError),
+    ("d3/dx3 y/x^3 at (0,0)", lambda x, y: y / (x * x * x), [0, 0], [3, 0], NonSmoothError),
+    ("d/dx x/y at (1,0)  [pole in a fixed coordinate]", lambda x, y: x / y, [1, 0], [1, 0], PoleError),
+    ("d/dx exp(xy)-exp(xy)  [residue]", lambda x, y: exp(x * y) - exp(x * y), [1, 1], [1, 0], ResidueError),
+    ("d/dx x*y + 0  [written zero]", lambda x, y: x * y + 0, [1, 2], [1, 0], ResidueError),
+    ("d/dx sqrt(x^2+y^2) at 0  [cone]", lambda x, y: sqrt(x * x + y * y), [0, 0], [1, 0], NonSmoothError),
+    ("d/dx sqrt(x)*y at (0,1)  [branch]", lambda x, y: sqrt(x) * y, [0, 1], [1, 0], BranchPointError),
+]
+
+
+@pytest.mark.parametrize("label,f,at,wrt,exc", SEGMENT_REFUSED, ids=[c[0] for c in SEGMENT_REFUSED])
+def test_segment_refusals(label, f, at, wrt, exc):
+    with pytest.raises(exc) as e:
+        partial_derivative(f, at, wrt)
+    print(f"\n  {label}: {type(e.value).__name__}: {str(e.value)[:80]}")
+    if exc is PoleError:
+        assert "grade" not in str(e.value)      # the fixed coordinate's grade is not the pole's
