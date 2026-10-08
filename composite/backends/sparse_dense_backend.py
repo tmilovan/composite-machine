@@ -539,7 +539,7 @@ class SparseDenseBackend(CompositeBackend):
     # With expressed zero preservation, the highest dim may have coeff 0.0,
     # which would cause division by zero / NaN in the quotient step.
     # Also clean near-zero remainder artifacts after each step.
-    def deconvolve(self, a: SparseData, b: SparseData) -> SparseData:
+    def deconvolve_cut(self, a: SparseData, b: SparseData) -> tuple:
         """Polynomial long division in sparse form.
 
         Computes Q such that A = Q * B (approximately).
@@ -599,9 +599,10 @@ class SparseDenseBackend(CompositeBackend):
             remainder_dims = remainder.dims[mask]
             remainder_vals = remainder.vals[mask]
 
+        cut = len(remainder_dims) > 0
         if len(q_dims) == 0:
             return SparseData(np.array([], dtype=DIM_DTYPE),
-                              np.array([], dtype=np.float64))
+                              np.array([], dtype=np.float64)), cut
 
         q_dims = np.array(q_dims, dtype=DIM_DTYPE)
         q_vals = np.array(q_vals, dtype=np.float64)
@@ -633,8 +634,8 @@ class SparseDenseBackend(CompositeBackend):
             uniq, inverse = np.unique(q_dims, return_inverse=True)
             merged = np.zeros(len(uniq), dtype=np.float64)
             np.add.at(merged, inverse, q_vals)
-            return SparseData(uniq.astype(DIM_DTYPE), merged)
-        return SparseData(q_dims, q_vals)
+            return SparseData(uniq.astype(DIM_DTYPE), merged), cut
+        return SparseData(q_dims, q_vals), cut
 
     def _map_vals(self, data: SparseData, fn) -> SparseData:
         return SparseData(runs=[(o, fn(v)) for o, v in data.runs])

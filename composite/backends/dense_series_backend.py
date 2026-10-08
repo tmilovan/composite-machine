@@ -259,7 +259,7 @@ class DenseSeriesBackend(CompositeBackend):
         return self._make(a.offset + b.offset, a.step,
                           np.convolve(a.vals, b.vals))
 
-    def deconvolve(self, a: DenseData, b: DenseData) -> DenseData:
+    def deconvolve_cut(self, a: DenseData, b: DenseData) -> tuple:
         """Long division, highest dimension first.
 
         The quotient of a non-terminating division is cut at `terms`; that is
@@ -295,6 +295,9 @@ class DenseSeriesBackend(CompositeBackend):
         else:
             rem = rem.copy()                          # descending
         q = np.zeros(terms, dtype=np.float64)
+        # The frame is fixed, so a quotient is cut either by a remainder left
+        # in it or by a step whose subtraction runs past its end.
+        spilled = False
         for i in range(terms):
             if i >= len(rem):
                 break
@@ -302,15 +305,17 @@ class DenseSeriesBackend(CompositeBackend):
             q[i] = c
             if c != 0.0:
                 m = min(len(bv), len(rem) - i)
+                spilled = spilled or m < len(bv)
                 rem[i:i + m] -= c * bv[:m]
             rem[i] = 0.0
+        cut = spilled or bool(rem.any())
         # q[i] is the coefficient of descending index i
         a_top = a.offset + step * (len(a.vals) - 1)
         b_top = b.offset + step * lead_k
         q_top = a_top - b_top
         used = int(np.max(np.nonzero(q)[0]) + 1) if q.any() else 1
         vals = q[:used][::-1]                      # back to ascending
-        return self._make(q_top - step * (used - 1), step, vals)
+        return self._make(q_top - step * (used - 1), step, vals), cut
 
     def scalar_multiply(self, data: DenseData, scalar: float) -> DenseData:
         if scalar == 0.0:

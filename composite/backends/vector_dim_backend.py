@@ -208,7 +208,7 @@ class VectorDimBackend(DictBackend):
                 out[k] = out.get(k, 0.0) + va * vb
         return DictData(out)
 
-    def deconvolve(self, a: DictData, b: DictData) -> DictData:
+    def deconvolve_cut(self, a: DictData, b: DictData) -> tuple:
         """Long division; dimensions SUBTRACT componentwise."""
         if not b.terms:
             raise ZeroDivisionError("Cannot deconvolve by empty Composite")
@@ -242,4 +242,4 @@ class VectorDimBackend(DictBackend):
                 if rem[o] == 0.0:
                     del rem[o]
             rem.pop(r_dim, None)
-        return DictData(quot)
+        return DictData(quot), bool(rem)

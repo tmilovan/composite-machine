@@ -160,15 +160,23 @@ def _operands(a, b):
         # can hold a scalar dimension d as (d, 0, ...); the reverse loses the
         # scale components, and numpy cannot even hold the tuples.  So when the
         # two differ, the vector side wins regardless of which operand it is.
+        #
+        # A change of storage is not a change of value: the completeness bound
+        # and the denotation marker travel with it.  Rebuilt without them,
+        # R(0)**3 / (R(1) + h*ln(h)) lost denotation_order 3 on the sparse-dense
+        # backend -- the dividend moved to the vector backend unmarked -- while
+        # the dict backend, which needs no move, kept it.
         if getattr(b._backend, "VECTOR_DIMS", False) and not getattr(
                 a._backend, "VECTOR_DIMS", False):
             dims, vals = a._backend.to_arrays(a._data)
             a = Composite._wrap(b._backend.create_from_terms(dims, vals),
-                                b._backend, demote=False)
+                                b._backend, demote=False,
+                                complete=a._complete, denot=_denot_of(a))
         else:
             dims, vals = b._backend.to_arrays(b._data)
             b = Composite._wrap(a._backend.create_from_terms(dims, vals),
-                                a._backend, demote=False)
+                                a._backend, demote=False,
+                                complete=b._complete, denot=_denot_of(b))
     # Judge each operand on ITS OWN blessing. Asking whether the PAIR contained
     # a blessed value let `x*x + ZERO` through: x*x is blessed, so the pair was,
     # and the bare ZERO beside it stayed infinitesimal.
@@ -1561,7 +1569,7 @@ class Composite:
         if _spans_multiple_axes(b) and _expandable_about_st(b):
             return a * _reciprocal(b, terms=_effective_terms(15))
 
-        result = a._backend.deconvolve(a._data, b._data)
+        result, cut = a._backend.deconvolve_cut(a._data, b._data)
         out = Composite._wrap(_truncate_dims(a._backend, result), a._backend,
                               complete=_scaled_complete(self, other, a, b, -1),
                               denot=_denot_quotient(a, b))
@@ -1571,8 +1579,11 @@ class Composite:
         # but there is no order beyond them -- so the quotient is complete TO
         # what it produced, never "exact".  Reporting exact here is what made
         # (1/x)*x = 1 diverge at order 50.
+        # Only a CUT quotient is bounded.  One whose remainder emptied is exact,
+        # and bounding it is the same mistake the other way round: x*x/x is x,
+        # and a bound of 1 made exp((x*x/x)*x) drop every order from 2.
         got = [_dim_order(d) for d in out.c if _dim_order(d) >= 0]
-        if got:
+        if got and cut:
             out._complete = _tighter(out._complete, max(got))
         return out
 
@@ -1774,8 +1785,21 @@ class Composite:
         for _g, _v in zip(dims, vals):
             if _v == 0.0:
                 continue
-            if _dim_positive(_g) or _fractional_power(_g):
-                return self.D(n).st()
+            # A term that is not an integer power of h -- a pole, a fractional
+            # power, or a LOG-AXIS term h**p * ln(1/h)**k -- is absent from
+            # grade -n, so read_dim skips it.  Its power order p decides
+            # whether that matters: for p > n its nth derivative vanishes at
+            # the point and the plain read is exact; for p <= n it is part of
+            # the answer, usually an unbounded one, and D is the one place that
+            # knows how to take it.  Before the p test, a log term at p <= n
+            # was skipped -- (h + h*ln h).d(1) returned 1, exp(2.25h*ln(4h))
+            # returned 3.119 for a derivative that diverges -- and a fractional
+            # term at p > n sent the read to D, which refuses log terms, so
+            # h**3.35 * exp(h*ln h) could not report d(1) = 0.
+            _log = isinstance(_g, tuple) and any(c != 0 for c in _g[1:])
+            if _dim_positive(_g) or _fractional_power(_g) or _log:
+                if -(_g[0] if isinstance(_g, tuple) else _g) <= n:
+                    return self.D(n).st()
         return self._backend.read_dim(self._data, -n) * math.factorial(n)
 
     def D(self, n=1):
@@ -2792,6 +2816,17 @@ def _has_positive_dims(x):
     return x.max_positive_dim() is not None
 
 
+def _infinite_part_is_logarithmic(x):
+    """Every infinite term of x sits on a log axis, none on the power axis.
+
+    Such a value grows like ln(1/h), not like 1/h, so exp of it is a power of h
+    rather than a transmonomial outside the value group.
+    """
+    dims, vals = x._backend.to_arrays(x._data)
+    inf = [d for d, v in zip(dims, vals) if v != 0.0 and _dim_positive(d)]
+    return bool(inf) and all(isinstance(d, tuple) and d[0] == 0 for d in inf)
+
+
 def _dim_nonzero(d):
     """Is this dimension anything other than THE zero dimension?
 
@@ -2994,29 +3029,6 @@ def _tighter(*bounds):
         if b is None:
             continue
         best = b if best is None else min(best, b)
-    return best
-
-
-def _shared_order(*xs):
-    """Highest order a COMBINATION of truncated series is valid to.
-
-    A product or quotient is only as complete as its least complete operand.
-    sin and cos are each sound to order 11 at the default depth; their quotient
-    comes back from the deconvolution carrying orders up to 49, and every one
-    above 11 is built from coefficients neither operand ever had.  That is how
-    tan, tanh, asin and acos each returned dozens of finished-looking orders
-    they could not support -- asin reached 785, with a backend overflow warning
-    on the way there.
-    """
-    best = None
-    for x in xs:
-        if not isinstance(x, Composite):
-            continue
-        got = [_dim_order(d) for d in x.c if _dim_order(d) >= 0]
-        if not got:
-            continue
-        m = max(got)
-        best = m if best is None else min(best, m)
     return best
 
 
@@ -4031,8 +4043,11 @@ def tan(x, terms=12):
     # rather than |1|_-0.5 -- the half grade IS the branch point.
     x = _r1(x)
     _s, _c = sin(x, terms), cos(x, terms)
-    return _truncate_order(_s / _c, _tighter(_shared_order(_s, _c),
-                                             _min_complete(_s, _c, x)))
+    # The quotient CARRIES its completeness: the operands' bounds through the
+    # division, and the division's own cut.  Nothing is inferred from which
+    # orders happen to be present.
+    _q = _s / _c
+    return _truncate_order(_q, _tighter(_q._complete, _min_complete(_s, _c, x)))
 
 # =============================================================================
 # INVERSE TRIGONOMETRIC FUNCTIONS
@@ -4407,10 +4422,53 @@ def tanh(x, terms=15):
     # rather than |1|_-0.5 -- the half grade IS the branch point.
     x = _r1(x)
     if _has_positive_dims(x):
+        # The APPROACH to +-1 is e^(-2|u|).  For a power infinity, u ~ c/h, that
+        # is exp(-2c/h): below every power of h, so the limit alone is the whole
+        # answer at every order.  For a LOG infinity, u ~ c*ln(1/h), it is
+        # h**(2|c|) -- an ordinary power, and dropping it was wrong:
+        # tanh(ln(h) + h) came back |-1|_0, claimed exact, where the function is
+        # -1 + 2h**2 e**(2h) - ...  exp already carries log terms, so say tanh
+        # in it.
+        if _infinite_part_is_logarithmic(x):
+            e2 = exp(x * 2.0, terms)
+            return (e2 - R(1)) / (e2 + R(1))
         return _bounded_at_inf(math.tanh, x)
-    _s, _c = sinh(x, terms), cosh(x, terms)
-    return _truncate_order(_s / _c, _tighter(_shared_order(_s, _c),
-                                             _min_complete(_s, _c, x)))
+    # ADDITION FORMULA about the standard part a, with u the infinitesimal rest:
+    #
+    #     tanh(a + u)  =  t + sech(a)**2 * T / (1 + t*T),   t = tanh a, T = tanh u
+    #
+    # sinh(x)/cosh(x) builds every coefficient of order >= 1 as a difference of
+    # numbers of size cosh(a) whose answer is of size sech(a)**2: an absolute
+    # error of eps, so a RELATIVE error of eps*e**(2a) -- 1e-6 at a = 12, and
+    # tanh(x**3) at 2.3 missed d5 by 1e-9.  Here T is the series of a value with
+    # no standard part, nothing in it is large, and sech(a)**2 is taken as
+    # 4e/(1+e)**2 with e = exp(-2|a|): no cancellation and no overflow, where
+    # cosh(a) overflowed past a = 710.
+    _inf = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
+    a = x.st()
+    if not _inf:
+        return Composite({0: math.tanh(a)})
+    u = _like(x, _inf)
+    _s, _c = sinh(u, terms), cosh(u, terms)
+    # Carried completeness, as in tan.
+    _q = _s / _c
+    T = _truncate_order(_q, _tighter(_q._complete, _min_complete(_s, _c, x)))
+    if a == 0.0:
+        return T                       # t = 0 and sech**2 = 1: the formula is T
+    t = math.tanh(a)
+    e = math.exp(-2.0 * abs(a))
+    sech2 = 4.0 * e / (1.0 + e) ** 2
+    core = T / (R(1) + T * t)
+    # Scaled through the backend: sech2 is a positive number that may underflow
+    # to 0.0 for |a| > ~370, and a Python 0.0 entering `core * sech2` would be
+    # an expressed zero, which R1 converts.  An underflowed scale is not that.
+    scaled = Composite._wrap(core._backend.scalar_multiply(core._data, sech2),
+                             core._backend, complete=core._complete,
+                             denot=_denot_of(core))
+    # The division above runs past T's bound; return only what is complete,
+    # as every transcendental does (test_series_completeness audits it).
+    out = R(t) + scaled
+    return _truncate_order(out, out._complete)
 
 
 # =============================================================================
@@ -7353,6 +7411,13 @@ def _preserves_type(fn):
 
     def wrapper(x, *args, **kwargs):
         plain = type(x) is Composite or not isinstance(x, Composite)
+        # R1 on the argument HERE, before its marker is read below.  Every fn
+        # runs _r1 on its argument itself, and does so after this wrapper has
+        # read the marker off the unconverted zero: sin(R(0)) built sin(h)
+        # and came back with denotation_order None.  Converted here, fn's own
+        # _r1 finds no wholly-zero operand and is a no-op.
+        if plain and isinstance(x, Composite):
+            x = _r1(x)
         out = fn(x if plain else x._as_plain(), *args, **kwargs)
         if not plain:
             out = x._fn_result(out, fn)

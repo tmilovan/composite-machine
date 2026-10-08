@@ -340,7 +340,7 @@ class FractionalDictBackend(CompositeBackend):
                 out[k] = out.get(k, 0.0) + va * vb
         return FracData(out, L)
 
-    def deconvolve(self, a: FracData, b: FracData) -> FracData:
+    def deconvolve_cut(self, a: FracData, b: FracData) -> tuple:
         L, ta, tb = self._align(a, b)
         if not tb:
             raise ZeroDivisionError("Cannot deconvolve by empty Composite")
@@ -366,7 +366,7 @@ class FractionalDictBackend(CompositeBackend):
             # qv cancels rk exactly by construction; float dust there would let
             # the loop reselect rk and overwrite a correct quotient coefficient.
             rem.pop(rk, None)
-        return FracData(quot, L)
+        return FracData(quot, L), bool(rem)
 
     def scalar_multiply(self, data: FracData, scalar: float) -> FracData:
         if scalar == 0.0:

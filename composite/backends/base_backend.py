@@ -212,13 +212,23 @@ class CompositeBackend(ABC):
         """
 
     @abstractmethod
-    def deconvolve(self, a: object, b: object) -> object:
-        """Composite division via deconvolution.
+    def deconvolve_cut(self, a: object, b: object) -> tuple:
+        """Composite division via deconvolution: (quotient, cut).
 
         The leading term of the divisor is its highest dimension with a
         NONZERO coefficient: retained zeros may sit above it.  Zero-valued
         quotient terms are retained.
+
+        `cut` is True when the long division stopped with a remainder left --
+        a non-terminating quotient cut at the iteration bound -- and False when
+        the remainder emptied, so the quotient is exact.  Only the division
+        knows which; inferring it afterwards from the highest order present
+        bounded exact quotients like x*x/x.
         """
+
+    def deconvolve(self, a: object, b: object) -> object:
+        """The quotient alone; see deconvolve_cut."""
+        return self.deconvolve_cut(a, b)[0]
 
     @abstractmethod
     def scalar_multiply(self, data: object, scalar: float) -> object:

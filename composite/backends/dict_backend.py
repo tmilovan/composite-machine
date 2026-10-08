@@ -195,7 +195,7 @@ class DictBackend(CompositeBackend):
     # With expressed zero preservation, the highest dim may have coeff 0.0,
     # which would cause division by zero / NaN in the quotient step.
     # Also clean near-zero terms from inputs before division.
-    def deconvolve(self, a: DictData, b: DictData) -> DictData:
+    def deconvolve_cut(self, a: DictData, b: DictData) -> tuple:
         if not b.terms:
             raise ZeroDivisionError("Cannot deconvolve by empty Composite")
 
@@ -241,7 +241,7 @@ class DictBackend(CompositeBackend):
             remainder.pop(r_dim, None)
 
         # zero-valued quotient terms are retained, as in convolve
-        return DictData(quotient)
+        return DictData(quotient), bool(remainder)
 
     def scalar_multiply(self, data: DictData, scalar: float) -> DictData:
         if scalar == 0.0:
