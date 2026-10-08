@@ -92,20 +92,21 @@ def _rebuild(d):
 
 
 def _term_add(a, b):
-    """a + b with a WHOLLY ZERO side kept inert.
+    """a + b of two sector series, accumulated by PARTS.
 
     A sector's series is a TERM of the transseries, not a number in its own
-    right, and R2 says a zero term is not an operand -- "there is nothing for
-    R1 to do, and the term is retained".  Going through Composite.__add__
-    makes it an operand, so R1 fired and converted it.  Measured before this:
+    right, and R2 says a zero term is not an operand.  Going through
+    Composite.__add__ makes it one: R1 fired on a wholly zero operand, and --
+    the case found later -- on a RESULT that cancels.  Measured before parts:
 
         A = {0: R(1), 1: (c-c)},  B = {1: R(5)}
         (A + B).sectors[1]  ->  {-1: 1.0, 0: 5.0}      should be {0: 5.0}
 
-    -- an infinitesimal manufactured inside a sector nobody used as an operand.
+    and T * ts_inverse(T) for T = 3 exp(1/h) + 2 + (1 + h/2) exp(-2/h) left
+    |-0.667|_-1 at sector 1 where the contributions cancel to 0.  A sector that
+    cancels while others survive is an inert zero term, as a cancelled grade is
+    inside a composite.  The transseries as a WHOLE still gets R1 (_r1).
     """
-    if not (_is_zero(a) or _is_zero(b)):
-        return a + b
     out = dict(a.coeffs_dict())
     for d, v in b.coeffs_dict().items():
         out[d] = out.get(d, 0.0) + v
@@ -113,9 +114,7 @@ def _term_add(a, b):
 
 
 def _term_sub(a, b):
-    """a - b, same rule."""
-    if not (_is_zero(a) or _is_zero(b)):
-        return a - b
+    """a - b of two sector series, by parts: same rule as _term_add."""
     out = dict(a.coeffs_dict())
     for d, v in b.coeffs_dict().items():
         out[d] = out.get(d, 0.0) - v
@@ -372,19 +371,24 @@ class Transseries:
     __rmul__ = __mul__
 
     def __truediv__(self, other):
-        """Division by an ordinary value, sector by sector: exp(-n/h) is a
-        common factor of its own sector and the divisor has none.
+        """Division.  By an ordinary value, sector by sector: exp(-n/h) is a
+        common factor of its own sector and the divisor has none.  By a
+        transseries with other sectors, through ts_inverse, and the quotient
+        keeps only the SECTOR_DEPTH sectors past its leading one that the cut
+        inverse completes -- the next one would be a partial sum."""
+        other = Transseries.lift(other)
+        if not (set(other.sectors) - {0}):
+            d = other.sectors.get(0, R(0))
+            return Transseries({n: c / d for n, c in self._r1().sectors.items()})
+        q = self * ts_inverse(other)
+        lead = q.leading_sector()
+        if lead is None:
+            return q
+        return Transseries({n: c for n, c in q.sectors.items() if n <= lead + SECTOR_DEPTH})
 
-        Division BY a transseries with more than sector 0 needs its inverse,
-        which is not built, and is refused.
-        """
-        if isinstance(other, Transseries):
-            if set(other.sectors) - {0}:
-                raise NotImplementedError(
-                    "division by a transseries with a non-zero sector needs its "
-                    "inverse, which is not built")
-            other = other.sectors.get(0, R(0))
-        return Transseries({n: c / other for n, c in self._r1().sectors.items()})
+    def __rtruediv__(self, other):
+        """other / self, for an ordinary value `other`."""
+        return Transseries.lift(other) / self
 
     # -- ordering: the whole point ------------------------------------------
     def _r1(self):
@@ -626,6 +630,64 @@ def sector(n, c=1.0):
 def flat(n=1):
     """exp(-n/h) -- the flat term itself, coefficient 1."""
     return sector(n, R(1))
+
+
+#: Sectors past the leading one that ts_inverse, and so division, return.  The
+#: inverse is a geometric series that never ends; it is cut here, and a sector
+#: past the cut would be a partial sum, so it is not returned.
+SECTOR_DEPTH = 8
+
+
+def ts_inverse(t, depth=None):
+    """1 / t for a transseries t.
+
+    With n0 the leading sector and c0 its series,
+        t = c0 exp(-n0/h) (1 + u),   u = sum_{k>0} (c_{n0+k} / c0) exp(-k/h),
+    so  1/t = (exp(n0/h) / c0) (1 - u + u^2 - ...), cut at `depth` sectors past
+    the leading one (SECTOR_DEPTH by default): every sector returned is
+    complete, and none past the cut is returned.
+
+    Sector contributions are accumulated by PARTS (see _term_add): a cancelled
+    sector stays an inert zero term.
+
+        tanh(1/h) = (exp(2/h) - 1) / (exp(2/h) + 1)
+                  = 1 - 2 exp(-2/h) + 2 exp(-4/h) - ...
+    """
+    depth = SECTOR_DEPTH if depth is None else int(depth)
+    t = Transseries.lift(t)
+    n0 = t.leading_sector()
+    if n0 is None:
+        raise ZeroDivisionError(
+            "the inverse of a transseries with no non-zero sector; a wholly zero "
+            "transseries is a zero and goes through R1 as an operand, not here")
+    inv0 = R(1) / t.sectors[n0]
+    u = {n - n0: c * inv0 for n, c in t.sectors.items() if n > n0 and not _is_zero(c)}
+
+    def acc(out, k, c):
+        d = out.setdefault(k, {})
+        for g, v in c.coeffs_dict().items():
+            d[g] = d.get(g, 0.0) + v
+
+    total = {}
+    acc(total, 0, R(1))
+    power = {0: R(1)}
+    for j in range(1, depth + 1):
+        nxt = {}
+        for m, a in power.items():
+            for k, b in u.items():
+                if m + k <= depth:
+                    acc(nxt, m + k, a * b)
+        power = {k: _rebuild(v) for k, v in nxt.items()}
+        if not power:
+            break
+        for k, c in power.items():
+            acc(total, k, c if j % 2 == 0 else -c)
+    out = {}
+    for k, parts in total.items():
+        c = _rebuild(parts)
+        if c.coeffs_dict():
+            acc(out, k - n0, c * inv0)
+    return Transseries({k: _rebuild(v) for k, v in out.items()})
 
 
 def ts_exp(x):

@@ -526,7 +526,14 @@ class SparseDenseBackend(CompositeBackend):
                     raise inexact_grade(offset_a, offset_b, off)
                 results.append((off, conv))
 
-        return self._truncate(SparseData(runs=_merge_runs(results)))
+        # No truncation here.  The order cap is applied by composite_lib's
+        # _order_cap, which RECORDS what it drops in complete_order.  Dropping
+        # it here first left that pass nothing to drop, so the bound was never
+        # tightened: under set_max_order(6), h^6 * h came back empty and still
+        # claimed to be exact, and exp(0.5 + h) claimed complete to 14 with
+        # nothing past order 6 -- a read of order 10 returned 0 as if vouched
+        # for.  dict and dense-series never truncated here and were right.
+        return SparseData(runs=_merge_runs(results))
 
     # FIXED: deconvolve — use highest dim with non-zero coeff as leading term.
     # With expressed zero preservation, the highest dim may have coeff 0.0,

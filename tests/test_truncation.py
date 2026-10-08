@@ -152,3 +152,44 @@ def test_a_lone_transcendental_is_not_touched_by_set_max_order():
     uncapped = len(sin(h).coeffs_dict())
     cl.set_max_order(4)
     assert len(sin(h).coeffs_dict()) == uncapped
+
+
+# --- the cap must be recorded, on every backend ---------------------------------------
+# Until 2026-10-08 the sparse-dense backend dropped terms below -max_order inside its
+# own convolve, silently, so composite_lib's _order_cap found nothing left to drop
+# and never tightened complete_order: h^6 * h came back empty and "exact", and
+# exp(0.5 + h) under set_max_order(6) claimed complete to 14 with nothing past
+# order 6.  A bound above the deepest order present is a silent wrong read.
+
+import pytest as _pytest
+
+_CAPPED_FUNCS = ("ln", "atan", "asin", "acos", "erf", "erfc", "normal_cdf", "sqrt",
+                 "exp", "sin", "cos", "tan", "sinh", "cosh", "tanh")
+
+
+@_pytest.mark.parametrize("backend", ["sparse_dense", "dict", "dense_series"])
+def test_a_capped_series_never_claims_past_what_it_holds(backend):
+    import composite.composite_lib as cl
+    import composite.backends.config as C
+    before = C.get_backend()
+    getattr(C, "use_" + backend)(); cl._refresh_constants(); cl.set_max_order(6)
+    try:
+        p = cl.ZERO
+        for _ in range(6):
+            p = p * cl.ZERO
+        print(f"\n  [{backend}] h^7 under set_max_order(6): {p}, complete {p.complete_order} (want 6)")
+        assert p.complete_order == 6
+        for name in _CAPPED_FUNCS:
+            try:
+                v = getattr(cl, name)(cl.R(0.5) + cl.ZERO)
+            except ValueError:
+                # dense-series cannot hold the capped ln/atan/asin/acos series at all
+                # (lattice); that is a refusal, recorded in OPEN_ITEMS, not a wrong read
+                assert backend == "dense_series" and name in ("ln", "atan", "asin", "acos")
+                continue
+            deep = max(-g for g in v.coeffs_dict())
+            print(f"  [{backend}] {name:10s} complete {v.complete_order}  deepest {deep}")
+            assert v.complete_order is not None and v.complete_order <= deep
+    finally:
+        cl.set_max_order(None)
+        C.set_backend(before); cl._refresh_constants()

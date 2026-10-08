@@ -35,7 +35,7 @@ from composite.transseries import (
     from_series,        # build one FROM a divergent series: the problem does it
     action_from_growth, # the action from the coefficient ratio, stride-aware
     resum_sector,       # the bridge: a sector's series -> a number
-    flat, sector, ts_exp, ts_ln, ts_d, ts_st,
+    flat, sector, ts_exp, ts_ln, ts_d, ts_st, ts_inverse,
     is_infinitesimal, is_infinite,
 )
 
