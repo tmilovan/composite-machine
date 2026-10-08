@@ -10,7 +10,7 @@ This document defines the revised composite notation using subscript dimensions,
 
 **Derived dimensions (infinities and zeroes) don't exist unless explicitly created by multiplication or division with zero (or infinity).**
 
-This is not a special case — it's the fundamental construction rule of the system.
+This is not a special case - it's the fundamental construction rule of the system.
 
 ### Principle 2: Only Existing Dimensions Participate
 
@@ -67,14 +67,14 @@ Dimensions are indexed on an integer scale with **rational as origin (0)**:
 
 ### The Value Zero and Infinity
 
-**`0 = 1(0) = |0| = |1|₋₁`** — these are the **same value** in two equivalent representations (the Ladder of Absences: `|0|ₙ = |1|ₙ₋₁`).
+**`0 = 1(0) = |0| = |1|₋₁`** - these are the **same value** in two equivalent representations (the Ladder of Absences: `|0|ₙ = |1|ₙ₋₁`).
 
-- `|0|₀` — zero expressed as coefficient 0 at dimension 0
-- `|1|₋₁` — zero expressed as coefficient 1 at dimension -1
+- `|0|₀` - zero expressed as coefficient 0 at dimension 0
+- `|1|₋₁` - zero expressed as coefficient 1 at dimension -1
 
-Both follow the same multiplication rule: `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`. There is no annihilation — only standard coefficient arithmetic and dimension addition.
+Both follow the same multiplication rule: `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`. There is no annihilation - only standard coefficient arithmetic and dimension addition.
 
-**`∞ = |1|₁`** — one first-order infinity (the "unit infinity").
+**`∞ = |1|₁`** - one first-order infinity (the "unit infinity").
 
 **Shift operators:** `×0` and `×∞` are dimension-shift operators equivalent to `×|1|₋₁` and `×|1|₁` respectively.
 
@@ -103,9 +103,9 @@ Both follow the same multiplication rule: `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`. 
 
 **Example:** `<|2|₁ |5| |1|₋₁> × 0`
 
-- `|2|₁` → `|2|₀` = `|2|` (rational)
-- `|5|` → `|5|₋₁`
-- `|1|₋₁` → `|1|₋₂`
+- `|2|₁` -> `|2|₀` = `|2|` (rational)
+- `|5|` -> `|5|₋₁`
+- `|1|₋₁` -> `|1|₋₂`
 - **Result:** `<|2| |5|₋₁ |1|₋₂>`
 
 ### Multiplication by ∞ⁿ (Expansion)
@@ -118,9 +118,9 @@ Both follow the same multiplication rule: `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`. 
 
 **Example:** `<|2| |5|₋₁ |1|₋₂> × ∞`
 
-- `|2|` → `|2|₁`
-- `|5|₋₁` → `|5|₀` = `|5|`
-- `|1|₋₂` → `|1|₋₁`
+- `|2|` -> `|2|₁`
+- `|5|₋₁` -> `|5|₀` = `|5|`
+- `|1|₋₂` -> `|1|₋₁`
 - **Result:** `<|2|₁ |5| |1|₋₁>` ✓ Matches original!
 
 ### Composite × Composite
@@ -133,8 +133,8 @@ Uses distribution. Each term's dimension is the **sum** of the two dimensions:
 
 **Key cases:**
 
-- `|a|₁ × |b|₋₁ = |a×b|₀` (∞ × 0 → rational)
-- `|a|₋₁ × |b|₋₁ = |a×b|₋₂` (0 × 0 → 0²)
+- `|a|₁ × |b|₋₁ = |a×b|₀` (∞ × 0 -> rational)
+- `|a|₋₁ × |b|₋₁ = |a×b|₋₂` (0 × 0 -> 0²)
 
 ### Addition
 
@@ -144,7 +144,7 @@ Only same-dimension terms combine:
 |a|ₙ + |b|ₙ = |a+b|ₙ
 ```
 
-Terms in different dimensions remain separate — they represent different orders of magnitude.
+Terms in different dimensions remain separate - they represent different orders of magnitude.
 
 **Example:** `|3|₁ + |5| + |2|₋₁ + |4|₁ = <|7|₁ |5| |2|₋₁>`
 
@@ -158,8 +158,8 @@ Division follows the inverse of multiplication:
 
 **Key cases:**
 
-- `|6|₁ / |2|₋₁ = |3|₂` (dividing by zero → multiplying by infinity)
-- `|6| / |2|₁ = |3|₋₁` (dividing by infinity → multiplying by zero)
+- `|6|₁ / |2|₋₁ = |3|₂` (dividing by zero -> multiplying by infinity)
+- `|6| / |2|₁ = |3|₋₁` (dividing by infinity -> multiplying by zero)
 
 **Note:** Division by multi-term composites: exact division returns finite result; non-exact kept as rational expression.
 
@@ -185,7 +185,7 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 **Input:** `|5| × 0`
 
-**Expected:** Shift down 1 → `|5|₋₁`
+**Expected:** Shift down 1 -> `|5|₋₁`
 
 **Process:**
 
@@ -197,7 +197,7 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 **Input:** `|5| × ∞`
 
-**Expected:** Shift up 1 → `|5|₁`
+**Expected:** Shift up 1 -> `|5|₁`
 
 **Process:**
 
@@ -233,9 +233,9 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 **Process:**
 
-- `|2|₁` → `|2|₀` = `|2|`
-- `|5|` → `|5|₋₁`
-- `|1|₋₁` → `|1|₋₂`
+- `|2|₁` -> `|2|₀` = `|2|`
+- `|5|` -> `|5|₋₁`
+- `|1|₋₁` -> `|1|₋₂`
 - **Result:** `<|2| |5|₋₁ |1|₋₂>` ✓
 
 #### Test 1.6: Multi-component Expansion
@@ -246,9 +246,9 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 **Process:**
 
-- `|2|` → `|2|₁`
-- `|5|₋₁` → `|5|₀` = `|5|`
-- `|1|₋₂` → `|1|₋₁`
+- `|2|` -> `|2|₁`
+- `|5|₋₁` -> `|5|₀` = `|5|`
+- `|1|₋₂` -> `|1|₋₁`
 - **Result:** `<|2|₁ |5| |1|₋₁>` ✓ **Reversal works!**
 
 ---
@@ -259,7 +259,7 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 **Input:** `|5| × 0²`
 
-**Expected:** Shift down 2 → `|5|₋₂`
+**Expected:** Shift down 2 -> `|5|₋₂`
 
 **Process:**
 
@@ -270,7 +270,7 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 **Input:** `|5| × ∞²`
 
-**Expected:** Shift up 2 → `|5|₂`
+**Expected:** Shift up 2 -> `|5|₂`
 
 **Process:**
 
@@ -293,9 +293,9 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 **Process:**
 
-- `|3|₂` → `|3|₁`
-- `|5|` → `|5|₋₁`
-- `|2|₋₁` → `|2|₋₂`
+- `|3|₂` -> `|3|₁`
+- `|5|` -> `|5|₋₁`
+- `|2|₋₁` -> `|2|₋₂`
 - **Result:** `<|3|₁ |5|₋₁ |2|₋₂>` ✓
 
 #### Test 2.5: Order Mismatch Reversal
@@ -304,7 +304,7 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 **Process:**
 
-- `|5|₋₂` → `|5|₋₁`
+- `|5|₋₂` -> `|5|₋₁`
 - **Result:** `|5|₋₁` ✓ (partial reversal, as expected)
 
 ---
@@ -392,12 +392,12 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 **Process:**
 
-- `|0|₁` → `|0|₀` = contributes 0 to rational
-- `|5|` → `|5|₋₁`
-- `|0|₋₁` → `|0|₋₂` = contributes 0 to dim -2
+- `|0|₁` -> `|0|₀` = contributes 0 to rational
+- `|5|` -> `|5|₋₁`
+- `|0|₋₁` -> `|0|₋₂` = contributes 0 to dim -2
 - **Result:** `<|0| |5|₋₁ |0|₋₂>`
 
-**Ladder equivalence:** By `|0|ₙ = |1|ₙ₋₁`, we have `|0|₀ = |1|₋₁` and `|0|₋₂ = |1|₋₃`, so the full result is equivalently `<|1|₋₁ |5|₋₁ |1|₋₃>`. Zero coefficients are **not omitted** — they carry structural meaning via the Ladder.
+**Ladder equivalence:** By `|0|ₙ = |1|ₙ₋₁`, we have `|0|₀ = |1|₋₁` and `|0|₋₂ = |1|₋₃`, so the full result is equivalently `<|1|₋₁ |5|₋₁ |1|₋₃>`. Zero coefficients are **not omitted** - they carry structural meaning via the Ladder.
 
 ✓ **Consistent!** Explicit zeros are preserved and interpretable.
 
@@ -415,18 +415,18 @@ Multi-term exponentiation uses distribution (polynomial expansion).
 
 **Process:** `|5|₀ × |1|₋₁ = |5|₋₁`
 
-**Result:** `|5|₋₁` ✓ (same result — `|0|₀` and `|1|₋₁` are the same value)
+**Result:** `|5|₋₁` ✓ (same result - `|0|₀` and `|1|₋₁` are the same value)
 
 **Test C:** `|5| × 0` (using ×0 as shift operator)
 
 **Result:** `|5|₋₁` ✓
 
-**Key insight:** There is only ONE rule. Since `|0|₀ = |1|₋₁` (the Ladder), multiplication by zero always shifts the dimension down by 1 and preserves the coefficient:
+There is only ONE rule. Since `|0|₀ = |1|₋₁` (the Ladder), multiplication by zero always shifts the dimension down by 1 and preserves the coefficient:
 
 - `|5|₀ × |0|₀ = |5|₀ × |1|₋₁ = |5|₋₁` (Ladder applied first, then standard rule)
 - `|5|₀ × |1|₋₁ = |5|₋₁` (standard rule directly)
 
-Both paths give `|5|₋₁`. Multiplication by zero does not annihilate — it preserves information at a lower dimension. This is the core principle: `a × 0 = |a|₋₁`.
+Both paths give `|5|₋₁`. Multiplication by zero does not annihilate - it preserves information at a lower dimension. This is the core principle: `a × 0 = |a|₋₁`.
 
 #### Test 4.4: Commutativity
 
@@ -460,9 +460,9 @@ Both paths give `|5|₋₁`. Multiplication by zero does not annihilate — it p
 
 ---
 
-## Test Suite 5: Composite × Composite — Trap Hunting
+## Test Suite 5: Composite × Composite - Trap Hunting
 
-The basic tests pass, but let's deliberately look for hidden contradictions.
+The basic tests pass; the cases below look for hidden contradictions.
 
 ### Test 5.1: Full 3×3 Distribution
 
@@ -508,12 +508,12 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 
 **Interpretation:** -6 zeroes. Mathematically: `-6 × 0 = 0` as a value.
 
-**⚠️ POTENTIAL ISSUE:** Negative coefficients work algebraically, but what do they *mean*?
+**POTENTIAL ISSUE:** Negative coefficients work algebraically, but what do they *mean*?
 
 - In provenance terms: "I owe 6 zeroes" or "6 anti-zeroes"?
 - Does `|6|₋₁ + |-6|₋₁ = |0|₋₁`? (zero zeroes = no zero dimension?)
 
-**Status:** 🟡 Algebraically consistent, semantically unclear
+**Status:** Algebraically consistent, semantically unclear
 
 ---
 
@@ -578,9 +578,9 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 
 **Result:** `<|2|₂ |0|₁ |-8|>`
 
-**✅ Resolved:** By the Ladder of Absences, `|0|ₙ = |1|ₙ₋₁`. A zero coefficient at dimension n is equivalent to coefficient 1 at dimension n-1. So `|0|₁` = `|1|₀` = `|1|` — the dimension exists and carries meaning. Zero coefficients are always preserved.
+**Resolved:** By the Ladder of Absences, `|0|ₙ = |1|ₙ₋₁`. A zero coefficient at dimension n is equivalent to coefficient 1 at dimension n-1. So `|0|₁` = `|1|₀` = `|1|` - the dimension exists and carries meaning. Zero coefficients are always preserved.
 
-**Status:** ✅ Resolved via Ladder of Absences
+**Status:** Resolved via Ladder of Absences
 
 ---
 
@@ -597,7 +597,7 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 
 **Result:** `<|2| |3|₋₁>` ✓
 
-**Interpretation:** Identical to Test B — because `|0|` and `|1|₋₁` are the same value, they must produce the same result. The Ladder normalization is always applied before arithmetic.
+**Interpretation:** Identical to Test B - because `|0|` and `|1|₋₁` are the same value, they must produce the same result. The Ladder normalization is always applied before arithmetic.
 
 **Test B:** `<|2|₁ |3|> × |1|₋₁` (multiply by structural-zero)
 
@@ -610,18 +610,18 @@ The basic tests pass, but let's deliberately look for hidden contradictions.
 
 **Test C:** `<|2|₁ |3|> × 0` (using ×0 as shift operator)
 
-- `|2|₁` → `|2|₀`
-- `|3|₀` → `|3|₋₁`
+- `|2|₁` -> `|2|₀`
+- `|3|₀` -> `|3|₋₁`
 
 **Result:** `<|2| |3|₋₁>` ✓
 
 **Key finding:** `×|1|₋₁` and `×0` (shift operator) produce **identical results**.
 
-Since `|0|₀ = |1|₋₁` (Ladder of Absences), `×|0|` also produces an equivalent result — the different-looking outputs are the same values expressed in different dimensional representations. All three follow the single rule `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`.
+Since `|0|₀ = |1|₋₁` (Ladder of Absences), `×|0|` also produces an equivalent result - the different-looking outputs are the same values expressed in different dimensional representations. All three follow the single rule `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`.
 
 ---
 
-### Test 5.6: Division — Does the Rule Extend?
+### Test 5.6: Division - Does the Rule Extend?
 
 **Hypothesis:** If `|a|ₘ × |b|ₙ = |a×b|ₘ₊ₙ`, then `|a|ₘ / |b|ₙ = |a/b|ₘ₋ₙ`
 
@@ -712,7 +712,7 @@ Since `|0|₀ = |1|₋₁` (Ladder of Absences), `×|0|` also produces an equiva
 
 **Result:** `|4|₋₂` ✓
 
-**Interpretation:** `(2×0)² = 4×0²` — consistent with `0² = 0×0`
+**Interpretation:** `(2×0)² = 4×0²` - consistent with `0² = 0×0`
 
 ---
 
@@ -720,11 +720,11 @@ Since `|0|₀ = |1|₋₁` (Ladder of Absences), `×|0|` also produces an equiva
 
 | Issue | Status | Notes |
 | --- | --- | --- |
-| Negative coefficients | ✅ | Algebraically sound; semantics (negative infinitesimals) to be developed later |
-| Zero coefficients `\|0\|ₙ` | ✅ | **Keep them.** If written or resulting from operations, respect and calculate with them |
-| Division rule | ✅ | Extends naturally: `\|a\|ₘ / \|b\|ₙ = \|a/b\|ₘ₋ₙ` |
-| Self-multiplication | ✅ | Works, matches polynomial expansion |
-| Dimension gaps | ✅ | Preserved correctly, no phantom fill |
+| Negative coefficients | yes | Algebraically sound; semantics (negative infinitesimals) to be developed later |
+| Zero coefficients `\|0\|ₙ` | yes | **Keep them.** If written or resulting from operations, respect and calculate with them |
+| Division rule | yes | Extends naturally: `\|a\|ₘ / \|b\|ₙ = \|a/b\|ₘ₋ₙ` |
+| Self-multiplication | yes | Works, matches polynomial expansion |
+| Dimension gaps | yes | Preserved correctly, no phantom fill |
 
 ---
 
@@ -746,11 +746,11 @@ Since `|0|₀ = |1|₋₁` (Ladder of Absences), `×|0|` also produces an equiva
 
 **Implications:**
 
-- `|4|₁ + |-4|₁ = |0|₁` — dimension 1 exists but has zero coefficient
-- `|0|₁` ≠ (no dimension 1) — structural difference preserved
+- `|4|₁ + |-4|₁ = |0|₁` - dimension 1 exists but has zero coefficient
+- `|0|₁` ≠ (no dimension 1) - structural difference preserved
 - A dimension with `|0|ₙ` still participates in operations
 
-**Example:** `|0|₁ × |3|₋₁ = |3|₋₁` — by the Ladder, `|0|₁ = |1|₀`, so `|1|₀ × |3|₋₁ = |3|₋₁`. The Ladder normalization applies before coefficient multiplication.
+**Example:** `|0|₁ × |3|₋₁ = |3|₋₁` - by the Ladder, `|0|₁ = |1|₀`, so `|1|₀ × |3|₋₁ = |3|₋₁`. The Ladder normalization applies before coefficient multiplication.
 
 ---
 
@@ -760,7 +760,7 @@ Since `|0|₀ = |1|₋₁` (Ladder of Absences), `×|0|` also produces an equiva
 
 ## Test Suite 6: Addition of Composites
 
-Addition should be simpler than multiplication — only same-dimension terms combine.
+Addition should be simpler than multiplication - only same-dimension terms combine.
 
 ### Addition Rule
 
@@ -852,7 +852,7 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 ### Test 6.8: Adding Zero Forms (REVISED)
 
-**Definition:** `0 = |0|₀ = |1|₋₁` (same value, two representations — Ladder of Absences)
+**Definition:** `0 = |0|₀ = |1|₋₁` (same value, two representations - Ladder of Absences)
 
 **Test A:** `|5| + |0|` (add zero as `|0|₀`)
 
@@ -860,7 +860,7 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 **Result:** `|5|` ✓
 
-**Note:** Addition operates on the representation as written — `|0|₀` shares dim 0 with `|5|₀`, so coefficients combine (5+0=5).
+**Note:** Addition operates on the representation as written - `|0|₀` shares dim 0 with `|5|₀`, so coefficients combine (5+0=5).
 
 **Test B:** `|5| + |1|₋₁` (add zero as `|1|₋₁`)
 
@@ -873,9 +873,9 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 **Note:** `|1|₋₁` occupies dim -1, which doesn't overlap with dim 0, so both terms remain.
 
-**Key finding:** Since `|0|₀ = |1|₋₁` (Ladder of Absences), these two additions are adding the **same value** — the different results (`|5|` vs `<|5| |1|₋₁>`) reflect the choice of dimensional representation, not different algebraic behavior. Both results are equivalent via the Ladder: `|5|₀` = `<|5|₀ |1|₋₁>` (the `|1|₋₁` is the zero that's always implicitly present at dim -1).
+**Key finding:** Since `|0|₀ = |1|₋₁` (Ladder of Absences), these two additions are adding the **same value** - the different results (`|5|` vs `<|5| |1|₋₁>`) reflect the choice of dimensional representation, not different algebraic behavior. Both results are equivalent via the Ladder: `|5|₀` = `<|5|₀ |1|₋₁>` (the `|1|₋₁` is the zero that's always implicitly present at dim -1).
 
-**Status:** ✅ Consistent with the Ladder of Absences
+**Status:** Consistent with the Ladder of Absences
 
 ---
 
@@ -915,7 +915,7 @@ Terms in different dimensions remain separate (they represent different "orders 
 **First path:**
 
 - `|3|₁ + |4| = <|3|₁ |4|>`
-- `|2|₋₁ × <|3|₁ |4|>` — distribute:
+- `|2|₋₁ × <|3|₁ |4|>` - distribute:
     - `|2|₋₁ × |3|₁ = |6|₀ = |6|`
     - `|2|₋₁ × |4|₀ = |8|₋₁`
 - Result: `<|6| |8|₋₁>`
@@ -981,20 +981,20 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 | Test | Result | Notes |
 | --- | --- | --- |
-| 6.1 Same-dimension | ✅ | Coefficients add |
-| 6.2 Different-dimension | ✅ | Terms stay separate |
-| 6.3 With rational | ✅ | No cross-dim mixing |
-| 6.4 Full + Full | ✅ | Matching dims combine |
-| 6.5 Additive identity | ✅ | `+|0|ₙ` preserves value |
-| 6.6 Negative coefficients | ✅ | Works as expected |
-| 6.7 Cancellation → |0|ₙ | ✅ | Zero coefficient preserved |
-| 6.8 Adding value zero | ✅ | **Provenance preserved** (not identity!) |
-| 6.9 Commutativity | ✅ | A + B = B + A |
-| 6.10 Associativity | ✅ | (A+B)+C = A+(B+C) |
-| 6.11 Distributivity | ✅ | A×(B+C) = A×B + A×C |
-| 6.12 Mixed dimension sets | ✅ | Union of dimensions |
-| 6.13 Partial overlap | ✅ | Combine where matching |
-| 6.14 Subtraction | ✅ | Works via negative coefficients |
+| 6.1 Same-dimension | yes | Coefficients add |
+| 6.2 Different-dimension | yes | Terms stay separate |
+| 6.3 With rational | yes | No cross-dim mixing |
+| 6.4 Full + Full | yes | Matching dims combine |
+| 6.5 Additive identity | yes | `+|0|ₙ` preserves value |
+| 6.6 Negative coefficients | yes | Works as expected |
+| 6.7 Cancellation -> |0|ₙ | yes | Zero coefficient preserved |
+| 6.8 Adding value zero | yes | **Provenance preserved** (not identity!) |
+| 6.9 Commutativity | yes | A + B = B + A |
+| 6.10 Associativity | yes | (A+B)+C = A+(B+C) |
+| 6.11 Distributivity | yes | A×(B+C) = A×B + A×C |
+| 6.12 Mixed dimension sets | yes | Union of dimensions |
+| 6.13 Partial overlap | yes | Combine where matching |
+| 6.14 Subtraction | yes | Works via negative coefficients |
 
 **All 14 addition tests pass.**
 
@@ -1002,7 +1002,7 @@ Terms in different dimensions remain separate (they represent different "orders 
 
 ## Key Finding: Zero and the Ladder of Absences
 
-`|0|₀ = |1|₋₁` — these are the **same value** in two equivalent representations (Ladder of Absences: `|0|ₙ = |1|ₙ₋₁`).
+`|0|₀ = |1|₋₁` - these are the **same value** in two equivalent representations (Ladder of Absences: `|0|ₙ = |1|ₙ₋₁`).
 
 All operations follow the same rules regardless of representation:
 
@@ -1016,7 +1016,7 @@ There is no "annihilation" and no special-cased additive identity among composit
 
 ## Test Suite 7: Deep Edge Cases
 
-Now let's stress-test with indeterminate forms, identities, and pathological cases.
+The next cases stress-test indeterminate forms, identities, and pathological cases.
 
 ---
 
@@ -1024,7 +1024,7 @@ Now let's stress-test with indeterminate forms, identities, and pathological cas
 
 **Question:** What is `1` in this system?
 
-**Answer:** `|1|` — just 1 in the rational dimension.
+**Answer:** `|1|` - just 1 in the rational dimension.
 
 **Test:** `<|3|₁ |5| |2|₋₁> × |1|`
 
@@ -1038,7 +1038,7 @@ Now let's stress-test with indeterminate forms, identities, and pathological cas
 
 ---
 
-### Test 7.2: 0 × ∞ — The Classic Indeterminate (REVISED)
+### Test 7.2: 0 × ∞ - The Classic Indeterminate (REVISED)
 
 **In standard math:** `0 × ∞` is indeterminate.
 
@@ -1053,7 +1053,7 @@ Now let's stress-test with indeterminate forms, identities, and pathological cas
 
 **Result:** `|0|₁` (zero infinities)
 
-**Value:** By the Ladder, `|0|₁ = |1|₀ = |1|` — so this also equals 1
+**Value:** By the Ladder, `|0|₁ = |1|₀ = |1|` - so this also equals 1
 
 **Test B:** `|1|₋₁ × |1|₁` (structural-zero × infinity)
 
@@ -1061,9 +1061,9 @@ Now let's stress-test with indeterminate forms, identities, and pathological cas
 
 **Result:** `|1|` ✓
 
-**Value:** 1 — dimensions cancel!
+**Value:** 1 - dimensions cancel!
 
-**Key insight:** The "indeterminacy" of 0×∞ in standard math comes from not knowing *which* zero and *which* infinity.
+The "indeterminacy" of 0×∞ in standard math comes from not knowing *which* zero and *which* infinity.
 
 - `|0| × |1|₁ = |0|₁` (value = 0)
 - `|1|₋₁ × |1|₁ = |1|` (value = 1)
@@ -1092,7 +1092,7 @@ Now let's stress-test with indeterminate forms, identities, and pathological cas
 
 ---
 
-### Test 7.4: 0/0 — Reconsidered
+### Test 7.4: 0/0 - Reconsidered
 
 **Initial error:** I tested the multi-term composite `<|0| |1|₋₁> / <|0| |1|₋₁>` which falls into the "division by multi-term" problem (Test 7.10).
 
@@ -1116,9 +1116,9 @@ This is **consistent with the fundamental rule**: anything divided by itself equ
 - `|3|₋₁ / |1|₋₁ = |3|` ✓ (3 zeroes / 1 zero = 3)
 - `|1|₋₂ / |1|₋₁ = |1|₋₁` ✓ (0² / 0 = 0)
 
-**Key insight:** There are NO undefined values in this system. The apparent indeterminacy of 0/0 in standard math comes from unspecified limits. Our structural zeroes are *specific*, so division is always determinate.
+There are NO undefined values in this system. The apparent indeterminacy of 0/0 in standard math comes from unspecified limits. Our structural zeroes are *specific*, so division is always determinate.
 
-**Status:** ✅ **0/0 = 1** (for same-order structural zeroes)
+**Status:** **0/0 = 1** (for same-order structural zeroes)
 
 ---
 
@@ -1149,7 +1149,7 @@ This is **consistent with the fundamental rule**: anything divided by itself equ
 
 **Result:** `|0|₁`
 
-**Interpretation:** Zero infinities — the dimension exists but has coefficient 0.
+**Interpretation:** Zero infinities - the dimension exists but has coefficient 0.
 
 Per Decision 2, we keep `|0|₁`. This is NOT the same as "no infinity dimension."
 
@@ -1158,7 +1158,7 @@ Per Decision 2, we keep `|0|₁`. This is NOT the same as "no infinity dimension
 - `|3|₁ + |-2|₁ = |1|₁` (determinate)
 - `<|2|₂ |3|₁> + |-3|₁ = <|2|₂ |0|₁>` (partial cancellation)
 
-✓ **Always determinate** — no true "∞ - ∞" indeterminacy.
+✓ **Always determinate** - no true "∞ - ∞" indeterminacy.
 
 ---
 
@@ -1176,7 +1176,7 @@ Per Decision 2, we keep `|0|₁`. This is NOT the same as "no infinity dimension
 
 **Result:** `|5|₋₁`
 
-**Verification:** 3 zeros, 2 infinities → net 1 zero → dim -1 ✓
+**Verification:** 3 zeros, 2 infinities -> net 1 zero -> dim -1 ✓
 
 ---
 
@@ -1235,7 +1235,7 @@ In standard algebra: `a / (b + c) ≠ a/b + a/c`
 
 But this loses the `|1|₋₁` provenance.
 
-**Status:** ⚠️ **Division by multi-term composite is problematic**
+**Status:** **Division by multi-term composite is problematic**
 
 We can define:
 
@@ -1246,7 +1246,7 @@ We can define:
 
 ### Test 7.11: Square Root of Composite
 
-**Test:** `√(|4|₂)` — square root of 4∞²
+**Test:** `√(|4|₂)` - square root of 4∞²
 
 **If** exponentiation follows dimension rules:
 
@@ -1256,14 +1256,14 @@ We can define:
 
 **And:** `√(|4|₂) = (|4|₂)^(1/2) = |4^(1/2)|₂ₓ₍₁/₂₎ = |2|₁` ✓
 
-**Test:** `√<|9| |6|₋₁ |1|₋₂>` — can we take square root of multi-term?
+**Test:** `√<|9| |6|₋₁ |1|₋₂>` - can we take square root of multi-term?
 
 This would require `<|3| |1|₋₁>² = <|9| |6|₋₁ |1|₋₂>`
 
 **Verify:**
 
 - `|3|² = |9|`
-- `|3| × |1|₋₁ = |3|₋₁` (twice) → `|6|₋₁`
+- `|3| × |1|₋₁ = |3|₋₁` (twice) -> `|6|₋₁`
 - `|1|₋₁ × |1|₋₁ = |1|₋₂`
 
 **Yes!** `<|3| |1|₋₁>² = <|9| |6|₋₁ |1|₋₂>` ✓
@@ -1276,7 +1276,7 @@ This would require `<|3| |1|₋₁>² = <|9| |6|₋₁ |1|₋₂>`
 
 ### Test 7.12: Non-Perfect Square Root
 
-**Test:** `√(|5|₋₁)` — square root of 5 zeroes
+**Test:** `√(|5|₋₁)` - square root of 5 zeroes
 
 **If:** `(|a|ₙ)^(1/2) = |a^(1/2)|ₙ/₂`
 
@@ -1288,9 +1288,9 @@ This would require `<|3| |1|₋₁>² = <|9| |6|₋₁ |1|₋₂>`
 
 1. Allow fractional dimensions (extends the system)
 2. Leave as unevaluated `√(|5|₋₁)`
-3. Reject — only integer dimensions allowed
+3. Reject - only integer dimensions allowed
 
-**Status:** ⚠️ **Fractional dimensions question** — design decision needed
+**Status:** **Fractional dimensions question** - design decision needed
 
 ---
 
@@ -1310,7 +1310,7 @@ This would require `<|3| |1|₋₁>² = <|9| |6|₋₁ |1|₋₂>`
 
 **Interpretation:** `|1|₋₁` = 1 zero = the "unit zero" = 0 (as a value)
 
-By the Ladder of Absences, `|1|₋₁ = |0|₀` — same value, different dimensional representations.
+By the Ladder of Absences, `|1|₋₁ = |0|₀` - same value, different dimensional representations.
 
 **Test:** `|1|₋₁ × ∞`
 
@@ -1320,7 +1320,7 @@ By the Ladder of Absences, `|1|₋₁ = |0|₀` — same value, different dimens
 
 **This confirms:** `|1|₋₁ × ∞ = 1`, which aligns with `0 × ∞ = 1` when both are "unit" sized.
 
-**Compare:** `|5|₋₁ × ∞ = |5|₀ = |5|` — the coefficient survives!
+**Compare:** `|5|₋₁ × ∞ = |5|₀ = |5|` - the coefficient survives!
 
 ---
 
@@ -1328,25 +1328,25 @@ By the Ladder of Absences, `|1|₋₁ = |0|₀` — same value, different dimens
 
 | Test | Result | Notes |
 | --- | --- | --- |
-| 7.1 Multiplicative identity | ✅ | `\|1\|` works as identity |
-| 7.2 0 × ∞ | ✅ | Determinate: `\|0\| × ∞ = 0`, `\|1\|₋₁ × ∞ = 1` |
-| 7.3 ∞ × 0 | ✅ | Commutative with 7.2 |
-| 7.4 0/0 | ✅ | **0/0 = 1** (structural zeroes, same order) |
-| 7.5 ∞/∞ | ✅ | Determinate: `\|1\|` (specific infinities) |
-| 7.6 ∞ - ∞ | ✅ | Determinate: `\|0\|₁` (zero coefficient) |
-| 7.7 Chained ops | ✅ | Net dimension shift works |
-| 7.8 Zero coeff in zero dim | ✅ | Propagates correctly |
-| 7.9 Deep dimensions | ✅ | Orders cancel as expected |
-| 7.10 Divide by multi-term | ⚠️ | Undefined for now |
-| 7.11 √ of composite | ✅ | Works for perfect squares |
-| 7.12 Non-perfect √ | ⚠️ | Fractional dimensions? Design decision |
-| 7.13 Negative × negative | ✅ | Standard sign rules |
-| 7.14 Unit zero `\|1\|₋₁` | ✅ | `\|1\|₋₁ × ∞ = \|1\|` |
+| 7.1 Multiplicative identity | yes | `\|1\|` works as identity |
+| 7.2 0 × ∞ | yes | Determinate: `\|0\| × ∞ = 0`, `\|1\|₋₁ × ∞ = 1` |
+| 7.3 ∞ × 0 | yes | Commutative with 7.2 |
+| 7.4 0/0 | yes | **0/0 = 1** (structural zeroes, same order) |
+| 7.5 ∞/∞ | yes | Determinate: `\|1\|` (specific infinities) |
+| 7.6 ∞ - ∞ | yes | Determinate: `\|0\|₁` (zero coefficient) |
+| 7.7 Chained ops | yes | Net dimension shift works |
+| 7.8 Zero coeff in zero dim | yes | Propagates correctly |
+| 7.9 Deep dimensions | yes | Orders cancel as expected |
+| 7.10 Divide by multi-term | open | Undefined for now |
+| 7.11 √ of composite | yes | Works for perfect squares |
+| 7.12 Non-perfect √ | open | Fractional dimensions? Design decision |
+| 7.13 Negative × negative | yes | Standard sign rules |
+| 7.14 Unit zero `\|1\|₋₁` | yes | `\|1\|₋₁ × ∞ = \|1\|` |
 
 **12 passed, 2 flagged:**
 
-1. Division by multi-term composite → see exploration below
-2. Fractional dimensions → **EXPERIMENTAL** (may be valid, needs exploration)
+1. Division by multi-term composite -> see exploration below
+2. Fractional dimensions -> **EXPERIMENTAL** (may be valid, needs exploration)
 
 ---
 
@@ -1401,7 +1401,7 @@ In polynomial form: `(6x + 11 + 6/x) ÷ (2x + 3)`
 
 - We get an infinite series: `<|3| |1|₋₁ |3/2|₋₂ |9/4|₋₃ ...>`
 
-⚠️ **Problem:** Unlike polynomial division over integers, this doesn't terminate!
+**Problem:** Unlike polynomial division over integers, this doesn't terminate!
 
 ### Why Polynomial Division Can Be Problematic
 
@@ -1459,7 +1459,7 @@ This is like writing `12 / (2 + ε) = 6 - 3ε + 3ε²/2 - ...` (Taylor expansion
 
 **Option C: Rational Expressions**
 
-Keep unevaluated as `|12| / <|2| |1|₋₁>` — a "rational composite."
+Keep unevaluated as `|12| / <|2| |1|₋₁>` - a "rational composite."
 
 Like how we write `(x+1)/(x-1)` without expanding.
 
@@ -1467,12 +1467,12 @@ Like how we write `(x+1)/(x-1)` without expanding.
 
 **Rule:** Division by multi-term composites is always defined:
 
-1. **If exact** (terminates with zero remainder) → return finite composite
-2. **If non-exact** → keep as **rational expression** `A / B`
+1. **If exact** (terminates with zero remainder) -> return finite composite
+2. **If non-exact** -> keep as **rational expression** `A / B`
 
 Rational expressions can later be expanded to infinite series if needed (like `1/(1-x) = 1 + x + x² + ...`), but the primary representation preserves structure.
 
-**Rationale:** The system has no undefined values. Division always has a result — either a finite composite or a rational expression.
+**Rationale:** The system has no undefined values. Division always has a result - either a finite composite or a rational expression.
 
 **Future development:** 
 
@@ -1488,7 +1488,7 @@ Rational expressions can later be expanded to infinite series if needed (like `1
 **Check if exact:** Does `<|3| |1|₋₁>² = <|9| |6|₋₁ |1|₋₂>`?
 
 - `|3|² = |9|`
-- `|3| × |1|₋₁ = |3|₋₁` (×2) → `|6|₋₁`
+- `|3| × |1|₋₁ = |3|₋₁` (×2) -> `|6|₋₁`
 - `|1|₋₁ × |1|₋₁ = |1|₋₂`
 - Result: `<|9| |6|₋₁ |1|₋₂>` ✓
 
@@ -1514,13 +1514,13 @@ Rational expressions can later be expanded to infinite series if needed (like `1
 
 **General principle:**
 
-- `/|n|₋₁` acts like `×|1/n|₁` (dividing by zero → multiplying by infinity)
-- `/|n|₁` acts like `×|1/n|₋₁` (dividing by infinity → multiplying by zero)
+- `/|n|₋₁` acts like `×|1/n|₁` (dividing by zero -> multiplying by infinity)
+- `/|n|₁` acts like `×|1/n|₋₁` (dividing by infinity -> multiplying by zero)
 
-This reinforces that all operations are fundamentally about **dimension shifting** along the scale:
+All operations are **dimension shifts** along the scale:
 
 ```
-... ∞³ — ∞² — ∞ — R — 0 — 0² — 0³ ...
+... ∞³ - ∞² - ∞ - R - 0 - 0² - 0³ ...
 ```
 
 **Open questions:**

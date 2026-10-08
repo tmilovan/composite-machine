@@ -1,4 +1,4 @@
-# Composite Notation — Formal Rules - Deprecated - Reference
+# Composite Notation - Formal Rules - Deprecated - Reference
 
 This document formalizes the rules for composite number notation and dimensional collapse/expansion operations developed through systematic testing.
 
@@ -49,7 +49,7 @@ When written without an explicit coefficient, the coefficient 1 is implied:
 | `∞²` | `1(∞²)` | 1 × ∞² |
 | `5(0)` | `5(0)` | 5 × 0¹ |
 
-This is **not** a recursive definition — `0ⁿ` and `∞ⁿ` are primitive basis elements, and the coefficient notation simply makes the multiplier explicit.
+This is **not** a recursive definition - `0ⁿ` and `∞ⁿ` are primitive basis elements, and the coefficient notation simply makes the multiplier explicit.
 
 ### Definition 1.4: Structural Absence
 
@@ -83,7 +83,7 @@ Every value belongs to exactly one **natural type**:
 
 A segment is in a **mixed state** when it contains values whose natural type differs from the segment's dimension.
 
-*Example:* `⟨_; 5(0)+2(0) | _⟩` has symbolic zeroes in the rational segment → mixed state
+*Example:* `⟨_; 5(0)+2(0) | _⟩` has symbolic zeroes in the rational segment -> mixed state
 
 ---
 
@@ -95,7 +95,7 @@ Dimensional collapse or expansion is triggered **only** by multiplying or dividi
 
 | Operation | Effect | Direction |
 | --- | --- | --- |
-| `× 0` or `/ ∞` | **Collapse** | Shift toward zero (→) |
+| `× 0` or `/ ∞` | **Collapse** | Shift toward zero (->) |
 | `× ∞` or `/ 0` | **Expand** | Shift toward infinity (←) |
 
 ### Definition 3.2: Multiplication by Symbolic Values
@@ -121,11 +121,11 @@ A × B = a₁b₁(∞²) + (a₁b₂ + a₂b₁)(∞) + (a₁b₃ + a₂b₂ + a
        + (a₂b₃ + a₃b₂)(0) + a₃b₃(0²)
 ```
 
-**Commutativity:** A × B = B × A ✔
+**Commutativity:** A × B = B × A (holds)
 
 - Follows from commutativity of scalar multiplication and symmetry of order cancellation
 
-**Associativity:** (A × B) × C = A × (B × C) ✔
+**Associativity:** (A × B) × C = A × (B × C) (holds)
 
 - Follows from associativity of scalar multiplication and basis element multiplication
 
@@ -160,8 +160,8 @@ Evaluate dimensional interactions step-by-step, migrating values toward their na
 
 | Operation | Processing Order | Rationale |
 | --- | --- | --- |
-| **Collapse** | Left → Right (∞ → r → 0) | Catch values as they fall |
-| **Expand** | Right → Left (0 → r → ∞) | Lift values as they rise |
+| **Collapse** | Left -> Right (∞ -> r -> 0) | Catch values as they fall |
+| **Expand** | Right -> Left (0 -> r -> ∞) | Lift values as they rise |
 
 ### Rule 4.3: Dimensional Interaction Rules
 
@@ -175,7 +175,7 @@ a(0ⁿ) × ∞ = a(0ⁿ) × (1/0) = a(0ⁿ) / 0 = a(0ⁿ⁻¹)
 
 The zero in the numerator cancels one zero from the denominator, reducing the order by 1.
 
-*Example:* `2(0) × ∞ = 2(0)/0 = 2` → plain coefficient, naturally belongs in rational
+*Example:* `2(0) × ∞ = 2(0)/0 = 2` -> plain coefficient, naturally belongs in rational
 
 **Collapse (×0):**
 
@@ -185,13 +185,13 @@ a × 0 = a(0)
 
 Multiplying by zero increases order by 1.
 
-*Example:* `5 × 0 = 5(0)` → symbolic zero, naturally belongs in zero segment
+*Example:* `5 × 0 = 5(0)` -> symbolic zero, naturally belongs in zero segment
 
 **Order cancellation formula:**
 
 - `0ⁿ × ∞ᵐ = 0ⁿ⁻ᵐ` if n > m
 - `0ⁿ × ∞ᵐ = ∞ᵐ⁻ⁿ` if m > n
-- `0ⁿ × ∞ᵐ = 1` if n = m (orders fully cancel → plain rational)
+- `0ⁿ × ∞ᵐ = 1` if n = m (orders fully cancel -> plain rational)
 
 ### Rule 4.5: Order Zero (Identity Order)
 
@@ -212,9 +212,9 @@ Multiplying by zero increases order by 1.
 | -1 | ∞ | 0 |
 | -2 | ∞² | 0² |
 
-**Key insight:** When dimensional interaction reduces order to 0, the value exits the symbolic family and becomes a plain rational number.
+When dimensional interaction reduces order to 0, the value exits the symbolic family and becomes a plain rational number.
 
-**Example:** `a(0¹) × ∞ = a(0⁰) = a` → plain number, migrates to rational segment
+**Example:** `a(0¹) × ∞ = a(0⁰) = a` -> plain number, migrates to rational segment
 
 ### Rule 4.4: Mixed State Persistence
 
@@ -232,7 +232,7 @@ During step-by-step evaluation, a symbolic zero landing in rational position sta
 
 Keep expressions like `5(0)+2(0)` in symbolic form rather than simplifying to `7(0)`.
 
-**Rationale:** Addition is compressive—it loses the information about original components.
+**Rationale:** Addition is compressive - it loses the information about original components.
 
 **Important clarification:** Distribution over multiplication is still mandatory (standard algebra):
 
@@ -247,21 +247,21 @@ The result `5 + 2` can remain unevaluated to preserve provenance, or collapse to
 | Expression | Preserve? | Reason |
 | --- | --- | --- |
 | `5(0) + 2(0)` | Yes | Tracks original segment sources |
-| `(a+b) × c` | No → distribute | Standard algebra required |
+| `(a+b) × c` | No -> distribute | Standard algebra required |
 | `5 + 2` (post-operation) | Optional | Preserve if reversal needed |
 
 ### Rule 5.2: Provenance Tracking
 
-**Provenance is preserved per-step, not globally — exactly like standard algebra.**
+**Provenance is preserved per-step, not globally - exactly like standard algebra.**
 
 In standard algebra:
 
-- `5 × 3 = 15` → reversible: `15 ÷ 3 = 5`
+- `5 × 3 = 15` -> reversible: `15 ÷ 3 = 5`
 - But after `15 + 1 = 16`, you can't recover `5` without additional information
 
 This system extends the same principle to zero:
 
-- `5 × 0 = 5(0)` → reversible: `5(0) × ∞ = 5`
+- `5 × 0 = 5(0)` -> reversible: `5(0) × ∞ = 5`
 - But after further operations, the original structure may be lost
 
 **What this achieves:** Operations with zero become reversible in the same local sense that operations with any other number are reversible. Information loss over multiple steps is expected behavior, not a flaw.
@@ -274,13 +274,13 @@ This system extends the same principle to zero:
 | --- | --- |
 | Multiply by 0 | Multiply by ∞ |
 | Multiply by ∞ | Multiply by 0 |
-| Collapse ∞ → r | Expand r → ∞ |
-| Collapse r → 0 | Expand 0 → r |
+| Collapse ∞ -> r | Expand r -> ∞ |
+| Collapse r -> 0 | Expand 0 -> r |
 
 ### Rule 5.4: Global vs Local Reversibility
 
 - **Local (step-by-step):** Each step is reversible if expressions are preserved
-- **Global (full collapse then expand):** NOT reversible—structure is lost when all values migrate to the same segment
+- **Global (full collapse then expand):** NOT reversible - structure is lost when all values migrate to the same segment
 
 ---
 
@@ -300,15 +300,15 @@ State: `⟨2(0²); 5(0) | 1(0²)⟩`
 
 **Phase 2: Collapse step-by-step (left to right)**
 
-*Step 1: ∞ → rational*
+*Step 1: ∞ -> rational*
 
-- `2(0²) × ∞ = 2(0)` → moves to rational
+- `2(0²) × ∞ = 2(0)` -> moves to rational
 - State: `⟨_; 5(0)+2(0) | 1(0²)⟩`
 
-*Step 2: rational → zero*
+*Step 2: rational -> zero*
 
-- `5(0)` → coefficient 5 in zero
-- `2(0)` → coefficient 2 in zero
+- `5(0)` -> coefficient 5 in zero
+- `2(0)` -> coefficient 2 in zero
 - State: `⟨_; _ | 5+2 || 1⟩`
 
 ### Example 6.2: Step Reversal Verification
@@ -339,10 +339,10 @@ State: `⟨2; 5(∞)+1 | _⟩`
 
 **Phase 2: Expand step-by-step (right to left)**
 
-*Step 1: Rational → infinity*
+*Step 1: Rational -> infinity*
 
-- `5(∞)` is symbolic infinity → migrates to infinity
-- `1` and `2` are plain → stay in rational
+- `5(∞)` is symbolic infinity -> migrates to infinity
+- `1` and `2` are plain -> stay in rational
 - State: `⟨5(∞)+2; 1 | _⟩`
 
 *(Note: keeping expressions unevaluated)*

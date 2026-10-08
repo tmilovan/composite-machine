@@ -50,8 +50,8 @@ iterated-logarithm basis:
 - `dimension -1`: infinitesimals (first order)
 - `dimension -2`: second-order infinitesimals
 - `dimension +1`: infinities
-- `dimension -0.5`: a half order, which is a branch point — `sqrt(ZERO)`
-- `dimension (0, 1)`: the log axis — `ln(1/h)`. `(0, 0, 1)` is `ln(ln(1/h))`,
+- `dimension -0.5`: a half order, which is a branch point - `sqrt(ZERO)`
+- `dimension (0, 1)`: the log axis - `ln(1/h)`. `(0, 0, 1)` is `ln(ln(1/h))`,
   and so on to any depth. These appear on their own when `ln` meets an
   infinitesimal or an infinite value; nothing has to be switched on.
 
@@ -370,13 +370,13 @@ Compute f'(at) automatically.
 
 ```python
 # Simple polynomial
-f_prime = derivative(lambda x: x**2, at=3)  # → 6
+f_prime = derivative(lambda x: x**2, at=3)  # -> 6
 
 # Transcendental
-f_prime = derivative(lambda x: sin(x), at=0)  # → 1
+f_prime = derivative(lambda x: sin(x), at=0)  # -> 1
 
 # Composition
-f_prime = derivative(lambda x: exp(x**2), at=1)  # → 2e
+f_prime = derivative(lambda x: exp(x**2), at=1)  # -> 2e
 ```
 
 ---
@@ -398,10 +398,10 @@ Compute the nth derivative f⁽ⁿ⁾(at).
 
 ```python
 # Third derivative of x⁵ at x=2:  60·x² = 60·4
-result = nth_derivative(lambda x: x**5, n=3, at=2)  # → 240
+result = nth_derivative(lambda x: x**5, n=3, at=2)  # -> 240
 
 # Fifth derivative of eˣ at x=1
-result = nth_derivative(lambda x: exp(x), n=5, at=1)  # → e
+result = nth_derivative(lambda x: exp(x), n=5, at=1)  # -> e
 ```
 
 ---
@@ -424,18 +424,18 @@ Get all derivatives [f(at), f'(at), f''(at), ...] up to nth derivative.
 ```python
 # All derivatives of eˣ at x=0
 derivs = all_derivatives(lambda x: exp(x), at=0, up_to=5)
-# → [1, 1, 1, 1, 1, 1]
+# -> [1, 1, 1, 1, 1, 1]
 
 # All derivatives of sin(x) at x=0
 derivs = all_derivatives(lambda x: sin(x), at=0, up_to=4)
-# → [0, 1, 0, -1, 0]
+# -> [0, 1, 0, -1, 0]
 ```
 
 ---
 
 ### `limit(f, as_x_to, terms=12, dir="both", fallback=False)`
 
-Compute lim(x→a) f(x) automatically.
+Compute lim(x->a) f(x) automatically.
 
 **Parameters:**
 
@@ -471,26 +471,26 @@ deliberately: probing them returned the right answer for a convergent case and
 
 ```python
 # Classic limits
-limit(lambda x: sin(x)/x, as_x_to=0)  # → 1
+limit(lambda x: sin(x)/x, as_x_to=0)  # -> 1
 
 # Algebraic limit
-limit(lambda x: (x**2 - 4)/(x - 2), as_x_to=2)  # → 4
+limit(lambda x: (x**2 - 4)/(x - 2), as_x_to=2)  # -> 4
 
 # Limit at infinity
-limit(lambda x: (3*x + 1)/(x + 2), as_x_to=float('inf'))  # → 3
+limit(lambda x: (3*x + 1)/(x + 2), as_x_to=float('inf'))  # -> 3
 ```
 
 ---
 
 ### `limit_right(f, as_x_to, terms=12)`
 
-Right-hand limit: lim(x→a⁺) f(x)
+Right-hand limit: lim(x->a⁺) f(x)
 
 ---
 
 ### `limit_left(f, as_x_to, terms=12)`
 
-Left-hand limit: lim(x→a⁻) f(x)
+Left-hand limit: lim(x->a⁻) f(x)
 
 ---
 
@@ -504,7 +504,7 @@ Get Taylor series coefficients [a₀, a₁, a₂, ...] where f(x) ≈ Σ aₙ(x-
 
 ```python
 coeffs = taylor_coefficients(lambda x: exp(x), at=0, up_to=4)
-# → [1, 1, 0.5, 0.166..., 0.041...]  (all 1/n!)
+# -> [1, 1, 0.5, 0.166..., 0.041...]  (all 1/n!)
 ```
 
 ---
@@ -529,7 +529,7 @@ integrate(f, u_range, v_range, surface=s)          #            surface integral
 **Returns:** float.
 
 Note that it ends in `result.st()`, so any grade other than the standard part
-is discarded — which is why differentiating under the integral sign is not
+is discarded - which is why differentiating under the integral sign is not
 available through this API even though the arithmetic underneath supports it.
 
 ---
@@ -791,7 +791,7 @@ the derivative is unbounded instead of returning 0.0.
 ### `.lead_dim()` and `.lead_order()`
 
 `lead_dim` returns the dominant dimension, skipping zero coefficients;
-`lead_order` returns its order — positive for an infinitesimal, negative for an
+`lead_order` returns its order - positive for an infinitesimal, negative for an
 unbounded value, `None` for nothing.
 
 ```python
@@ -829,8 +829,8 @@ The shallowest order at which an **expressed zero** entered this value, or
 
 An expressed zero of magnitude m at grade -k denotes `m*(x-a)**k`, so from that
 order down the jet is the exact jet of the function the expression *denotes*
-rather than of its classical reading. It is still a true derivative — a real
-slope, a real acceleration — of that function:
+rather than of its classical reading. It is still a true derivative - a real
+slope, a real acceleration - of that function:
 
 ```python
 x = R(3) + ZERO
@@ -844,7 +844,7 @@ It is carried rather than inferred, because division moves it: a residue at
 order 1 divided by `ZERO` reaches order 0. Propagation is `min` on add and
 subtract, `+ other.lead_order()` on multiply, `-` on divide.
 
-`d(n)` reports when `n` is at or below it — see `CONVENTIONAL_STRICT`.
+`d(n)` reports when `n` is at or below it - see `CONVENTIONAL_STRICT`.
 
 ---
 
@@ -855,18 +855,18 @@ subtract, `+ other.lead_order()` on multiply, `-` on divide.
 **Use `is_zero(x)` rather than `x == 0`.** `x == 0` compares against NOTHING,
 so it is True for NOTHING and False for a dimensioned zero.
 
-- `is_nothing(x)` — `Composite({})`, printed `∅`: no term at any dimension.
+- `is_nothing(x)` - `Composite({})`, printed `∅`: no term at any dimension.
   This is the classical zero, an additive identity and a multiplicative
   annihilator, and it is the right accumulator seed.
-- `is_vanishing(x)` — a zero that HAS a dimension, so it converts under R1.
+- `is_vanishing(x)` - a zero that HAS a dimension, so it converts under R1.
   A written zero, `Composite({0: 0.0})`, is one.
-- `is_zero(x)` — either of the above.
+- `is_zero(x)` - either of the above.
 
 ### `CANCELLATION_CARRIES`
 
 Module switch, `"quantity"`. What a cancellation deposits.
 
-`"quantity"` — the whole annihilated quantity, one grade down: **`a - a = a*h`**.
+`"quantity"` - the whole annihilated quantity, one grade down: **`a - a = a*h`**.
 
 ```python
 R(6) - R(6)                  # |6|₋₁
@@ -887,7 +887,7 @@ by one, which is the shift R1 already prescribes, so this is R1 with the
 coefficients kept rather than a separate rule.
 
 Two properties follow rather than being imposed. `(a*h)/(b*h) = a/b`, so the
-ratio between two zeros is the ratio of what they destroyed —
+ratio between two zeros is the ratio of what they destroyed - 
 `(2-2)/(3-3)` is 2/3 and `(x-x)/(y-y)` is `x/y`. And `a*(b*h)` equals `(a*b)*h`
 by associativity of multiplication, so distributivity across a cancellation
 holds, sign included.
@@ -896,7 +896,7 @@ holds, sign included.
 `a + (-a)` does not, the rule reads the left operand, and the two orders differ
 by a sign. So `2 + (-2)` is `|2|₋₁` and `(-2) + 2` is `|-2|₋₁`: addition does not
 commute on a cancelling pair. The difference is never more than a sign.
-Multiplication is unaffected — commutative and associative either way.
+Multiplication is unaffected - commutative and associative either way.
 
 **The dimensional cost.** A coefficient at grade `-k` carries units `[f]/[x]^k`,
 so with `[h] = [x]` every term of `f(x0 + h)` has units `[f]`. Because `a - a` is
@@ -909,7 +909,7 @@ cancellation is reachable and the seed carries a unit, prefer a dimensionless
 seed, or annihilate with `Composite({})`, which leaves no residue. Zero Rules v2
 section 1 has the derivation.
 
-`"magnitude"` — the previous rule, keeping only the deepest coefficient, so
+`"magnitude"` - the previous rule, keeping only the deepest coefficient, so
 `(3+h) - (3+h)` is `<|0|₀ |1|₋₂>`. Kept reachable for comparison. It keeps
 addition commutative, and in exchange every composite zero has ratio 1 and
 distributivity fails wherever the other factor is negative.
@@ -968,7 +968,7 @@ Trace composite computation showing all intermediate steps.
 
 - `f`: Callable
 - `at`: float - For derivative (x = at + h)
-- `to`: float - For limit (x → to)
+- `to`: float - For limit (x -> to)
 
 **Returns:** Composite
 
@@ -978,7 +978,7 @@ Trace composite computation showing all intermediate steps.
 trace(lambda x: (3*x + 1)/(x + 2), to=float('inf'))
 
 # Output:
-# === TRACE: lim(x→∞) ===
+# === TRACE: lim(x->∞) ===
 # Let x = |1|₁  (INF)
 #     |3|₀  ×  |1|₁
 #   = |3|₁
@@ -1029,7 +1029,7 @@ is_correct = verify_derivative(
     lambda x: x**2,
     lambda x: 2*x,
     at=3
-)  # → True
+)  # -> True
 ```
 
 ---
@@ -1080,9 +1080,9 @@ Composite objects can interact with Python scalars (int, float):
 ```python
 # Scalars are automatically converted
 x = R(3) + ZERO
-result = x + 5      # Composite + int → Composite
-result = x * 2.5    # Composite * float → Composite
-result = 10 / x     # int / Composite → Composite
+result = x + 5      # Composite + int -> Composite
+result = x * 2.5    # Composite * float -> Composite
+result = 10 / x     # int / Composite -> Composite
 ```
 
 ---
@@ -1094,7 +1094,7 @@ result = 10 / x     # int / Composite → Composite
 **`ZeroDivisionError`**
 
 - Not raised for `x / 0`. A written zero is an expressed zero, which R1
-  converts, so `R(1) / 0` is `|1|₁` — an infinity of definite order, not an
+  converts, so `R(1) / 0` is `|1|₁` - an infinity of definite order, not an
   error. Use `Composite({})` if you mean an absent denominator.
 
 **`ValueError`**
@@ -1121,7 +1121,7 @@ result = 10 / x     # int / Composite → Composite
 
 - Raised where a value has no composite at all: `exp` of a positive grade
   (`exp(-1/x**2)` at 0), or a bounded transcendental at an unbounded argument
-  (`sin(1/x)` as x → 0, which is a range rather than a point).
+  (`sin(1/x)` as x -> 0, which is a range rather than a point).
 
 **`StandardPartUndefinedError`**
 

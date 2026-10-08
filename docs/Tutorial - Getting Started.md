@@ -144,10 +144,10 @@ For convenience, use the high-level functions:
 from composite import derivative, nth_derivative
 
 # First derivative
-f_prime = derivative(lambda x: x**3, at=2)  # → 12
+f_prime = derivative(lambda x: x**3, at=2)  # -> 12
 
 # nth derivative:  d³/dx³ of x⁵ is 60x², so at x=2 it is 60·4
-f_triple_prime = nth_derivative(lambda x: x**5, n=3, at=2)  # → 240
+f_triple_prime = nth_derivative(lambda x: x**5, n=3, at=2)  # -> 240
 ```
 
 ### Limits
@@ -156,10 +156,10 @@ f_triple_prime = nth_derivative(lambda x: x**5, n=3, at=2)  # → 240
 from composite import limit, sin
 
 # Classic limit
-result = limit(lambda x: sin(x)/x, as_x_to=0)  # → 1.0
+result = limit(lambda x: sin(x)/x, as_x_to=0)  # -> 1.0
 
 # Limit at infinity
-result = limit(lambda x: (3*x + 1)/(x + 2), as_x_to=float('inf'))  # → 3.0
+result = limit(lambda x: (3*x + 1)/(x + 2), as_x_to=float('inf'))  # -> 3.0
 ```
 
 ### All Derivatives at Once
@@ -273,12 +273,12 @@ result.coeff(k) # Coefficient at dimension k
 ```python
 derivative(f, at=x)           # f'(x)
 nth_derivative(f, n, at=x)    # f⁽ⁿ⁾(x)
-limit(f, as_x_to=a)           # lim_{x→a} f(x)
+limit(f, as_x_to=a)           # lim_{x->a} f(x)
 all_derivatives(f, at=x, up_to=n)  # [f, f', f'', ..., f⁽ⁿ⁾]
 ```
 
 ---
 
-**You're ready to start using composite calculus!** 🎉
+**You're ready to start using composite calculus!**
 
 © Toni Milovan. Documentation licensed under CC BY-SA 4.0. Code licensed under AGPL-3.0.

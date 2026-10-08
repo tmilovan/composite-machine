@@ -5,7 +5,7 @@
 Independent Researcher, Pula, Croatia
 
 <aside>
-⚠️
+
 
 **Status: Seeking Review**
 
@@ -17,7 +17,7 @@ This page presents exploration (evidence?) of idea that composite arithmetic (as
 
 ## The Claim
 
-Composite arithmetic — a ℤ-graded sparse coefficient algebra based on Laurent polynomials with provenance-preserving semantics — appears to satisfy the requirements for Turing completeness.
+Composite arithmetic - a ℤ-graded sparse coefficient algebra based on Laurent polynomials with provenance-preserving semantics - appears to satisfy the requirements for Turing completeness.
 
 If correct, this would place it among a very small set of mathematical or number systems known to be Turing complete:
 
@@ -31,7 +31,7 @@ If correct, this would place it among a very small set of mathematical or number
 | Generalized Collatz functions | Functions on ℕ | 2000s |
 | **Composite Arithmetic** | **Graded ring (Laurent polynomial)** | **2026** |
 
-Standard arithmetic on ℝ, ℤ, or ℚ is **not** Turing complete. Neither are hyperreals, wheel theory, p-adics, quaternions, or surreals. The relevant comparison is FRACTRAN (Conway, 1987), which uses prime factorization as "dimensions" and fraction multiplication as state transformation — structurally similar to our use of dimensional coefficients and `read_dim`/`write_dim`.
+Standard arithmetic on ℝ, ℤ, or ℚ is **not** Turing complete. Neither are hyperreals, wheel theory, p-adics, quaternions, or surreals. The relevant comparison is FRACTRAN (Conway, 1987), which uses prime factorization as "dimensions" and fraction multiplication as state transformation - structurally similar to our use of dimensional coefficients and `read_dim`/`write_dim`.
 
 **What would make this distinctive:** unlike every other system on this list, composite arithmetic simultaneously functions as a calculus machine (derivatives, limits, integrals via coefficient reads). No other TC mathematical system has this dual interpretation.
 
@@ -45,9 +45,9 @@ A computational model requires four primitives for Turing completeness:
 
 Composite numbers are ℤ-indexed sparse coefficient maps with no bound on the number of active dimensions. This provides:
 
-- **Random access** — `read_dim(n)` and `write_dim(n, v)` at any integer dimension, O(1)
-- **Sparse storage** — only occupied dimensions consume space, O(k) for k entries
-- **Unbounded addressing** — dimensions extend infinitely in both directions
+- **Random access** - `read_dim(n)` and `write_dim(n, v)` at any integer dimension, O(1)
+- **Sparse storage** - only occupied dimensions consume space, O(k) for k entries
+- **Unbounded addressing** - dimensions extend infinitely in both directions
 
 This satisfies the TM tape requirement.
 
@@ -55,7 +55,7 @@ This satisfies the TM tape requirement.
 
 **Our key argument:** coefficient extraction (`read_dim`) *is* conditional branching.
 
-A transition function δ(state, symbol) → (new_state, new_symbol, direction) can be encoded as three Composite numbers where `dimension = state × ALPHABET_SIZE + symbol` and the coefficient at that dimension encodes the output:
+A transition function δ(state, symbol) -> (new_state, new_symbol, direction) can be encoded as three Composite numbers where `dimension = state × ALPHABET_SIZE + symbol` and the coefficient at that dimension encodes the output:
 
 ```python
 # 2-state busy beaver encoded as Composite numbers
@@ -71,7 +71,7 @@ No Python dictionary lookup. No if/else. The Composite number holds all possible
 
 ### 3. Iteration
 
-Repeated application of a fixed composite step function constitutes iteration. The `×ZERO` dimensional shift provides a natural "tick" — each multiplication shifts the entire state down one dimension, encoding one computational step.
+Repeated application of a fixed composite step function constitutes iteration. The `×ZERO` dimensional shift provides a natural "tick" - each multiplication shifts the entire state down one dimension, encoding one computational step.
 
 The execution loop (analogous to beta-reduction in lambda calculus, or the clock cycle in hardware) applies this step repeatedly. This is the execution engine, not part of the computational model itself.
 
@@ -225,7 +225,7 @@ def test_1_busy_beaver_2state():
     assert len(tape.c) == 4, f"Expected 4 ones, got {len(tape.c)}"
     for d in tape.c:
         assert tape.c[d] == 1, f"Cell {d} = {tape.c[d]}, expected 1"
-    print(f"  ✅ Halted in {steps} steps, tape = {tape}")
+    print(f"  OK: Halted in {steps} steps, tape = {tape}")
     return True
 
 # =====================================================================
@@ -249,7 +249,7 @@ def test_2_busy_beaver_3state():
         state = new_state
         steps += 1
     assert state == 'HALT' and steps == 14 and len(tape.c) == 6
-    print(f"  ✅ Halted in {steps} steps, {len(tape.c)} ones on tape")
+    print(f"  OK: Halted in {steps} steps, {len(tape.c)} ones on tape")
     return True
 
 # =====================================================================
@@ -274,7 +274,7 @@ def test_3_multi_symbol():
         steps += 1
     for i in range(5):
         assert int(tape.read_dim(i)) == i + 1
-    print(f"  ✅ Tape = {tape}")
+    print(f"  OK: Tape = {tape}")
     return True
 
 # =====================================================================
@@ -304,7 +304,7 @@ def test_4_arithmetic_on_tape():
     combined = tape + tape2
     assert int(combined.read_dim(0)) == 11 and int(combined.read_dim(1)) == 22
 
-    print("  ✅ ×2, ×ZERO, ÷ZERO, + all work on tape")
+    print("  OK: ×2, ×ZERO, ÷ZERO, + all work on tape")
     return True
 
 # =====================================================================
@@ -321,7 +321,7 @@ def test_5_polynomial():
     assert len(product.c) > len(tape.c)
     assert product.read_dim(-2) == 1  # lowest term unchanged
     assert product.read_dim(2) == 1   # new highest term
-    print(f"  ✅ tape × (1+x) = {product}")
+    print(f"  OK: tape × (1+x) = {product}")
     return True
 
 # =====================================================================
@@ -346,7 +346,7 @@ def test_6_composite_native_control_flow():
     ALPHABET_SIZE = 2
 
     # Transition function AS Composite numbers
-    # (A=0, B=1, HALT=2) × (blank=0, marked=1) → key ∈ {0,1,2,3}
+    # (A=0, B=1, HALT=2) × (blank=0, marked=1) -> key ∈ {0,1,2,3}
     T_state     = Composite({0: 1, 1: 1, 2: 0, 3: HALT_CODE})
     T_symbol    = Composite({0: 1, 1: 1, 2: 1, 3: 1})
     T_direction = Composite({0: 1, 1: -1, 2: -1, 3: 0})
@@ -372,8 +372,8 @@ def test_6_composite_native_control_flow():
         tape, state, head = composite_step(tape, state, head)
         steps += 1
         print(f"    Step {steps}: {names[old_state]},read={old_sym}"
-              f" → key={key} → read_dim({key})"
-              f" → {names[state]},write={int(T_symbol.read_dim(key))}"
+              f" -> key={key} -> read_dim({key})"
+              f" -> {names[state]},write={int(T_symbol.read_dim(key))}"
               f",move={int(T_direction.read_dim(key)):+d}")
 
     # Verify: identical result to Test 1
@@ -384,9 +384,9 @@ def test_6_composite_native_control_flow():
         assert tape.c[d] == 1, f"Cell {d} = {tape.c[d]}, expected 1"
 
     print()
-    print("  ✅ IDENTICAL to Test 1 — no dict, no if/else")
-    print("  ✅ Branching = coefficient extraction (read_dim)")
-    print("  ✅ Transition function = Composite numbers")
+    print("  OK: IDENTICAL to Test 1 - no dict, no if/else")
+    print("  OK: Branching = coefficient extraction (read_dim)")
+    print("  OK: Transition function = Composite numbers")
     return True
 
 # =====================================================================
@@ -418,7 +418,7 @@ if __name__ == "__main__":
             if test():
                 passed += 1
         except Exception as e:
-            print(f"  ❌ FAILED: {e}")
+            print(f"  FAILED: {e}")
         print()
 
     print("=" * 60)
@@ -446,13 +446,13 @@ if __name__ == "__main__":
 
 | Test | What It Shows | Why It Matters |
 | --- | --- | --- |
-| **1–2** | Busy beaver TMs run correctly on a Composite tape | Composite numbers work as TM memory |
-| **3** | Multi-symbol alphabet (values 1–5) | Not limited to binary |
+| **1-2** | Busy beaver TMs run correctly on a Composite tape | Composite numbers work as TM memory |
+| **3** | Multi-symbol alphabet (values 1-5) | Not limited to binary |
 | **4** | ×, +, ×ZERO, ÷ZERO operate on the tape | Tape is a real algebraic object, not just a dict |
 | **5** | Tape is a Laurent polynomial | Same structure encodes calculus (dual interpretation) |
 | **6** | **Transition lookup via coefficient extraction** | **Control flow is native to the algebra** |
 
-Test 6 is the critical one. Tests 1–5 show the tape works. Test 6 shows the *branching* works — without Python dicts or if/else.
+Test 6 is the critical one. Tests 1-5 show the tape works. Test 6 shows the *branching* works - without Python dicts or if/else.
 
 ---
 
@@ -464,7 +464,7 @@ Composite numbers provide unbounded, sparse, ℤ-indexed random-access storage. 
 
 ### Branching
 
-A transition function δ(state, symbol) → (new_state, new_symbol, direction) is encoded as Composite numbers where each dimension corresponds to a (state, symbol) pair. Coefficient extraction (`read_dim(key)`) selects the correct transition — this IS conditional branching, expressed algebraically.
+A transition function δ(state, symbol) -> (new_state, new_symbol, direction) is encoded as Composite numbers where each dimension corresponds to a (state, symbol) pair. Coefficient extraction (`read_dim(key)`) selects the correct transition - this IS conditional branching, expressed algebraically.
 
 ### Iteration
 
@@ -478,17 +478,17 @@ Composite operations chain: the output of one is input to the next. Function com
 
 ## What We're NOT Claiming
 
-- ❌ That this is a formal proof (it's evidence + argument, seeking review)
-- ❌ That TC gives faster algorithms (same asymptotic complexity as standard TMs)
-- ❌ That the halting problem is solved (it remains undecidable, as expected)
-- ❌ That this replaces existing computation models
+- That this is a formal proof (it's evidence + argument, seeking review)
+- That TC gives faster algorithms (same asymptotic complexity as standard TMs)
+- That the halting problem is solved (it remains undecidable, as expected)
+- That this replaces existing computation models
 
 ## What We ARE Claiming
 
-- ✅ Composite arithmetic has the primitives needed for universal computation
-- ✅ The same algebraic structure that does calculus can also do computation
-- ✅ This dual interpretation (calculus + computation) appears to be unique among TC systems
-- ✅ The tests pass and are reproducible
+- Composite arithmetic has the primitives needed for universal computation
+- The same algebraic structure that does calculus can also do computation
+- This dual interpretation (calculus + computation) appears to be unique among TC systems
+- The tests pass and are reproducible
 
 ---
 
@@ -506,9 +506,9 @@ We actively seek answers to these:
 
 ## Related Pages
 
-- Provenance-Preserving Arithmetic — foundational theory and algebraic structure
-- composite_lib.py — the library implementation
-- Standalone Test Suite — 100+ tests validating the core arithmetic
+- Provenance-Preserving Arithmetic - foundational theory and algebraic structure
+- composite_lib.py - the library implementation
+- Standalone Test Suite - 100+ tests validating the core arithmetic
 
 ---
 
@@ -520,6 +520,6 @@ If you find an error in the reasoning, a gap in the tests, or a counterexample:
 2. Reference the specific test or argument section
 3. Provide a concrete counterexample if possible
 
-We value honest critique over agreement.
+Critique is more useful to us than agreement.
 
 © Toni Milovan. Documentation licensed under CC BY-SA 4.0. Code licensed under AGPL-3.0.

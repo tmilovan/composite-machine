@@ -16,17 +16,18 @@ mpmath.mp.dps = 50
 
 import composite.composite_lib as cl
 from composite.composite_lib import Composite, R, ZERO, exp, sinh, sqrt
-from composite.backends.config import use_dict
 
 
-@pytest.fixture(autouse=True)
-def dict_backend():
-    before = cl.get_backend() if hasattr(cl, "get_backend") else None
-    use_dict(); cl._refresh_constants()
-    yield
-    if before is not None:
-        from composite.backends.config import set_backend
-        set_backend(before)
+BACKENDS = ["dict", "sparse_dense", "dense_series", "fractional_dict", "fractional_numpy"]
+
+
+@pytest.fixture(autouse=True, params=BACKENDS)
+def backend(request):
+    import composite.backends.config as C
+    before = C.get_backend()
+    getattr(C, "use_" + request.param)(); cl._refresh_constants()
+    yield request.param
+    C.set_backend(before); cl._refresh_constants()
 
 
 def first_wrong(c, coeff, orders):
@@ -42,31 +43,32 @@ def e(k):                                    # Taylor coefficient of exp
     return 1.0 / math.factorial(k) if k >= 0 else 0.0
 
 
-H, INF = Composite({-1: 1.0}), Composite({1: 1.0})
+def H(): return Composite({-1: 1.0})
+def INF(): return Composite({1: 1.0})
 
 
 CASES = [
     # label, build, true coefficient of order k, the bound the rule gives
-    ("X * h", lambda X: X * H, lambda k: e(k - 1), 6),
-    ("X * (1/h)", lambda X: X * INF, lambda k: e(k + 1), 4),
-    ("X / h", lambda X: X / H, lambda k: e(k + 1), 4),
-    ("X / (1/h)", lambda X: X / INF, lambda k: e(k - 1), 6),
-    ("(X h) / (h + h^2)", lambda X: (X * H) / (H + H * H),
+    ("X * h", lambda X: X * H(), lambda k: e(k - 1), 6),
+    ("X * (1/h)", lambda X: X * INF(), lambda k: e(k + 1), 4),
+    ("X / h", lambda X: X / H(), lambda k: e(k + 1), 4),
+    ("X / (1/h)", lambda X: X / INF(), lambda k: e(k - 1), 6),
+    ("(X h) / (h + h^2)", lambda X: (X * H()) / (H() + H() * H()),
      lambda k: float(mpmath.taylor(lambda r: mpmath.exp(r) / (1 + r), 0, 14)[k]) if 0 <= k <= 14 else 0.0, 5),
 ]
 
 
 @pytest.mark.parametrize("label,build,coeff,want_bound", CASES, ids=[c[0] for c in CASES])
-def test_bound_sits_just_below_the_first_wrong_order(label, build, coeff, want_bound):
-    X = exp(ZERO, terms=6)                    # complete to order 5
+def test_bound_sits_just_below_the_first_wrong_order(backend, label, build, coeff, want_bound):
+    X = exp(cl.ZERO, terms=6)                 # complete to order 5
     c = build(X)
     bad = first_wrong(c, coeff, range(-2, 14))
-    print(f"\n  {label:20s} claims {c.complete_order}   first wrong order {bad}")
+    print(f"\n  [{backend}] {label:20s} claims {c.complete_order}   first wrong order {bad}")
     assert c.complete_order == want_bound
     assert bad is not None and bad == want_bound + 1
 
 
-def test_barrier_transmission_at_the_top():
+def test_barrier_transmission_at_the_top(backend):
     E = Composite({0: 1.0, -1: -1.0})          # V0 - h, V0 = 1, a = 2
     T = R(1) / (R(1) + sinh(sqrt(2 * (R(1) - E)) * 2.0) ** 2 / (4 * E * (R(1) - E)))
 
@@ -76,5 +78,5 @@ def test_barrier_transmission_at_the_top():
         return 1 / (1 + 4 * s ** 2 / (2 * x))
     tay = mpmath.taylor(T_ref, 1, 10)
     bad = first_wrong(T, lambda k: float(tay[k]) * (-1) ** k if 0 <= k <= 10 else 0.0, range(0, 10))
-    print(f"\n  T(V0 - h) claims {T.complete_order}   first wrong order {bad}")
+    print(f"\n  [{backend}] T(V0 - h) claims {T.complete_order}   first wrong order {bad}")
     assert bad is not None and T.complete_order < bad

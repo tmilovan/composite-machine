@@ -58,8 +58,8 @@ class Composite:
 Derivatives naturally appear at **negative dimensions** because:
 
 - f(x + h) = f(x) + f'(x)·h + f''(x)·h²/2! + ...
-- h → dimension -1
-- h² → dimension -2
+- h -> dimension -1
+- h² -> dimension -2
 - Coefficient at -1 is the derivative (after factorial rescaling)
 
 ### Creating the Infinitesimal
@@ -123,10 +123,10 @@ Dimension view:
   c at dim 0, d at dim -1
 
 Products:
-  a×c → dim 0+0=0,   coeff a*c
-  a×d → dim 0+(-1)=-1, coeff a*d
-  b×c → dim (-1)+0=-1, coeff b*c
-  b×d → dim (-1)+(-1)=-2, coeff b*d
+  a×c -> dim 0+0=0,   coeff a*c
+  a×d -> dim 0+(-1)=-1, coeff a*d
+  b×c -> dim (-1)+0=-1, coeff b*c
+  b×d -> dim (-1)+(-1)=-2, coeff b*d
 ```
 
 **This IS the Leibniz product rule!** The convolution formula for polynomial multiplication is **identical** to the formula for derivatives of products.
@@ -199,8 +199,8 @@ f(a+h) = f(a) + f'(a)h/1! + f''(a)h²/2! + f'''(a)h³/3! + ...
 
 So:
 
-- Coefficient at -1 = f'(a) / 1! → multiply by 1! to get f'(a)
-- Coefficient at -2 = f''(a) / 2! → multiply by 2! to get f''(a)
+- Coefficient at -1 = f'(a) / 1! -> multiply by 1! to get f'(a)
+- Coefficient at -2 = f''(a) / 2! -> multiply by 2! to get f''(a)
 
 ---
 
@@ -272,7 +272,7 @@ def ln(x, terms=15):
     return result
 ```
 
-**Key insight:** ln(a + h) = ln(a) + ln(1 + h/a), then expand ln(1 + u) as a series.
+ln(a + h) = ln(a) + ln(1 + h/a), then expand ln(1 + u) as a series.
 
 ---
 
@@ -282,8 +282,8 @@ def ln(x, terms=15):
 
 Integration is the **inverse of differentiation**, so:
 
-- Differentiation shifts dimensions **down** (0 → -1 → -2)
-- Integration shifts dimensions **up** (-2 → -1 → 0)
+- Differentiation shifts dimensions **down** (0 -> -1 -> -2)
+- Integration shifts dimensions **up** (-2 -> -1 -> 0)
 
 ```python
 def antiderivative(f_composite, constant=0):
@@ -309,7 +309,7 @@ F = antiderivative(f)
 
 Use **stepped integration**:
 
-1. Evaluate f at point x₀ as composite → get all derivatives
+1. Evaluate f at point x₀ as composite -> get all derivatives
 2. Shift dimensions to get antiderivative
 3. Evaluate F(x₀ + Δx) - F(x₀) using Taylor coefficients
 4. Repeat for next step
@@ -320,10 +320,10 @@ def integrate_adaptive(f, a, b, tol=1e-10):
     x0 = a
 
     while x0 < b:
-        # ONE evaluation → all derivatives
+        # ONE evaluation -> all derivatives
         fx = f(R(x0) + ZERO)
 
-        # ONE dimensional shift → antiderivative
+        # ONE dimensional shift -> antiderivative
         Fx = antiderivative(fx)
 
         # Evaluate contribution from this step
@@ -465,7 +465,7 @@ class CompositeOptimized:
 - JIT compilation (Numba): 50×
 - GPU implementation: 100×
 
-Total potential: **500-1000× faster** → competitive with PyTorch autograd!
+Total potential: **500-1000× faster** -> competitive with PyTorch autograd!
 
 ---
 

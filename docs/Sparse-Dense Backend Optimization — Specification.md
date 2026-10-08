@@ -16,14 +16,14 @@ runs, dims −19..0), `cProfile`, sorted by `tottime`:
 
 | share | function |
 |---|---|
-| 11.0% | `_cluster_terms` — 40k calls, twice per multiply, once per operand |
+| 11.0% | `_cluster_terms` - 40k calls, twice per multiply, once per operand |
 | 8.2% | `np.unique` (inside clustering) |
-| 7.9% | `np.array_split` — 80k calls |
+| 7.9% | `np.array_split` - 80k calls |
 | 7.6% | `_mask_to_minkowski` |
 | 7.5% | `_merge_cluster_outputs` |
 | 5.0% | `np.diff` (inside clustering) |
 | 4.1% | `composite_lib._is_wholly_zero` |
-| **3.5%** | **`convolve` — the actual arithmetic** |
+| **3.5%** | **`convolve` - the actual arithmetic** |
 
 Cost breakdown of one `a*b` at n=20, measured independently:
 
@@ -99,13 +99,13 @@ class SparseData:
 1. Clusters are sorted by `offset` and are **non-overlapping and non-adjacent**:
    for consecutive clusters, `offset[i] + len(vals[i]) + gap_threshold <= offset[i+1]`.
    Anything closer is merged at construction.
-2. `vals` within a cluster may contain zeros (expressed zeros are meaningful —
+2. `vals` within a cluster may contain zeros (expressed zeros are meaningful - 
    see Zero Rules; they must not be pruned silently).
 3. A cluster is never empty (`len(vals) >= 1`).
 4. The empty composite is `clusters == []`. This is distinct from a composite
    holding `|0|_0`, which is `[(0, array([0.0]))]`.
 5. Leading and trailing zeros within a cluster are permitted but SHOULD be
-   trimmed at construction *only when* trimming cannot change the meaning —
+   trimmed at construction *only when* trimming cannot change the meaning - 
    i.e. never for a cluster of length 1, and never if it would empty a cluster.
    (Open question, §7.)
 
@@ -116,7 +116,7 @@ rediscovered by scanning:
 
 | operation | resulting structure |
 |---|---|
-| dense x dense | **dense** — the Minkowski sum of two contiguous ranges is contiguous |
+| dense x dense | **dense** - the Minkowski sum of two contiguous ranges is contiguous |
 | dense x k clusters | k clusters, merged where they overlap after offsetting |
 | j clusters x k clusters | at most j*k clusters, merged where they overlap |
 | add | sorted merge of the two cluster lists; overlapping clusters sum elementwise |
@@ -158,7 +158,7 @@ operation** for callers that need flat form; it MUST NOT be called inside
 ### 4.4 `read_dim(data, dim)`
 
 Binary search over cluster offsets, then direct index. O(log k) rather than
-O(log n) over a flat dims array — and O(1) for the single-cluster case.
+O(log n) over a flat dims array - and O(1) for the single-cluster case.
 
 ### 4.5 `deconvolve(a, b)`
 
@@ -188,7 +188,7 @@ The following MUST hold after the change:
    under the Zero Rules and MUST NOT be pruned by the new code paths.
 5. `gap_threshold` continues to mean what it means today; `use_sparse_dense(8)`,
    `use_sparse_dense(256)` etc. must still produce identical *results* (they
-   currently do — only performance should vary).
+   currently do - only performance should vary).
 
 ## 6. Why results can differ, and when that is acceptable
 
@@ -206,7 +206,7 @@ separate, independently-justified change.
 1. **Zero trimming (§3.2 rule 5).** Trimming leading/trailing zeros from a
    cluster shortens arrays but can destroy an expressed zero that the Zero Rules
    treat as meaningful. Needs a decision, and it interacts with `_is_wholly_zero`
-   in `composite_lib` (4.1% of the current profile — worth checking whether it
+   in `composite_lib` (4.1% of the current profile - worth checking whether it
    can be answered from cluster metadata instead of a value scan).
 2. **Cached scalar metadata.** `_is_wholly_zero`, leading dimension, and term
    count are all derivable from the cluster list in O(k). Consider caching the
@@ -225,7 +225,7 @@ separate, independently-justified change.
    runs separated by more; negative-only, positive-only and straddling dims;
    operands of very different lengths.
 2. **Existing suite green.** Baseline at time of writing: `pytest tests/` gives
-   **76 passed, 1 failed** — the one failure is `test_limits`, from the separate
+   **76 passed, 1 failed** - the one failure is `test_limits`, from the separate
    `sqrt` dimension fix (2 of 105 limit assertions), not from this work. That
    baseline must not get worse.
 3. **Bit-identity check** on a fixed corpus, before vs after, asserting exact
@@ -265,6 +265,6 @@ print(bench(lambda: a * b), "us")                      # baseline 65.35
 
 40x on dense-operand multiplication at n=20 (65.35 us -> ~1.65 us), with 86% of
 the remaining time in `np.convolve` itself. Sparse layouts benefit by the removal
-of the same clustering round-trip, by an amount not yet measured — the TSP
+of the same clustering round-trip, by an amount not yet measured - the TSP
 crossword (one dense negative run plus sparse positive metadata) is the case to
 measure, since it re-derives its structure on every operation today.

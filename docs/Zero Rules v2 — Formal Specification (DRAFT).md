@@ -46,7 +46,7 @@ negative coefficient together, and the glyph form's bars prevent it
 only of operands. Terms are notation; there is nothing for a rule to act on.
 
 ```
-<0_0>                     an operand — a number that is a zero
+<0_0>                     an operand - a number that is a zero
 <0_0 6_-1 1_-2>           one operand whose first term happens to be zero
 ```
 
@@ -54,12 +54,12 @@ only of operands. Terms are notation; there is nothing for a rule to act on.
 
 ## 1. The rules
 
-**R1 — a zero operand converts.**
+**R1 - a zero operand converts.**
 A composite that is **wholly zero** (every expressed coefficient is 0), used as
 an operand of any operation, converts: `0_d -> 1_(d-1)`.
 If it carries several zeros, convert the **lowest dimension only**. Once that
 one has converted the composite holds a nonzero, so by R2 every remaining zero
-is inert — and, by R2, retained.
+is inert - and, by R2, retained.
 
 **R1 applies AT THE SITE for a cancellation, and the residue is the whole
 annihilated quantity, one grade down:**
@@ -82,7 +82,7 @@ for the next use:
 
 Two readings of the same rule, and they agree term for term. Grade by grade:
 each dimension that goes to zero converts where it stands, carrying its own
-coefficient — `3 - 3` gives `|3|_-1` and `h - h` gives `|1|_-2`, and their sum
+coefficient - `3 - 3` gives `|3|_-1` and `h - h` gives `|1|_-2`, and their sum
 is the line above. Or as a whole: multiplying by `h` shifts every grade down by
 one, because `h` is the unit at grade -1, which is the shift R1 already
 prescribes. So `a - a = a*h` is not an extra axiom; it is R1 with the
@@ -92,8 +92,8 @@ R1 in the form stated first is left with the **written** and **manufactured**
 zeros, where nothing was annihilated and a unit is all there is to deposit.
 
 **Why the quantity and not a unit, or just a magnitude.** With a unit every
-cancellation is the same character and every ratio between two zeros is 1 —
-`(2-2)/(3-3)` came out 1 — which is precisely the collapse §85 forbids. Keeping
+cancellation is the same character and every ratio between two zeros is 1 - 
+`(2-2)/(3-3)` came out 1 - which is precisely the collapse §85 forbids. Keeping
 only the deepest coefficient fixes that for scalars and not for composites,
 because the deepest coefficient of a seeded quantity is always 1: `(x-x)/(y-y)`
 still came out 1 where `x/y` is 1.5. Carrying the whole quantity gives the ratio
@@ -103,7 +103,7 @@ performs. Measured: `(2-2)/(3-3)` is 2/3, `(6-6)/(2-2)` is 3, `(x-x)/(y-y)` is
 
 It also restores **distributivity across a cancellation** with nothing given up
 for it, because `a*(b*h)` and `(a*b)*h` are the same term by associativity of
-multiplication — sign included. Measured 64/64 on scalar pairs where keeping
+multiplication - sign included. Measured 64/64 on scalar pairs where keeping
 only the magnitude gave 32/64, failing on every negative factor.
 
 **The cost is `a + (-a)`.** In `a - a` the annihilated quantity appears
@@ -111,7 +111,7 @@ identically on both sides, so it is unambiguous. In `a + (-a)` the operands are
 `a` and `-a`, the rule reads the left one, and the two orders differ by a sign:
 `2 + (-2)` is `|2|_-1` and `(-2) + 2` is `|-2|_-1`. So commutativity of addition
 does not hold on a cancelling pair. There is no symmetric composite to take
-instead — the only symmetric choice is a magnitude, which is what collapses the
+instead - the only symmetric choice is a magnitude, which is what collapses the
 composite ratios back to 1. The difference is never more than a sign, and
 `z4c_cancelling_pair` asserts that. (Selected by `CANCELLATION_CARRIES`, which
 also keeps the magnitude rule reachable for comparison.)
@@ -149,7 +149,7 @@ has no units to check, so the statement is derived, not observed.
                           =  <0_3 0_-1 1_-4>
 ```
 
-Exactly one conversion happens. The other zeros are not discarded — they record
+Exactly one conversion happens. The other zeros are not discarded - they record
 that those dimensions cancelled too.
 
 Lowest-first is forced by the object being a zero: converting highest-first
@@ -157,7 +157,7 @@ would yield `1_2`, an infinity, which a zero is not.
 
 ### When R1 fires, and why it is always an identity
 
-R1 needs the composite to be wholly zero — nothing left at any grade. For a
+R1 needs the composite to be wholly zero - nothing left at any grade. For a
 quantity carrying infinitesimal structure that is a strong condition, and it
 picks out a specific kind of cancellation.
 
@@ -165,7 +165,7 @@ If `x` and `y` are different quantities that happen to agree at a point, then
 seeded with an infinitesimal they disagree *near* it: the first derivative that
 does not match appears as a nonzero coefficient at some negative grade. The
 difference has a tail, R2 governs it, and **R1 never fires**. If `x` and `y`
-agree in a neighbourhood — the same quantity, or equal by law or symmetry —
+agree in a neighbourhood - the same quantity, or equal by law or symmetry - 
 every derivative matches and the difference is zero at every grade.
 
 So R1 fires exactly on the cases where the cancellation is an *identity*, and
@@ -179,26 +179,26 @@ c - v      (v = c) ->  |c|_-1                identity: nothing below, it convert
 This is not a tendency; it follows from what "wholly zero" means. It holds
 whenever the computation carries infinitesimal structure. Evaluate two
 different functions at a bare point with no seed and a coincidental
-cancellation also gives `0_0` — but there is no local information in that
+cancellation also gives `0_0` - but there is no local information in that
 computation to distinguish it with.
 
-**The consequence to be aware of.** A physics run found this in five places —
+**The consequence to be aware of.** A physics run found this in five places - 
 the Dirac quantum-number identity `n - (j+1/2)`, charge conservation `k.J`,
 the massless photon `c - v`, a supersymmetric vacuum sum, and a remnant at
 exactly `M = 1`. In each, the identity converted and the residue was larger
 than the real structure around it: the photon's gap came out `h` against an
 infinitesimal-mass gap of `h**2/2`, and the longitudinal term of `k.J` came out
 1, 0.25 or 0.01 depending on how the mass was scaled. Carrying the quantity
-makes this LARGER, not smaller — `c - v` at `v = c` now deposits
+makes this LARGER, not smaller - `c - v` at `v = c` now deposits
 `|299792458|_-1` where it deposited `|1|_-1`, and a cancelled composite deposits
-every grade it had — so the guidance is unchanged and more pressing: an identity
+every grade it had - so the guidance is unchanged and more pressing: an identity
 that is known in advance should be written as `Composite({})`, which is NOTHING
 and deposits no order.
 
 R1 is correct as specified and stays as specified. What the caller must know is
 that an identity has to be written as `NOTHING` deliberately, because the
 algebra cannot tell an identity from a cancellation it merely has no structure
-below — those are the same object. Seeding the quantity (`M = 1 + h` rather
+below - those are the same object. Seeding the quantity (`M = 1 + h` rather
 than `M = 1`) removes the cancellation entirely and is the better fix where it
 applies.
 
@@ -209,11 +209,11 @@ structure** and still went to zero at every grade is an identity, while two
 bare scalars cancelling is not. Nothing depends on this today; it is recorded
 so the option is not rediscovered from scratch.
 
-**R2 — a zero term is inert and is kept.** *(a consequence of R1, not a
+**R2 - a zero term is inert and is kept.** *(a consequence of R1, not a
 separate rule)*
 
 R1 acts on operands. A zero that is a **term** of a composite is not an
-operand — it is part of how that number is written (§0). So there is nothing
+operand - it is part of how that number is written (§0). So there is nothing
 for R1 to do, and the term is retained, contributing **0** to every operation
 exactly as a zero coefficient does in ordinary polynomial arithmetic. It never
 merges into another coefficient and never promotes.
@@ -227,15 +227,15 @@ merges into another coefficient and never promotes.
 Nothing here is stipulated. Once `+` stops doing two jobs, R1 alone decides
 every case.
 
-**R3 — `× 1` and `/ 1` are identities.** They return the operand untouched.
+**R3 - `× 1` and `/ 1` are identities.** They return the operand untouched.
 
-**R4 — addition and subtraction never shift dimensions.** Coefficients add per
+**R4 - addition and subtraction never shift dimensions.** Coefficients add per
 dimension, and the addition itself shifts nothing. Where the result still
 carries a nonzero term, a zero among them is a term and stays put, per R2.
 Where the result is **wholly** zero the cancellation converts at the site, per
 R1: `6 - 6` is `|6|_-1`, not `|0|_0`.
 
-**R6 — there is no additive identity.**
+**R6 - there is no additive identity.**
 Adding zero is not a no-op. `0_d` is a number, so by R1 it converts and
 contributes `1_(d-1)`:
 
@@ -244,7 +244,7 @@ R(5) + <0_0>   ->  <5_0 1_-1>      not <5_0>
 <0_0> + <0_0>  ->  <2_-1>
 ```
 
-This is the `1 − 1 ≠ 0` thesis applied consistently — if subtracting a value
+This is the `1 − 1 ≠ 0` thesis applied consistently - if subtracting a value
 from itself leaves an infinitesimal, adding a zero must deposit one too.
 
 `∅` (nothing) is **not** an identity element, because it is not a number.
@@ -252,7 +252,7 @@ from itself leaves an infinitesimal, adding a zero must deposit one too.
 (§0, Principle 2). The system has a multiplicative identity (R3) and no
 additive one; the asymmetry is deliberate.
 
-**A written zero is an EXPRESSED zero.** `c + 0`, `c * 0`, `sum([c, c])` — the
+**A written zero is an EXPRESSED zero.** `c + 0`, `c * 0`, `sum([c, c])` - the
 scalar was written, so it is `0_0` and R1 converts it. An expressed zero *is*
 an infinitesimal; that is the content of the system, not a cost it imposes.
 
@@ -260,13 +260,13 @@ The distinction §0 draws is between a zero and an **absence**, not between a
 zero and a zero that arrived from data. A masked entry holding `0.0` holds
 zero; a quadrature node at `0.0` is a node at zero; a coefficient that is
 `0.0` is a coefficient that is zero. What is *absent* is a term that was never
-put there — `d.get(k)` returning nothing, an accumulator with nothing added
-yet — and the idiom for that is `Composite({})`, never a written `0`.
+put there - `d.get(k)` returning nothing, an accumulator with nothing added
+yet - and the idiom for that is `Composite({})`, never a written `0`.
 
 This was briefly changed, so that a bare scalar zero coerced to `∅`. It was
 reverted for two reasons. The premise was wrong: the event R1 records is the
 *expression* of the zero, and writing it is that event. And the consequence
-was worse than the problem — a keyboard-reachable additive identity makes this
+was worse than the problem - a keyboard-reachable additive identity makes this
 a conventional ring with an extra symbol attached, and two zeros obeying
 different laws is worse than one obeying one.
 
@@ -277,17 +277,17 @@ expressed, and a Borel integral returned 3224 for a value of 0.697. The fix is
 
 ---
 
-**R5 — products retain the dimensions they construct.** The dimensions of a
+**R5 - products retain the dimensions they construct.** The dimensions of a
 product are the Minkowski sum of the operands' dimension sets, and
 zero-valued results at those dimensions are kept (R2). Note the current
 backend violates this: `_merge_cluster_outputs` prunes with
-`abs(v) > zero_tol` and `zero_tol = 0.0`. The mask is required — `_cluster_terms`
+`abs(v) > zero_tol` and `zero_tol = 0.0`. The mask is required - `_cluster_terms`
 densifies gaps before convolving, so simply not pruning would invent
 dimensions nobody built.
 
 ---
 
-## 2. Worked examples — all measured
+## 2. Worked examples - all measured
 
 | expression | result |
 |---|---|
@@ -298,7 +298,7 @@ dimensions nobody built.
 | `0_3 × 2_0` | `2_2` |
 | `5_0 × 0_3` | `5_2` |
 | `0_0 / 0_0` | `1_0` |
-| `<0_3> + <5_3>` | `<5_3 1_2>` (an addition — R1 applies to `0_3`) |
+| `<0_3> + <5_3>` | `<5_3 1_2>` (an addition - R1 applies to `0_3`) |
 | `<0_3 0_-1 0_-3> × 2_0` | `<0_3 0_-1 2_-4>` |
 | `x − x` for `x = <3_3 5_-1 2_-3>`, then `× 2_0` | `<0_3 0_-1 2_-4>` |
 | `<0_2 3_0><0_1 5_0>` | `<6_1 18_0>` |
@@ -334,9 +334,9 @@ than by any choice between rules.
 
 ---
 
-## 3. Algebraic laws — measured
+## 3. Algebraic laws - measured
 
-Operands built as sums of single terms with zeros included, N = 1500–2000,
+Operands built as sums of single terms with zeros included, N = 1500-2000,
 compared as numbers:
 
 | law | failures |
@@ -375,7 +375,7 @@ distributivity holds: those rows are unchanged.
 
 ---
 
-## 4. Calculus — measured
+## 4. Calculus - measured
 
 | | result |
 |---|---|
@@ -406,13 +406,13 @@ Read the markers with `[d for d, v in c.c.items() if v == 0.0]`.
 
 **What is preserved**
 
-- **Theorem 1.** `5_0 × 0_0 = 5_-1` — multiplying by zero shifts the value to
+- **Theorem 1.** `5_0 × 0_0 = 5_-1` - multiplying by zero shifts the value to
   another dimension instead of destroying it, and `5_0 × 0_0 / 0_0 = 5_0`
   recovers it exactly.
 - **Order of a zero.** `0_0 × 0_0 = 1_-2`, `0_0³ = 1_-3`. A zero carries its
   dimensional order through every operation; `0_2` and `0_0` are different
   numbers with different futures.
-- **The derivative tower.** `(3+h)² = <9_0 6_-1 1_-2>` — value and all
+- **The derivative tower.** `(3+h)² = <9_0 6_-1 1_-2>` - value and all
   derivatives, from one evaluation.
 - **The cancellation record**, at its own dimension, carried through
   subsequent arithmetic.
@@ -511,18 +511,18 @@ Performance unchanged (692 ms on a 200-evaluation mixed workload).
 Three library defects surfaced while implementing these rules. None was caused
 by them; each was pre-existing and hidden.
 
-**6.1 — `ln` seeded its accumulator with a zero.** `Composite({0: math.log(a)})`
+**6.1 - `ln` seeded its accumulator with a zero.** `Composite({0: math.log(a)})`
 is `{0: 0.0}` at `a = 1` -- a zero, which R1 converts on first use, adding a
 spurious `h` and doubling the series. This is R6: a summation that has not yet
 added a term holds *nothing*, not zero. `atan`, `asin` and `acos` seeded the
 same way. Every accumulator in the library should be audited against R6.
 
-**6.2 — transcendentals built series with nothing to expand in.** `sqrt`, `sin`,
+**6.2 - transcendentals built series with nothing to expand in.** `sqrt`, `sin`,
 `cos`, `ln`, `atan`, `asin` now return their value directly when the argument
 carries no infinitesimal part. Otherwise `x - R(a)` is a genuine zero, and R1
 turns it into `|1|_-1`, manufacturing an infinitesimal that is not there.
 
-**6.3 — FFT convolution silently zeroed products of large composites.** Above
+**6.3 - FFT convolution silently zeroed products of large composites.** Above
 128 combined terms, `convolve` used an FFT, which mixes every input coefficient
 into every output bin -- so one overflow destroyed all of them, including
 dimension 0, whose direct product is finite. Squaring `sin(1/x)` (coefficients
@@ -534,7 +534,7 @@ Taylor tower; the oscillatory limit test was simply the only thing that noticed.
 
 ## 7. Decisions
 
-**7.1 — what counts as `0`: exact `0.0` only.** *Decided; implemented.*
+**7.1 - what counts as `0`: exact `0.0` only.** *Decided; implemented.*
 No tolerance decides zero-ness anywhere in the arithmetic. Term existence
 (`exp`'s infinitesimal filter, `deconvolve`'s leading-term and dividend
 selection in both backends, `_mc_deconvolve`, the `MC` transcendental guards),
@@ -547,12 +547,12 @@ Five `1e-100` guards remain in `_detect_singularity` and the improper-integral
 machinery. They test whether a *function value* is large enough to divide by,
 not whether a coefficient is a zero -- a different question, left alone.
 
-**7.2 — no discarding in serialization.** *Decided; implemented.*
+**7.2 - no discarding in serialization.** *Decided; implemented.*
 `to_dict`/`from_dict`, `to_json`/`from_json`, `to_bytes`/`from_bytes` and
 `to_array`/`from_array` all round-trip zero coefficients. `from_array` was
 filtering `if v != 0`; that is gone.
 
-**7.3 — cancellation above dimension 0.** *Resolved; no change needed.*
+**7.3 - cancellation above dimension 0.** *Resolved; no change needed.*
 `3_3 - 3_3` gives `<0_3>` -- the dimension was constructed by both operands, so
 it exists and holds zero, exactly as at any other dimension. When that zero is
 later used as an operand R1 converts it, and the result is the mirror image of
@@ -567,11 +567,11 @@ Cancellation always moves one step toward the less-structured end. Two equal
 infinitesimals cancel to a deeper infinitesimal; two equal infinities cancel to
 a smaller one.
 
-**7.4 — marker accumulation.** *Left as is.* Zeros are never discarded, so long
+**7.4 - marker accumulation.** *Left as is.* Zeros are never discarded, so long
 chains accumulate them. Measured cost is ~1.2x with no growth in
 active-dimension count. Revisit if a workload shows otherwise.
 
-**7.5 — scope.** *Left for now.* The rules apply to `Composite`. The
+**7.5 - scope.** *Left for now.* The rules apply to `Composite`. The
 complex composites in `composite_extended.py` have their own arithmetic. `MC`
 had its own too (it received the division fix below, but not R1--R6); since
 2026-10-06 it is parked in `composite_multivar_mc.py` and `composite_multivar`
@@ -640,11 +640,11 @@ why that is `ZERO**2`.
   - the nine identities of §2
   - the six algebraic laws of §3, fuzzed over operands **built by addition** of
     single terms with zeros included, ≥1500 cases each
-  - the provenance assertions of §5 — `((3+h)²−9)/h` must be
+  - the provenance assertions of §5 - `((3+h)²−9)/h` must be
     `<0_1 6_0 1_-1>`, not `<6_0 1_-1>`
 - Regression guard for 7.3: `∫₀^∞ x·e⁻ˣ dx` must terminate and return 1.
 - Round-trip guard for 7.4: a composite carrying zero coefficients must survive
   `to_json` / `from_json` unchanged.
 - Guards for §6.1 and §6.2: `ln(1+h)` must have no dimension-0 term, and
   `1/x` with a Python literal must equal `R(1)/x`.
-- No xfail markers are needed — every suite passes in full.
+- No xfail markers are needed - every suite passes in full.

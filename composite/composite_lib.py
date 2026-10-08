@@ -101,6 +101,30 @@ class LimitDoesNotExistError(ValueError):
     """Raised when a limit provably does not exist."""
     pass
 
+class RoundingResidueWarning(UserWarning):
+    """limit() dropped terms above grade 0 as float rounding residue.
+
+    Float coefficients cannot cancel exactly along two different routes:
+    sin(tan x) and tan(sin x) agree through x^6, but their x^3 and x^5
+    coefficients differ in the last bit, and dividing by a denominator that
+    starts at x^7 turns 2.8e-17 into a pole term of 8e-16.  The arithmetic keeps
+    it -- it is exact by design and cannot know -- and limit() then read the
+    sign of that residue as divergence and returned -INF for a limit of 1.
+
+    limit() now reads terms above grade 0 as residue when every one of them is
+    at most LIMIT_ROUNDING_RESIDUE of the largest finite term, and says so with
+    this warning.  The cost is stated: a GENUINE infinite part that small would
+    be read the same way, which is why this is a warning and never silent.
+    """
+
+
+#: Relative size, against the largest term at grade 0 or below, under which
+#: limit() reads every term above grade 0 as rounding residue.  The measured
+#: residue in the case that motivated it was 8.5e-16; the bound leaves three
+#: orders of headroom for residues amplified by small denominators.
+LIMIT_ROUNDING_RESIDUE = 1e-12
+
+
 class LimitUndecidableError(ValueError):
     """Raised when composite arithmetic cannot determine the limit."""
     pass
@@ -4783,7 +4807,10 @@ def limit(f: Callable, as_x_to: float, terms: int = 12,
     (sin, cos, atan, asin, acos, tanh) evaluate at st(x) for infinite
     arguments, so oscillatory limits like x·sin(1/x) resolve algebraically.
 
-    Positive dims in the result indicate unbounded divergence (e.g. exp).
+    Positive dims in the result indicate unbounded divergence (e.g. exp) --
+    unless every one is at float rounding size against the finite part, the
+    residue of a cancellation floats could not make exact; those are dropped
+    with a RoundingResidueWarning (see LIMIT_ROUNDING_RESIDUE).
     Domain errors (ln(0), sqrt(-x)) raise LimitUndecidableError, or fall
     back to integral averaging with ``fallback=True``.
 
@@ -4907,6 +4934,25 @@ def _limit_impl(f, as_x_to, terms, dir, fallback):
         raise LimitUndecidableError(
             "Algebraic evaluation failed (domain error at limit point). "
             "Use fallback=True for integral averaging.")
+
+    # Terms above grade 0 at rounding size against the finite part: a
+    # cancellation that float coefficients could not make exact.  See
+    # RoundingResidueWarning.
+    if isinstance(result, Composite):
+        _all = result.coeffs_dict()
+        _pos = [abs(c) for d, c in _all.items() if _dim_positive(d) and c != 0.0]
+        _fin = [abs(c) for d, c in _all.items() if not _dim_positive(d)]
+        _scale = max(_fin) if _fin else 0.0
+        if _pos and _scale > 0.0 and max(_pos) <= LIMIT_ROUNDING_RESIDUE * _scale:
+            _warnings.warn(
+                "limit(): %d term(s) above grade 0, the largest %.1e of the "
+                "finite part, read as float rounding residue of a cancellation "
+                "and dropped; the limit is the grade-0 value. A genuine infinite "
+                "part that small would be read the same way (bound: "
+                "LIMIT_ROUNDING_RESIDUE = %.0e)." % (len(_pos), max(_pos) / _scale,
+                                                    LIMIT_ROUNDING_RESIDUE),
+                RoundingResidueWarning, stacklevel=3)
+            return float(result.coeff(0))
 
     # Positive dims → unbounded divergence (from exp, ln, etc.)
     max_pos = result.max_positive_dim()

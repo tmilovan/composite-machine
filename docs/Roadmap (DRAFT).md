@@ -1,8 +1,8 @@
 # docs/ROADMAP.md
 
-# Composite Machine — What Works, What Doesn't, What's Next
+# Composite Machine - What Works, What Doesn't, What's Next
 
-An honest accounting of where the project stands.
+Where the project stands.
 
 ---
 
@@ -12,11 +12,11 @@ These are tested, stable, and used regularly.
 
 ### Core arithmetic
 
-Numbers are sparse dicts over integer dimensions. Multiplication is polynomial multiplication, division polynomial division. This follows from Laurent polynomial ring theory — nothing exotic about the arithmetic itself.
+Numbers are sparse dicts over integer dimensions. Multiplication is polynomial multiplication, division polynomial division. This follows from Laurent polynomial ring theory - nothing exotic about the arithmetic itself.
 
 - Addition, subtraction, negation
 - Multiplication
-- Division — single-term and multi-term (polynomial long division)
+- Division - single-term and multi-term (polynomial long division)
 - Integer and real-valued powers
 
 ### Differentiation
@@ -30,7 +30,7 @@ All derivatives from a single evaluation. Evaluate `f(a + ε)`, read the coeffic
 
 ### Limits
 
-Plug in the infinitesimal or infinity, read the standard part. No L'Hôpital needed — composite division resolves indeterminate forms directly.
+Plug in the infinitesimal or infinity, read the standard part. No L'Hôpital needed - composite division resolves indeterminate forms directly.
 
 - Limits at a point, at zero, at ±∞
 - One-sided limits
@@ -57,12 +57,12 @@ Works well for a wide range of functions. Adaptive stepping uses higher-order Ta
 
 ### Provenance-preserving operations
 
-This is the part that's genuinely new. Multiplying by zero doesn't destroy information — it shifts it to dimension −1. Dividing by zero shifts it to dimension +1. You can recover the original value by reversing the operation.
+This is the part that is new. Multiplying by zero doesn't destroy information - it shifts it to dimension −1. Dividing by zero shifts it to dimension +1. You can recover the original value by reversing the operation.
 
-- `a × 0` → coefficient preserved at dim −1
-- `a / 0` → coefficient preserved at dim +1
-- `(a × 0) / 0` → recovers `a`
-- `0 / 0` → resolves to `1` (provenance-dependent)
+- `a × 0` -> coefficient preserved at dim −1
+- `a / 0` -> coefficient preserved at dim +1
+- `(a × 0) / 0` -> recovers `a`
+- `0 / 0` -> resolves to `1` (provenance-dependent)
 - Arbitrary chains of ×0 and ÷0 preserve and recover values
 
 ---
@@ -123,9 +123,9 @@ Same arithmetic, complex coefficients.
 
 ## Performance
 
-Pure Python, dict-based sparse storage. Roughly 500–1000× slower than PyTorch for simple gradients.
+Pure Python, dict-based sparse storage. Roughly 500-1000× slower than PyTorch for simple gradients.
 
-This is a research prototype. It's useful for problems where having all derivative orders, algebraic limits, or provenance matters more than throughput. It's not useful for production numerical computing — not yet.
+This is a research prototype. It's useful for problems where having all derivative orders, algebraic limits, or provenance matters more than throughput. It's not useful for production numerical computing - not yet.
 
 ---
 
@@ -133,11 +133,11 @@ This is a research prototype. It's useful for problems where having all derivati
 
 In rough priority order:
 
-1. **Validate experimental modules** — systematic edge-case testing for multivariable, complex analysis, vector calculus, and ODE solving
-2. **Missing transcendentals** — inverse hyperbolics, special functions
-3. **Performance** — extending numpy support.
-4. **Transforms** — Fourier, Laplace. These should map naturally onto the dimensional structure.
-5. **Better ODE support** — implicit methods for stiff systems, adaptive order selection
+1. **Validate experimental modules** - systematic edge-case testing for multivariable, complex analysis, vector calculus, and ODE solving
+2. **Missing transcendentals** - inverse hyperbolics, special functions
+3. **Performance** - extending numpy support.
+4. **Transforms** - Fourier, Laplace. These should map naturally onto the dimensional structure.
+5. **Better ODE support** - implicit methods for stiff systems, adaptive order selection
 
 ### What's not on the roadmap
 
@@ -149,10 +149,10 @@ There's a theoretical question about whether this structure can encode a univers
 
 Every operation listed above uses the same mechanism: evaluate a function on a composite number, read coefficients at the right dimensions.
 
-- Dimension 0 → value
-- Dimension −n → nth derivative coefficient (× n!)
-- Dimension +n → antiderivative / growth structure
-- Dimension −1 (complex) → residue
+- Dimension 0 -> value
+- Dimension −n -> nth derivative coefficient (× n!)
+- Dimension +n -> antiderivative / growth structure
+- Dimension −1 (complex) -> residue
 
 One algebraic structure. Multiple mathematical readings. That's the whole idea.
 

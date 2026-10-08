@@ -155,7 +155,7 @@ not all point the same way.
 
 - **vs PyTorch/JAX** - They give first-order gradients, fast, and vectorised across a batch. This gives every order from one evaluation, plus limits and integration. Neither is a backend here, so no throughput ratio against them is quoted - the measurements below are against NumPy and SymPy, which are what this actually runs on.
 - **vs SymPy** - SymPy is symbolic, this is numerical. On the cases measured this is the faster of the two: 3-70x on indeterminate limits (both exact) and ~6400x on a Taylor expansion to order 8, agreeing to 2.5e-15.
-- **vs mpmath** - mpmath is arbitrary-precision and carries the special-function library this does not (gamma, zeta, Bessel). On derivatives the two agree exactly: the 4th derivative of x⁴eˣ at 1 matches to all 15 digits. The difference is method - mpmath samples and extrapolates, so a limit is only as good as the extrapolation converges. On six harder limits it returned 0.99962 for xˣ as x→0⁺ and −2.7e−8 for x²·ln x, where reading the standard part off the algebra gives both exactly.
+- **vs mpmath** - mpmath is arbitrary-precision and carries the special-function library this does not (gamma, zeta, Bessel). On derivatives the two agree exactly: the 4th derivative of x⁴eˣ at 1 matches to all 15 digits. The difference is method - mpmath samples and extrapolates, so a limit is only as good as the extrapolation converges. On six harder limits it returned 0.99962 for xˣ as x->0⁺ and −2.7e−8 for x²·ln x, where reading the standard part off the algebra gives both exactly.
 - **vs dual numbers** - Classic dual numbers give you one derivative (epsilon squared is zero). Here epsilon squared is kept, so you get all orders.
 
 ---

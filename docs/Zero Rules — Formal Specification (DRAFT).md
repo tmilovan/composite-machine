@@ -2,16 +2,16 @@
 
 **Status:** awaiting review. **Not implemented.**
 Derived from the working session of 2026-08-19. Every numeric claim in
-§7–§11 was measured against a working prototype, not reasoned about.
+§7 - §11 was measured against a working prototype, not reasoned about.
 
-**Structure.** §1–§7 are the rules. §8 is the measured consequence of applying
-them. §9–§11 are the open items and the plan.
+**Structure.** §1 - §7 are the rules. §8 is the measured consequence of applying
+them. §9 - §11 are the open items and the plan.
 
 ---
 
 ## 0. Purpose
 
-This document fixes the semantics of a **zero coefficient at a dimension** —
+This document fixes the semantics of a **zero coefficient at a dimension** - 
 what `|0|_d` means, when it shifts dimension, and what it does under each
 arithmetic operation. It supersedes the informal rationale currently written
 in the `Composite.__sub__` source comment (see §6.1).
@@ -26,23 +26,23 @@ the infinitesimal and dimension `+1` is the infinity.
 
 A composite is a sparse map from integer dimensions to real coefficients.
 
-**1.1 — Nothing is not zero.**
+**1.1 - Nothing is not zero.**
 A dimension that is not present **does not exist**. This is *nothing* (`∅`).
 
-**1.2 — Zero exists.**
+**1.2 - Zero exists.**
 A dimension present with coefficient `0` is **the zero at that dimension**,
 written `|0|_d`. It exists, and it is retained in the representation.
 
-**1.3 — There is exactly one kind of zero.**
+**1.3 - There is exactly one kind of zero.**
 No provenance, tag, order field, or flag is carried. Any coefficient equal
-to `0` is the zero, regardless of how it arose — written by hand, computed
+to `0` is the zero, regardless of how it arose - written by hand, computed
 (`ln(1)`, `cos(π/2)`), or produced by cancellation.
 
 > This is the decision that drives everything in §8. See §9.1.
 
 ---
 
-## 2. R1 — The zero identity
+## 2. R1 - The zero identity
 
 ```
 |0|_d  ≡  |1|_(d-1)
@@ -50,16 +50,16 @@ to `0` is the zero, regardless of how it arose — written by hand, computed
 
 A zero at dimension `d` is one unit at dimension `d-1`.
 
-**2.1 — Latency.** The zero is stored as `|0|_d` and is *read as* `|1|_(d-1)`
+**2.1 - Latency.** The zero is stored as `|0|_d` and is *read as* `|1|_(d-1)`
 **only at the moment of a multiplication or a division**. It is not rewritten
 eagerly, and the identity is never applied repeatedly or to a fixpoint.
 
-**2.2 — Only `×` and `÷` shift dimensions.** No other operation moves a
+**2.2 - Only `×` and `÷` shift dimensions.** No other operation moves a
 coefficient between dimensions.
 
 ---
 
-## 3. R2 — Addition and subtraction
+## 3. R2 - Addition and subtraction
 
 **3.1** Coefficients add per dimension. Dimensions never shift.
 
@@ -70,7 +70,7 @@ coefficient between dimensions.
 |0|_0 + |3|_0  =  |3|_0
 ```
 
-**3.3 — Cancellation yields a zero, not nothing.** For `a ≠ 0`:
+**3.3 - Cancellation yields a zero, not nothing.** For `a ≠ 0`:
 
 ```
 |a|_d − |a|_d  =  |0|_d
@@ -82,15 +82,15 @@ The dimension remains expressed. It does **not** become `∅`.
 
 ---
 
-## 4. R3 — Multiplication
+## 4. R3 - Multiplication
 
 **4.1** At the moment of multiplication, every zero coefficient in either
-operand is read per R1: `|0|_d → |1|_(d-1)`. Applied once, term-wise, to
+operand is read per R1: `|0|_d -> |1|_(d-1)`. Applied once, term-wise, to
 each operand independently.
 
 **4.2** Then ordinary convolution: dimensions add, coefficients multiply.
 
-**4.3 — Information preservation (Theorem 1).** Multiplying by a zero does
+**4.3 - Information preservation (Theorem 1).** Multiplying by a zero does
 not annihilate the other operand; it shifts it.
 
 ```
@@ -99,7 +99,7 @@ not annihilate the other operand; it shifts it.
 |0|_3 × |2|_0  =  |1|_2 × |2|_0   =  |2|_2
 ```
 
-**4.4 — Products of zeros.**
+**4.4 - Products of zeros.**
 
 ```
 |0|_0 × |0|_0        =  |1|_-1 × |1|_-1            =  |1|_-2
@@ -107,14 +107,14 @@ not annihilate the other operand; it shifts it.
 |0|_2 × |0|_1        =  |1|_1 × |1|_0              =  |1|_1
 ```
 
-**4.5 — Distributivity holds.** Because R1 is applied term-wise, regrouping
+**4.5 - Distributivity holds.** Because R1 is applied term-wise, regrouping
 cannot change the result:
 
 ```
 (a+b)(c+d)  =  ac + ad + bc + bd
 ```
 
-**4.6 — Constructed dimensions.** The dimensions a product constructs are
+**4.6 - Constructed dimensions.** The dimensions a product constructs are
 exactly the **Minkowski sum** of the operands' dimension sets, computed
 *after* the R1 reading:
 
@@ -127,13 +127,13 @@ dimension outside that set is created.
 
 > This corrects a current backend defect: `_merge_cluster_outputs` prunes
 > with `np.abs(vals) > zero_tol` (`zero_tol=0.0`), discarding every zero a
-> product constructs. Note the fix cannot simply stop pruning — `_cluster_terms`
+> product constructs. Note the fix cannot simply stop pruning - `_cluster_terms`
 > densifies gaps before convolving, so the output must be masked to the
 > Minkowski sum or phantom dimensions appear.
 
 ---
 
-## 5. R4 — Division
+## 5. R4 - Division
 
 Identical to R3: zeros are read per R1 at the point of division, then
 dimensions subtract and coefficients divide.
@@ -142,17 +142,17 @@ dimensions subtract and coefficients divide.
 |0|_0 / |0|_0  =  |1|_-1 / |1|_-1  =  |1|_0
 ```
 
-**5.1 — Implementation note.** `Composite.__truediv__` currently has a
+**5.1 - Implementation note.** `Composite.__truediv__` currently has a
 single-term-divisor fast path that bypasses the backend entirely. R1 must be
 applied there too, or division and multiplication will disagree.
 
 ---
 
-## 6. R5 — Derived results
+## 6. R5 - Derived results
 
-These are **consequences** of R1–R4, not additional rules.
+These are **consequences** of R1 - R4, not additional rules.
 
-**6.1 — Subtraction of equal zeros.**
+**6.1 - Subtraction of equal zeros.**
 
 ```
 0**a  =  |1|_-a                       (canonical form)
@@ -173,7 +173,7 @@ This matches the library's current behaviour. It does **not** match the
 rationale in the `__sub__` source comment, which reads:
 
 ```
-#   R(0)-R(0) = ZERO-ZERO = 0·0 = 0². Multiplication with zero → shift.
+#   R(0)-R(0) = ZERO-ZERO = 0·0 = 0². Multiplication with zero -> shift.
 #   ZERO²-ZERO² = 0·(0²) = 0³. Shift via multiplication.
 ```
 
@@ -181,7 +181,7 @@ That justification is incoherent (line 1 multiplies both operands, line 2
 multiplies by one) and, taken seriously, would give `0**2 − 0**2 = 0**4`.
 **Action: rewrite that comment to the R2.3 + R1 derivation above.** The
 `+1` shift is a consequence, not a special case, so the bespoke cancellation
-branch in `__sub__` may be removable — to be confirmed during implementation.
+branch in `__sub__` may be removable - to be confirmed during implementation.
 
 ---
 
@@ -212,9 +212,9 @@ Randomised checks on the prototype: **400/400** regroupings agree
 
 ---
 
-## 8. Consequences of the rules — measured
+## 8. Consequences of the rules - measured
 
-R1 fires on every `×` and `÷` without exception (§2.1–2.2). A zero produced by
+R1 fires on every `×` and `÷` without exception (§2.1-2.2). A zero produced by
 cancellation is the same object as a written zero (§1.3), so `9 − 9 = |0|_0`,
 and that zero converts like any other. The following are **measured outputs of
 a prototype**, not predictions.
@@ -245,7 +245,7 @@ a prototype**, not predictions.
 ### 8.3 Divergence from real arithmetic
 
 At `x = 2 + h`, the spec gives `x² − 4 = 5h + h²`. The real function gives
-`4h + h²` at every `h` tested (1e-1 … 1e-6). The gap is exactly one `h` per
+`4h + h²` at every `h` tested (1e-1 ... 1e-6). The gap is exactly one `h` per
 cancellation. **The system is no longer a conservative extension of ℝ on
 expressions containing a cancelling subtraction.**
 
@@ -278,29 +278,29 @@ Failing categories are exactly two: *Calculus: Derivatives* (2/7) and
 
 ## 9. Open decisions for review
 
-**9.1 — Is §8 accepted?**
+**9.1 - Is §8 accepted?**
 §8 is what the rules produce. Difference quotients read `+1` and indeterminate
 limits read `(a₁+1)/(b₁+1)`. Coefficient-read derivatives are unaffected
 (§8.4), so the machine's native route is intact; what shifts is the classical
 difference-quotient and limit constructions layered on top.
 
 If accepted, the affected assertions in `test_standalone.py` and
-`test_limits.py` are rewritten to the §8 values, and §8.2–§8.3 need an explicit
-position in the paper — §8.3 in particular, since the algebra ceases to agree
+`test_limits.py` are rewritten to the §8 values, and §8.2 - §8.3 need an explicit
+position in the paper - §8.3 in particular, since the algebra ceases to agree
 with ℝ on any expression containing a cancelling subtraction.
 
-**9.2 — What counts as `0`?**
+**9.2 - What counts as `0`?**
 Exact `0.0` only, or a tolerance? A tolerance is unsafe: `exp(-100) ≈ 3.7e-44`
 read as a zero becomes a unit infinitesimal, turning a `1e-44` integrand tail
 into `50` and hanging `∫₀^∞ x·e⁻ˣ dx` indefinitely. **Recommendation: exact
 `0.0` only.**
 
-**9.3 — Serialization.** `to_dict` / `to_bytes` / `to_json` / `from_array`
+**9.3 - Serialization.** `to_dict` / `to_bytes` / `to_json` / `from_array`
 must round-trip expressed zeros, or a save/load cycle silently drops
 dimensions the computation constructed. `from_array` currently filters
 `if v != 0`.
 
-**9.4 — Scope.** Does this apply to `MC` (multivariable, tuple dimensions)
+**9.4 - Scope.** Does this apply to `MC` (multivariable, tuple dimensions)
 and the complex composites in `composite_extended.py`, or to `Composite` only?
 Both have their own arithmetic and would need the same treatment separately.
 
@@ -308,27 +308,27 @@ Both have their own arithmetic and would need the same treatment separately.
 
 ## 10. Implementation plan
 
-1. **Backend `convolve`** — mask the output to the Minkowski sum of the
+1. **Backend `convolve`** - mask the output to the Minkowski sum of the
    operands' dimension sets, retaining zero-valued results (§4.6). Replaces the
    `zero_tol` pruning in `_merge_cluster_outputs`. Note the mask is required:
    `_cluster_terms` densifies gaps before convolving, so simply not pruning
    would create phantom dimensions.
 
-2. **Backend `convolve` / `deconvolve` — R1** — apply R1 to both operands of
+2. **Backend `convolve` / `deconvolve` - R1** - apply R1 to both operands of
    every `×` and `÷`: each `|0|_d` term is read as `|1|_(d-1)`, once, term-wise,
    before the convolution or division runs (§4.1, §5).
 
-3. **`Composite.__truediv__`** — the single-term-divisor fast path bypasses the
+3. **`Composite.__truediv__`** - the single-term-divisor fast path bypasses the
    backend entirely and must be brought in line, or division and multiplication
    will disagree (§5.1).
 
-4. **`Composite.__add__` / `__sub__`** — retain expressed zeros, never shift.
+4. **`Composite.__add__` / `__sub__`** - retain expressed zeros, never shift.
    Evaluate whether the bespoke cancellation branch in `__sub__` can be deleted
    now that §6 derives its behaviour.
 
-5. **Serialization** — preserve expressed zeros (§9.3).
+5. **Serialization** - preserve expressed zeros (§9.3).
 
-6. **`__sub__` source comment** — replace with the §6 derivation.
+6. **`__sub__` source comment** - replace with the §6 derivation.
 
 A working prototype backend is in the session scratchpad and can be lifted
 directly.
@@ -339,8 +339,8 @@ directly.
 
 - New file `tests/test_zero_rules.py`:
   - the nine identities of §7
-  - distributivity fuzz — 400 random regroupings of `(Σaᵢ)(Σbⱼ)` vs `Σᵢⱼ aᵢbⱼ`
-  - associativity and commutativity fuzz — 600 checks
+  - distributivity fuzz - 400 random regroupings of `(Σaᵢ)(Σbⱼ)` vs `Σᵢⱼ aᵢbⱼ`
+  - associativity and commutativity fuzz - 600 checks
 - Regression guard for §9.2: `∫₀^∞ x·e⁻ˣ dx` must terminate and return 1.
 - Round-trip guard for §9.3: a composite containing expressed zeros must
   survive `to_json` / `from_json` unchanged.

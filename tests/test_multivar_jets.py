@@ -394,3 +394,44 @@ def test_segment_refusals(label, f, at, wrt, exc):
     print(f"\n  {label}: {type(e.value).__name__}: {str(e.value)[:80]}")
     if exc is PoleError:
         assert "grade" not in str(e.value)      # the fixed coordinate's grade is not the pole's
+
+
+# --- limits along curves, not only lines ------------------------------------------------
+# x^2 y / (x^4 + y^2) at the origin is 0 along every straight line and 1/2 along
+# y = x^2; the line-only multivar_limit returned 0.0 for it.  Paths are now
+# x_i = q_i h^(w_i) for weight vectors over {1, 2, 3}, so the curves y ~ x^2, x^3,
+# sqrt(x), ... are tried as well.
+
+LIMITS_THAT_EXIST = [
+    ("x^2 y / (x^2+y^2)", lambda x, y: x * x * y / (x * x + y * y), [0, 0], 0.0),
+    ("(x^3+y^3) / (x^2+y^2)", lambda x, y: (x ** 3 + y ** 3) / (x * x + y * y), [0, 0], 0.0),
+    ("sin(x^2+y^2) / (x^2+y^2)", lambda x, y: sin(x * x + y * y) / (x * x + y * y), [0, 0], 1.0),
+    ("(1 - cos(x^2+y^2)) / (x^2+y^2)^2", lambda x, y: (R(1) - cos(x * x + y * y)) / ((x * x + y * y) ** 2), [0, 0], 0.5),
+    ("(x^2 y - 2x^2)/(y - 2) at (1,2)", lambda x, y: (x * x * y - 2 * x * x) / (y - 2), [1, 2], 1.0),
+    ("x y z / (x^2+y^2+z^2)", lambda x, y, z: x * y * z / (x * x + y * y + z * z), [0, 0, 0], 0.0),
+    ("sin(u^2+v^2)/(u^2+v^2), u = x-1, v = y-2, at (1,2)",
+     lambda x, y: sin((x - 1) ** 2 + (y - 2) ** 2) / ((x - 1) ** 2 + (y - 2) ** 2), [1, 2], 1.0),
+]
+
+
+@pytest.mark.parametrize("label,f,at,want", LIMITS_THAT_EXIST, ids=[c[0] for c in LIMITS_THAT_EXIST])
+def test_limits_that_exist(label, f, at, want):
+    check(f"lim {label}", multivar_limit(f, at), want)
+
+
+LIMITS_THAT_DO_NOT = [
+    ("x y / (x^2+y^2)  [lines disagree]", lambda x, y: x * y / (x * x + y * y), [0, 0]),
+    ("x^2 y / (x^4+y^2)  [0 on lines, 1/2 on y = x^2]", lambda x, y: x * x * y / (x ** 4 + y * y), [0, 0]),
+    ("x y^2 / (x^2+y^4)  [0 on lines, 1/2 on x = y^2]", lambda x, y: x * y * y / (x * x + y ** 4), [0, 0]),
+    ("x^3 y / (x^6+y^2)  [0 on lines, 1/2 on y = x^3]", lambda x, y: x ** 3 * y / (x ** 6 + y * y), [0, 0]),
+    ("x^2 y / (x^4+y^2) + z, 3 variables", lambda x, y, z: x * x * y / (x ** 4 + y * y) + z, [0, 0, 0]),
+    ("u^2 v / (u^4+v^2), u = x-1, v = y-2, at (1,2)  [curve off the origin]",
+     lambda x, y: (x - 1) ** 2 * (y - 2) / ((x - 1) ** 4 + (y - 2) ** 2), [1, 2]),
+]
+
+
+@pytest.mark.parametrize("label,f,at", LIMITS_THAT_DO_NOT, ids=[c[0] for c in LIMITS_THAT_DO_NOT])
+def test_path_dependent_limits_are_refused(label, f, at):
+    with pytest.raises(LimitDoesNotExistError) as e:
+        multivar_limit(f, at)
+    print(f"\n  {label}: {str(e.value)[:150]}")

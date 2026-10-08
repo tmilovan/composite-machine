@@ -517,30 +517,75 @@ def directional_derivative(f, at: List[float], direction: List[float]):
     return c.get(-1, 0.0)
 
 
+@_functools_dir.lru_cache(maxsize=None)
+def _path_weights(n):
+    """Weight vectors w for the curved paths x_i = x0_i + q_i h^(w_i): every
+    combination of 1, 2, 3 that is not a multiple of a smaller one.  For n = 2:
+    (1,1) -- the straight lines -- and (1,2), (2,1), (1,3), (3,1), (2,3), (3,2),
+    which are the curves y ~ x^2, sqrt(x), x^3, x^(1/3), x^(3/2), x^(2/3).  All
+    grades stay integers, so every backend can hold them."""
+    import math as _m
+    out = [w for w in _itertools_dir.product((1, 2, 3), repeat=n)
+           if _functools_dir.reduce(_m.gcd, w) == 1]
+    out.sort(key=lambda w: (max(w), w))
+    return tuple(out)
+
+
 def multivar_limit(f, as_vars_to: List[float], rel_tol=1e-12):
-    """lim f as the point is approached, read as the standard part along several
-    directions.  If they disagree beyond rounding (rel_tol), the limit depends on
-    the path and does not exist.  An unbounded result reads as +-inf."""
-    from composite.composite_lib import (_seed_at, _derivative_scope, LimitDoesNotExistError,
+    """lim f as the point is approached, read as the standard part along many
+    paths.  If any two disagree beyond rounding (rel_tol), the limit depends on
+    the path and does not exist.  An unbounded result reads as +-inf.
+
+    The paths are x_i = x0_i + q_i h^(w_i): straight lines (all w_i = 1) along
+    the directions of _direction_set and the orthonormal basis, and CURVES for
+    the other weight vectors of _path_weights.  Lines alone are not enough:
+    x^2 y / (x^4 + y^2) at the origin is 0 along every line and 1/2 along
+    y = x^2, and the line-only version returned 0.0 for it.
+
+    A returned value means the same value along every path tried.  No finite set
+    of paths proves that a limit exists -- a function can be built to agree on
+    all of these and differ along y ~ x^(5/2) or y ~ exp(-1/x) -- so this is
+    strong evidence, not a proof.  A refusal, by contrast, is exact: two paths
+    really do give different values.
+    """
+    from composite.composite_lib import (_mint, _derivative_scope, LimitDoesNotExistError,
                                          _refusing_float, _refusing_residue, FloatCoercionError, Composite)
     n = len(as_vars_to)
     dirs = _direction_set(n, 2) + _orthonormal_exact(n)
+
+    def point(w, d):
+        out = []
+        for x0, wi, q in zip(as_vars_to, w, d):
+            terms = {-wi: float(q)}
+            if x0 != 0:
+                terms[0] = float(x0)
+            out.append(_mint(Composite(terms)))
+        return out
+
+    def describe(w, d):
+        if all(wi == 1 for wi in w):
+            return "the line along %s" % (tuple(round(float(q), 4) for q in d),)
+        return "the curve x_i ~ q_i h^w_i with w = %s, q = %s" % (w, tuple(round(float(q), 4) for q in d))
+
     vals = []
     try:
-        with _derivative_scope(4, 4), _refusing_float(), _refusing_residue(), _reading_within_bounds():
-            for d in dirs:
-                c = f(*[_seed_at(x, float(q)) for x, q in zip(as_vars_to, d)])
-                vals.append(c.to_ieee754() if isinstance(c, Composite) else float(c))
+        # Depth: a weight-3 coordinate in a degree-4 expression puts the leading
+        # terms at grade -12; the cap must reach past them.
+        with _derivative_scope(16, 16), _refusing_float(), _refusing_residue(), _reading_within_bounds():
+            for w in _path_weights(n):
+                for d in (dirs if all(wi == 1 for wi in w) else dirs[:3]):
+                    c = f(*point(w, d))
+                    vals.append((c.to_ieee754() if isinstance(c, Composite) else float(c), describe(w, d)))
     except FloatCoercionError as e:
         raise ValueError("the function is not composite -- %s" % e) from None
-    first = vals[0]
-    for v in vals[1:]:
+    first, where = vals[0]
+    for v, there in vals[1:]:
         same = (v == first) if (math.isinf(first) or math.isinf(v)) else \
                abs(v - first) <= rel_tol * max(1.0, abs(first))
         if not same:
             raise LimitDoesNotExistError(
-                "the limit depends on the direction of approach: %r along one, %r along "
-                "another" % (first, v))
+                "the limit depends on the path of approach: %r along %s, %r along %s"
+                % (first, where, v, there))
     return first
 
 

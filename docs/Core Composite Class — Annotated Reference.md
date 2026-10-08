@@ -1,13 +1,13 @@
 # Core Composite Class — Annotated Reference
 
 <aside>
-📐
+
 
 **The essential mechanism of Composite Calculus in ~150 lines.**
 
 This is the irreducible core: a number that carries coefficients at integer dimensions.
 
-Everything else — derivatives, limits, integrals, series, Turing machines — is built on this.
+Everything else - derivatives, limits, integrals, series, Turing machines - is built on this.
 
 </aside>
 
@@ -17,7 +17,7 @@ Everything else — derivatives, limits, integrals, series, Turing machines — 
 
 ```python
 """
-core_composite.py — The Essential Mechanism
+core_composite.py - The Essential Mechanism
 ============================================
 
 A Composite number is a Laurent-like object:
@@ -39,10 +39,10 @@ The dimension encodes what KIND of quantity the coefficient represents:
       +1        First infinity           |1|₁ = structural infinity (INF)
       +n        nth-order infinity        grows without bound
 
-The KEY INSIGHT:
+The key point:
     When you compute f(a + h) where h = |1|₋₁, the result is a
     composite whose negative-dimension coefficients ARE the Taylor
-    coefficients of f around a. No limits needed — the algebra
+    coefficients of f around a. No limits needed - the algebra
     produces them automatically.
 
     Example: (3 + h)² = <|9|₀ |6|₋₁ |1|₋₂>
@@ -69,7 +69,7 @@ class Composite:
       - Division:       dimensions SUBTRACT, coefficients DIVIDE
 
     These are the SAME rules as polynomial/Laurent series arithmetic.
-    That's not a coincidence — it's the whole point.
+    That's not a coincidence - it's the whole point.
     """
 
     # =========================================================================
@@ -93,17 +93,17 @@ class Composite:
     def __init__(self, coefficients=None):
         """
         Create a Composite from:
-          - None          → empty (additive identity)
-          - int or float  → real number at dimension 0
-          - dict          → explicit {dimension: coefficient} map
+          - None          -> empty (additive identity)
+          - int or float  -> real number at dimension 0
+          - dict          -> explicit {dimension: coefficient} map
 
         Coefficients with |value| ≤ 1e-15 are pruned to keep
         the representation clean and avoid floating-point dust.
 
         Examples:
-            Composite()           → {}           (additive identity)
-            Composite(5)          → {0: 5.0}     i.e. |5|₀
-            Composite({-1: 1.0})  → {-1: 1.0}    i.e. |1|₋₁ = ZERO
+            Composite()           -> {}           (additive identity)
+            Composite(5)          -> {0: 5.0}     i.e. |5|₀
+            Composite({-1: 1.0})  -> {-1: 1.0}    i.e. |1|₋₁ = ZERO
         """
         if coefficients is None:
             self.c = {}
@@ -127,13 +127,13 @@ class Composite:
         Structural zero: ZERO = |1|₋₁
 
         This is NOT the additive identity (which is Composite()).
-        It is an infinitesimal — a number smaller than any positive
+        It is an infinitesimal - a number smaller than any positive
         real but not equal to nothing. It has coefficient 1 at
         dimension -1.
 
         Key property: multiplying by ZERO does NOT destroy information.
             R(5) * ZERO = |5|₋₁   (coefficient 5 moved to dimension -1)
-            |5|₋₁ / ZERO = |5|₀   (moved back — fully reversible)
+            |5|₋₁ / ZERO = |5|₀   (moved back - fully reversible)
 
         This reversibility is what makes 0/0 and ∞×0 well-defined
         in composite arithmetic.
@@ -151,7 +151,7 @@ class Composite:
             INF * ZERO = |1|₀ = R(1)   (dimensions -1 + 1 = 0)
             R(5) * INF = |5|₁           (5 at the infinity level)
 
-        INF is not a "limit" — it's a concrete algebraic object
+        INF is not a "limit" - it's a concrete algebraic object
         with dimension +1 and coefficient 1.
         """
         return cls({1: 1.0})
@@ -215,8 +215,8 @@ class Composite:
     # =========================================================================
     #
     # These four operations (+, -, ×, ÷) on composites are the ONLY
-    # mechanism. Every calculus result — derivatives, limits, integrals,
-    # series, even Turing machine steps — emerges from these rules.
+    # mechanism. Every calculus result - derivatives, limits, integrals,
+    # series, even Turing machine steps - emerges from these rules.
     #
     # The rules mirror Laurent polynomial arithmetic:
     #   Addition:       pointwise by dimension
@@ -271,7 +271,7 @@ class Composite:
 
         |a|ₙ × |b|ₘ = |a·b|₍ₙ₊ₘ₎
 
-        This is the CRUCIAL rule. It means:
+        This is the rule everything else follows from. It means:
           - Multiplying by ZERO (|1|₋₁) SHIFTS dimensions down by 1.
             |5|₀ × |1|₋₁ = |5|₋₁    (5 moves from real to infinitesimal)
           - Multiplying by INF (|1|₊₁) SHIFTS dimensions up by 1.
@@ -283,7 +283,7 @@ class Composite:
             <|a|₀ |b|₋₁> × <|c|₀ |d|₋₁>
             = <|ac|₀ |ad+bc|₋₁ |bd|₋₂>
 
-        This is EXACTLY how (a + bh)(c + dh) expands — because h = |1|₋₁
+        This is EXACTLY how (a + bh)(c + dh) expands - because h = |1|₋₁
         and h² = |1|₋₂. The dimensional algebra IS Taylor expansion.
         """
         if isinstance(other, (int, float)):
@@ -328,7 +328,7 @@ class Composite:
         if len(other.c) == 0:
             raise ZeroDivisionError("Cannot divide by empty composite")
 
-        # Fast path: single-term divisor → exact dimension shift.
+        # Fast path: single-term divisor -> exact dimension shift.
         if len(other.c) == 1:
             div_dim, div_coeff = list(other.c.items())[0]
             result = {}
@@ -336,7 +336,7 @@ class Composite:
                 result[dim - div_dim] = coeff / div_coeff
             return Composite(result)
 
-        # Multi-term divisor → polynomial long division.
+        # Multi-term divisor -> polynomial long division.
         return _poly_divide(self, other)[0]
 
     def __rtruediv__(self, other):
@@ -380,7 +380,7 @@ class Composite:
         This extracts the "real number" part of the composite,
         discarding all infinitesimal and infinite components.
 
-        For f(a + h), st() returns f(a) — the function value.
+        For f(a + h), st() returns f(a) - the function value.
 
         For a limit computation, st() returns the limit value.
 
@@ -497,11 +497,11 @@ def _poly_divide(numerator, denominator, max_terms=20):
 
     This naturally produces Laurent series expansions. For example,
     1 / (1 - x) with x = |1|₋₁ will produce 1 + x + x² + ...
-    which is the geometric series — the mechanism behind
+    which is the geometric series - the mechanism behind
     "computation as division" in the self-hosted execution work.
 
     Returns:
-        (quotient, remainder) — both Composite objects.
+        (quotient, remainder) - both Composite objects.
     """
     if not denominator.c:
         raise ZeroDivisionError("Cannot divide by zero polynomial")
@@ -546,15 +546,15 @@ def R(x):
     Create a real-valued composite: |x|₀
 
     Short for Composite.real(x). Used constantly in expressions:
-        R(3) + ZERO   →  <|3|₀ |1|₋₁>   (i.e., 3 + h)
+        R(3) + ZERO   ->  <|3|₀ |1|₋₁>   (i.e., 3 + h)
     """
     return Composite.real(x)
 
 # The two structural constants.
 # These are the atoms from which all composite computation is built.
 
-ZERO = Composite.zero()       # |1|₋₁  — the infinitesimal
-INF  = Composite.infinity()   # |1|₊₁  — the infinite
+ZERO = Composite.zero()       # |1|₋₁ - the infinitesimal
+INF  = Composite.infinity()   # |1|₊₁ - the infinite
 h    = ZERO                   # Alias: h is the infinitesimal probe
 ```
 
@@ -568,27 +568,27 @@ With **only** the code above (~150 lines of mechanism, no transcendental functio
 # ── Derivatives (any polynomial) ──────────────────────────
 x = R(3) + h           # x = 3 + infinitesimal
 result = x**2          # <|9|₀ |6|₋₁ |1|₋₂>
-result.st()            # → 9    (value)
-result.d(1)            # → 6    (first derivative)
-result.d(2)            # → 2    (second derivative)
+result.st()            # -> 9    (value)
+result.d(1)            # -> 6    (first derivative)
+result.d(2)            # -> 2    (second derivative)
 
 # ── Limits (algebraic) ────────────────────────────────────
-x = R(2) + ZERO                           # x → 2
-((x**2 - R(4)) / (x - R(2))).st()         # → 4  (0/0 resolved algebraically)
+x = R(2) + ZERO                           # x -> 2
+((x**2 - R(4)) / (x - R(2))).st()         # -> 4  (0/0 resolved algebraically)
 
 # ── Reversible zero multiplication ────────────────────────
-a = R(5) * ZERO        # |5|₋₁  — information preserved
-a / ZERO               # |5|₀   — fully recovered
+a = R(5) * ZERO        # |5|₋₁ - information preserved
+a / ZERO               # |5|₀ - fully recovered
 
 # ── 0/0, ∞×0 are well-defined ────────────────────────────
-(ZERO / ZERO).st()     # → 1
-(INF * ZERO).st()      # → 1
-((R(5) * ZERO) / ZERO).st()  # → 5
+(ZERO / ZERO).st()     # -> 1
+(INF * ZERO).st()      # -> 1
+((R(5) * ZERO) / ZERO).st()  # -> 5
 
 # ── Division generates series (computation = division) ────
 one = Composite({0: 1})
 x = Composite({-1: 1})  # = ZERO
-result = one / (one - x)  # → 1 + x + x² + ... (geometric series)
+result = one / (one - x)  # -> 1 + x + x² + ... (geometric series)
 ```
 
 ---
@@ -597,7 +597,7 @@ result = one / (one - x)  # → 1 + x + x² + ... (geometric series)
 
 | Layer | What it does | Lines |
 | --- | --- | --- |
-| **Storage** | `dict` mapping `int → float` — sparse Laurent coefficients | ~10 |
+| **Storage** | `dict` mapping `int -> float` - sparse Laurent coefficients | ~10 |
 | **Arithmetic** | `+` pointwise, `×` convolution (dims add), `÷` deconvolution (dims subtract) | ~60 |
 | **Extraction** | `st()` = dim 0, `d(n)` = dim −n × n!, `coeff(d)` = raw | ~15 |
 | **Constants** | `ZERO` = |1|₋₁, `INF` = |1|₊₁, `R(x)` = |x|₀ | ~5 |
