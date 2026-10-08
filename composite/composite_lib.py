@@ -1433,7 +1433,7 @@ class Composite:
         a, b = _operands(self, other)
         data, complete = _capped(a._backend,
                                  a._backend.convolve(a._data, b._data),
-                                 _min_complete(self, other))
+                                 _scaled_complete(self, other, a, b, +1))
         return Composite._wrap(data, a._backend, complete=complete,
                                denot=_denot_product(a, b))
 
@@ -1523,7 +1523,7 @@ class Composite:
                 shifted = my_dims - div_dim
             return Composite._wrap(
                 a._backend.create_from_terms(shifted, my_vals / div_coeff),
-                a._backend, complete=_min_complete(self, other),
+                a._backend, complete=_scaled_complete(self, other, a, b, -1),
                 denot=_denot_quotient(a, b))
 
         # deconvolve is lexicographic long division: it repeatedly takes
@@ -1539,7 +1539,7 @@ class Composite:
 
         result = a._backend.deconvolve(a._data, b._data)
         out = Composite._wrap(_truncate_dims(a._backend, result), a._backend,
-                              complete=_min_complete(self, other),
+                              complete=_scaled_complete(self, other, a, b, -1),
                               denot=_denot_quotient(a, b))
         # A multi-term divisor generally yields a NON-TERMINATING quotient that
         # the backend cuts at a fixed length: 1/(1-x) comes back as 50 correct
@@ -2928,6 +2928,39 @@ def _min_complete(*xs):
             continue
         best = v if best is None else min(best, v)
     return best
+
+
+def _scaled_complete(x, y, ax, ay, sign):
+    """Completeness of a product (sign = +1) or quotient (sign = -1).
+
+    A bound is RELATIVE to the operand's leading order: X complete to C with
+    leading order L is right for C - L orders past its leading term.  A product
+    or quotient keeps the tighter of those relative bounds, starting from its
+    own leading order L_x + sign * L_y.  _min_complete took the smaller ABSOLUTE
+    bound, which ignores the shift: X / h, X complete to 5, moves X's order 5
+    to order 4 and its first wrong coefficient (order 6) to order 5 -- yet
+    claimed 5.  The same for X * (1/h).  Found reading T(E) of a rectangular
+    barrier at E = V0 - h: claimed complete to 7, order 7 off by 9.5e-7.  In the
+    other direction it under-claimed: X * h is complete to 6 and said 5.
+
+    x, y are the operands as given (they carry the bounds); ax, ay the operands
+    after R1 (their leading orders are what the arithmetic used).  With no
+    leading term on either side (nothing, or only zeros) the old rule stands.
+    """
+    lx = ax.lead_order() if isinstance(ax, Composite) else 0
+    ly = ay.lead_order() if isinstance(ay, Composite) else 0
+    if lx is None or ly is None:
+        return _min_complete(x, y)
+    rel = None
+    for v, lead in ((x, lx), (y, ly)):
+        c = getattr(v, "_complete", None) if isinstance(v, Composite) else None
+        if c is None:
+            continue
+        r = c - lead
+        rel = r if rel is None else min(rel, r)
+    if rel is None:
+        return None
+    return lx + sign * ly + rel
 
 
 def _tighter(*bounds):

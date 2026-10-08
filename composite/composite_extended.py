@@ -39,8 +39,8 @@ FIXES applied:
   6. improper_integral() uses integrate_adaptive directly --
      lift-at-the-gate handles structureless integrands (replaces
      RK4 workaround from v3/v4)
-  7. exp() monkey-patched: split exp(a+h) = math.exp(a) * Taylor(h)
-     Fixes catastrophic Taylor truncation for |x| > 6
+  7. exp() split exp(a+h) = math.exp(a) * Taylor(h) for |x| > 6.  Now done
+     by composite_lib.exp itself; the monkey-patch is no longer installed
 
 Author: Toni Milovan
 License: AGPL
@@ -52,8 +52,8 @@ import composite.composite_lib as _clib
 from composite.composite_lib import Composite, R, ZERO, INF, sin, cos, ln, sqrt
 from composite.composite_lib import integrate_adaptive, antiderivative
 
-# NOTE: we deliberately do NOT import exp from composite_lib here.
-# Instead, we define _smart_exp below and monkey-patch composite_lib.exp.
+# exp is composite_lib's own (see the note at _smart_exp below, which used to
+# be monkey-patched over it).
 
 
 # =============================================================================
@@ -131,13 +131,17 @@ def _smart_exp(x, terms=15):
     return Composite({0: _clib._exp_float(float(x))})
 
 
-# Monkey-patch composite_lib so ALL downstream code gets the fix.
-# This includes test lambdas like `lambda x: exp(-x)` that capture
-# composite_lib.exp at import time.
-_clib.exp = _smart_exp
-
-# Local reference for use within this module
-exp = _smart_exp
+# NOT INSTALLED (2026-10-07).  This used to monkey-patch composite_lib.exp so
+# every caller got the split above.  composite_lib.exp has since gained the same
+# split (exact at x = -30 .. 30, value and derivatives), plus what this copy
+# lacks: completeness tracking, R1 on the argument, and exact zero tests in place
+# of `abs(c) > 1e-15`.  Installed, the patch replaced all of that for the whole
+# process as soon as anything imported this module (composite_vector does):
+# exp and everything built on it -- sinh, cosh -- then claimed to be EXACT
+# however few terms were summed.  sinh(2 sqrt(2h)), 15 terms, complete to order
+# 7, read as complete; the rectangular-barrier T(E) claimed 49 orders with
+# order 7 already wrong.  _smart_exp is kept for reference.
+exp = _clib.exp
 
 
 # =============================================================================

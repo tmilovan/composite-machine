@@ -79,16 +79,20 @@ def test_a_denoted_jet_is_flagged_on_every_affected_row():
 
 
 def test_terms_past_complete_order_are_flagged():
-    # sin to 6 terms squared reaches grade -10 while only 5 orders are vouched
-    # for, and the library already counts 3 leaked terms.
+    # sin to 6 terms squared reaches grade -10 while only 6 orders are vouched
+    # for, and the library counts 2 leaked terms.  Each factor is complete to
+    # 5 from a leading order of 1, so 4 orders past its lead; the product leads
+    # at order 2 and is complete to 2 + 4 = 6.  (Until 2026-10-07 the bound was
+    # the smaller absolute one, 5, which under-claimed here and over-claimed
+    # for X / h and X * (1/h); see _scaled_complete.)
     value = sin(ZERO, terms=6) * sin(ZERO, terms=6)
-    assert value.complete_order == 5, "got %r, want 5" % value.complete_order
-    assert len(value.leaked_coeffs()) == 3, \
-        "got %d leaked, want 3" % len(value.leaked_coeffs())
+    assert value.complete_order == 6, "got %r, want 6" % value.complete_order
+    assert len(value.leaked_coeffs()) == 2, \
+        "got %d leaked, want 2" % len(value.leaked_coeffs())
     said = meanings(value)
-    for grade in (-2, -4):
+    for grade in (-2, -4, -6):
         assert "not vouched" not in said[grade], "grade %s: got %r" % (grade, said[grade])
-    for grade in (-6, -8, -10):
+    for grade in (-8, -10):
         assert "not vouched" in said[grade], \
             "grade %s: got %r, want the warning" % (grade, said[grade])
 
