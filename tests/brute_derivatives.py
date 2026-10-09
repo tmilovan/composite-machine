@@ -130,11 +130,16 @@ def safe(f, x):
 
 
 def ident_zero(f, a):
-    """f identically zero near a: zero to 1e-40 at three nearby points (50 digits)."""
-    with mp.workdps(50):
+    """f identically zero near a: below 1e-120 at three nearby points, 150 digits.
+
+    The threshold sits far above rounding noise at 150 digits and far below any
+    power that occurs: at 50 digits and 1e-40, (x - a)**54 at a + 0.0137 (about
+    1e-101) passed for zero and the reference invented a cancellation.
+    """
+    with mp.workdps(150):
         for p in (a, a + mp.mpf("0.0137"), a - mp.mpf("0.0211")):
             v = safe(f, p)
-            if not mp.isfinite(v) or abs(v) > mp.mpf("1e-40"):
+            if not mp.isfinite(v) or abs(v) > mp.mpf("1e-120"):
                 return False
     return True
 

@@ -54,10 +54,10 @@ print("=" * 74)
 head(1, "L evolution along a chain of new denominators")
 print("   multiply in (1 + h^(1/q)) for successive primes q; L must be the lcm")
 print("   %-6s %-14s %6s %8s %11s" % ("q", "L after", "terms", "lcm ok", "convolve ms"))
-acc = BN.create_from_terms([0, F(1, 2)], [1.0, 1.0])
+acc = BN.create_from_terms([F(-1, 2), 0], [1.0, 1.0])     # 1 + h^(1/2): grade d is h^(-d)
 want_L = 2
 for q in (3, 5, 7, 11, 13, 17):
-    b = BN.create_from_terms([0, F(1, q)], [1.0, 1.0])
+    b = BN.create_from_terms([F(-1, q), 0], [1.0, 1.0])
     ms = timed(lambda a=acc, b=b: BN.convolve(a, b), 3)
     acc = BN.convolve(acc, b)
     want_L = want_L * q // math.gcd(want_L, q)
@@ -69,12 +69,12 @@ head(2, "term growth: one denominator (terms collide) vs many (they cannot)")
 print("   %-4s %14s %14s %12s" % ("k", "pure 1/2", "mixed denoms", "ratio"))
 primes = [2, 3, 5, 7, 11, 13, 17, 19]
 for k in range(1, 9):
-    p = BN.create_from_terms([0, F(1, 2)], [1.0, 1.0])
+    p = BN.create_from_terms([F(-1, 2), 0], [1.0, 1.0])
     for _ in range(k - 1):
-        p = BN.convolve(p, BN.create_from_terms([0, F(1, 2)], [1.0, 1.0]))
-    m = BN.create_from_terms([0, F(1, primes[0])], [1.0, 1.0])
+        p = BN.convolve(p, BN.create_from_terms([F(-1, 2), 0], [1.0, 1.0]))
+    m = BN.create_from_terms([F(-1, primes[0]), 0], [1.0, 1.0])
     for j in range(1, k):
-        m = BN.convolve(m, BN.create_from_terms([0, F(1, primes[j])], [1.0, 1.0]))
+        m = BN.convolve(m, BN.create_from_terms([F(-1, primes[j]), 0], [1.0, 1.0]))
     tp, tm = BN.term_count(p), BN.term_count(m)
     print("   %-4d %14d %14d %11.1fx" % (k, tp, tm, tm / tp))
 print("   pure grows k+1 (every product lands back on the 1/2 lattice)")
@@ -142,12 +142,12 @@ config.use_sparse_dense()
 head(6, "exactness through a chain: (h^(1/q))^q must come back to exactly h")
 print("   %-6s %-12s %-22s %-10s %s" % ("q", "dyadic?", "fractional_numpy", "L", "sparse_dense"))
 for q in (2, 4, 8, 3, 5, 7, 10, 23, 31):
-    root = BN.create(F(1, q), 1.0)
+    root = BN.create(F(-1, q), 1.0)
     a = root
     for _ in range(q - 1):
         a = BN.convolve(a, root)
     got = pub(BN, a)
-    ok = got == {1: 1.0}
+    ok = got == {-1: 1.0}
     dyadic = (q & (q - 1)) == 0
     config.use_sparse_dense()
     try:
@@ -168,11 +168,11 @@ for q in (2, 4, 8, 3, 5, 7, 10, 23, 31):
 # ---------------------------------------------------------------- arm 7
 head(7, "behaviour through the public transcendental ops")
 config.use_fractional_numpy()
-c = Composite({F(1, 3): 1.0})
-print("   Composite({1/3: 1.0}).lead_order()      = %s" % (c.lead_order(),))
+c = Composite({F(-1, 3): 1.0})            # h^(1/3): grade d is h^(-d)
+print("   Composite({-1/3: 1.0}).lead_order()     = %s   (h^(1/3))" % (c.lead_order(),))
 print("   (c*c*c).lead_order()                    = %s   (three thirds make a whole)"
       % ((c * c * c).lead_order(),))
-print("   (c * Composite({1/5:1})).lead_order()   = %s" % ((c * Composite({F(1, 5): 1.0})).lead_order(),))
+print("   (c * Composite({-1/5:1})).lead_order()  = %s" % ((c * Composite({F(-1, 5): 1.0})).lead_order(),))
 print()
 print("   %-26s %10s %-26s %s" % ("op on a 1/3-grade value", "terms", "lead order", "ms"))
 for label, fn in (("c * c", lambda: c * c),

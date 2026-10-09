@@ -251,12 +251,25 @@ def demo_vertex():
     print("  y = x^2.  Its curvature is largest at x = 0, which is a vertex, and")
     print("  ordinary at x = 1.  The osculating circle has contact order 3 at a")
     print("  generic point and 4 at a vertex, so the vertex is visible in the")
-    print("  grade.  No curvature is formed and dk/ds is never differentiated.\n")
+    print("  grade.  The circle itself needs the curvature -- a vertex cannot be")
+    print("  defined without it -- and here it is built from the curve's own jet:")
+    print("  y' and y'' read off ONE seeded evaluation, not worked out by hand.")
+    print("  What the grade replaces is the next step: dk/ds is never formed and")
+    print("  never solved, the vertex shows as the contact order going up.  It")
+    print("  CONFIRMS a vertex at a given point; it does not search for one.\n")
 
     def parabola(x):
         return x * x
 
-    def osc_circle(centre_x, centre_y, r2):
+    def osc_circle(f, x0):
+        """The osculating circle of f at x0, from f's composite jet there."""
+        jet = f(cl._seeded(x0))       # NOT R(x0) + ZERO: at x0 = 0 that is 2h
+        y0, y1, y2 = jet.st(), jet.d(1), jet.d(2)
+        w = 1 + y1 * y1
+        centre_x, centre_y, r2 = x0 - y1 * w / y2, y0 + w / y2, w ** 3 / (y2 * y2)
+        print("    at x0 = %g: y' = %g, y'' = %g  ->  centre (%g, %g), r^2 = %g"
+              % (x0, y1, y2, centre_x, centre_y, r2))
+
         def g(x):
             # A centre coordinate of 0 is ABSENT.  `x - R(0.0)` subtracts an
             # infinitesimal and moves the curve, which reported the vertex at
@@ -265,10 +278,9 @@ def demo_vertex():
             return R(centre_y) - sqrt(R(r2) - dx ** 2)
         return g
 
-    # x = 0: k = 2, radius 1/2, centre (0, 1/2)
-    at_vertex = osc_circle(0.0, 0.5, 0.25)
-    # x = 1: y' = 2, y'' = 2, radius 5^(3/2)/2, centre (-4, 3.5), r^2 = 125/4
-    at_generic = osc_circle(-4.0, 3.5, 31.25)
+    at_vertex = osc_circle(parabola, 0.0)
+    at_generic = osc_circle(parabola, 1.0)
+    print()
 
     order, lead = contact_order(parabola, at_generic, 1.0)
     check("generic point x=1: contact order", order or 0.0, 3)

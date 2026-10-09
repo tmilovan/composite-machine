@@ -34,6 +34,8 @@ import math
 import warnings
 
 from composite.composite_lib import R, ZERO, Composite, exp, ln, sqrt, cos, sin
+import composite.composite_lib as cl
+from composite.transseries import ts_d
 
 warnings.filterwarnings("ignore")        # R1 conversions are expected where shown
 
@@ -126,19 +128,39 @@ def demo_critical():
 # ---------------------------------------------------------------------------
 def demo_casimir():
     section("3. Zero-point mode sums: divergent and finite parts on separate grades")
-    q = exp(R(-1) * h)
-    S1 = q / (R(1) - q)**2                                      # sum n e^{-n h}
-    S3 = q * (R(1) + R(4)*q + q*q) / (R(1) - q)**4              # sum n^3 e^{-n h}
-    print(f" sum n e^(-nh)   = {str(S1)[:78]}")
-    check("divergent part 1/h^2", coeff(S1, 2), 1.0, 1e-14)
-    check("finite part = zeta(-1) = -1/12", coeff(S1, 0), -1/12, 1e-14)
-    check("next: h^2/240", coeff(S1, -2), 1/240, 1e-14)
-    print(f" sum n^3 e^(-nh) = {str(S3)[:78]}")
-    check("divergent part 6/h^4", coeff(S3, 4), 6.0, 1e-13)
-    check("finite part = zeta(-3) = 1/120", coeff(S3, 0), 1/120, 1e-14)
-    check("next: -h^2/504", coeff(S3, -2), -1/504, 1e-13)
+    # The sum is taken over an INFINITE number of modes, N = 1/h^2, with no
+    # limit anywhere.  The only identity used is the finite geometric sum,
+    # (1 - q) S = q - q^(N+1), which is algebra true for every N.  With N
+    # infinite, q^N = e^(-N h) = e^(-1/h) sits below every power of h, in a
+    # transseries sector: that sector IS the tail past the cutoff, kept rather
+    # than dropped.  The weights n and n^3 come from differentiating the sum,
+    #     sum n e^{-nh} = -dS/dh,      sum n^3 e^{-nh} = -d^3S/dh^3
+    q = exp(-h)                                                 # e^{-h}
+    N = R(1) / (h * h)                                          # infinitely many modes
+    with cl._exp_to_transseries():
+        qN = exp(-(N * h))                                      # e^{-1/h}
+    S = (q - q * qN) / (R(1) - q)                               # sum_{n=1}^{N} e^{-n h}
+    print(f" N = {N} modes,  q^N = {qN}")
+    print(f" sum_(n=1..N) e^(-nh), powers: {str(S.sectors[0])[:66]}")
+    print(f"                       sector exp(-1/h): {str(S.sectors[1])[:56]}")
+    G = R(1) / (exp(h) - R(1))
+    check("power part = 1/(e^h - 1), worst grade", max(abs(coeff(S.sectors[0], g) - coeff(G, g))
+                                                      for g in range(-8, 2)), 0.0, 1e-15)
+    check("tail past N: sector exp(-1/h), grade +1", coeff(S.sectors[1], 1), -1.0, 1e-15)
+    S1 = -ts_d(S)                                               # sum n e^{-n h}
+    S3 = -ts_d(ts_d(ts_d(S)))                                   # sum n^3 e^{-n h}
+    P1, P3 = S1.sectors[0], S3.sectors[0]
+    print(f" sum n e^(-nh)   = {str(P1)[:78]}")
+    check("divergent part 1/h^2", coeff(P1, 2), 1.0, 1e-14)
+    check("finite part = zeta(-1) = -1/12", coeff(P1, 0), -1/12, 1e-14)
+    check("next: h^2/240", coeff(P1, -2), 1/240, 1e-14)
+    print(f" sum n^3 e^(-nh) = {str(P3)[:78]}")
+    check("divergent part 6/h^4", coeff(P3, 4), 6.0, 1e-13)
+    check("finite part = zeta(-3) = 1/120", coeff(P3, 0), 1/120, 1e-14)
+    check("next: -h^2/504", coeff(P3, -2), -1/504, 1e-13)
     print(" the finite parts are the Casimir coefficients: 1+1D plates give E = (pi/2a) * (-1/12) = -pi/(24a);")
-    print(" the divergent parts are kept, not subtracted, on grades 2 and 4.")
+    print(" the divergent parts are kept, not subtracted, on grades 2 and 4, and the")
+    print(" modes past the cutoff are kept too, in the exp(-1/h) sector.")
 
 
 # ---------------------------------------------------------------------------

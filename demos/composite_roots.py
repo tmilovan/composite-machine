@@ -11,17 +11,23 @@ A composite knows more than a sample.  Seeding f with an infinitesimal returns
 the whole Taylor expansion at that point in one evaluation, and two facts follow:
 
   EXCLUSION.  On |h| <= rad,  |f(mid+h)| >= |c0| - sum_{k>=1} |ck| rad^k.
-              If that is positive the interval provably holds no root and the
+              If that is positive the interval holds no root -- as far as the
+              series to `order`, plus an ESTIMATED tail, can tell -- and the
               whole subtree is dropped.  Sampling can only ever say "no sign
-              change here", which is not the same statement.
+              change here"; this is a statement about every point of the
+              interval, though not a proof (see below).
 
   UNIQUENESS. If  |c1| > sum_{k>=2} k |ck| rad^(k-1)  then f' cannot vanish on
               the interval, so f is monotone and holds AT MOST one root.  That
               turns "some roots somewhere" into "exactly these, one per box".
 
-Both bounds truncate the series at `order`, so they are reliable rather than
-rigorous.  Carrying an interval remainder term would make them rigorous -- that
-is the Taylor-model construction, and it is the natural next step.
+Both bounds truncate the series at `order` and estimate the tail from the
+ratio of the last coefficients, so they are reliable rather than rigorous: a
+function whose coefficients turn sharply after `order` can defeat the estimate.
+Carrying an interval remainder term would make them rigorous -- that is the
+Taylor-model construction, and it is the natural next step.
+
+Run it to see the search on functions whose roots are known in closed form.
 
 Polishing uses Householder of arbitrary order d (d=1 Newton, d=2 Halley),
 which costs nothing extra here because the derivatives were already computed:
@@ -284,3 +290,40 @@ def _condense(f, found, order, tol):
         if not out or abs(r - out[-1]) > 1e-9 * max(1.0, abs(r)):
             out.append(r)
     return out
+
+
+def main():
+    """The search on functions with closed-form roots, and the checks."""
+    results = []
+
+    def check(label, got, want, tol):
+        ok = len(got) == len(want) and all(abs(g - w) <= tol for g, w in zip(got, want))
+        results.append(ok)
+        print("  %s %-40s found %s" % ("OK " if ok else "BAD", label,
+                                       ", ".join("%.15g" % g for g in got)))
+        print("      %-40s known %s" % ("", ", ".join("%.15g" % w for w in want)))
+
+    print("Roots by Taylor exclusion + Householder, checked against closed forms\n")
+    rs, st = roots(lambda x: cl.sin(3 * x) - cl.R(0.5), 0.0, 3.0)
+    want = sorted([(math.pi / 6 + 2 * math.pi * k) / 3 for k in range(2)]
+                  + [(5 * math.pi / 6 + 2 * math.pi * k) / 3 for k in range(2)])
+    want = [w for w in want if 0.0 <= w <= 3.0]
+    check("sin(3x) = 1/2 on [0, 3]", rs, want, 1e-11)
+    print("      boxes pruned by the bound %d, split %d\n" % (st["pruned"], st["split"]))
+
+    rs, _ = roots(lambda x: (x - cl.R(1.0)) ** 2 * (x + cl.R(0.5)), -2.0, 3.0)
+    check("(x - 1)^2 (x + 1/2): a DOUBLE root at 1", rs, [-0.5, 1.0], 1e-9)
+    print("      multiplicity at 1: %d (want 2)\n"
+          % multiplicity(lambda x: (x - cl.R(1.0)) ** 2 * (x + cl.R(0.5)), 1.0))
+    results.append(multiplicity(lambda x: (x - cl.R(1.0)) ** 2 * (x + cl.R(0.5)), 1.0) == 2)
+
+    rs, _ = roots(lambda x: (x - cl.R(0.3)) * (x - cl.R(0.3001)) * cl.exp(x), 0.0, 1.0)
+    check("two roots 1e-4 apart, times exp(x)", rs, [0.3, 0.3001], 1e-11)
+
+    print("\n  %d/%d checks passed" % (sum(results), len(results)))
+    return 0 if all(results) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

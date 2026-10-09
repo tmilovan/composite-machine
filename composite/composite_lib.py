@@ -2866,6 +2866,30 @@ def _derivative_scope(order, terms):
 # TAYLOR SERIES FOR TRANSCENDENTAL FUNCTIONS
 # =============================================================================
 
+def _const_like(x, value):
+    """f(x) for an x with no infinitesimal part: f(a), keeping x's zero grades.
+
+    An argument like <1_0 0_-1 ... 0_-11> is not a bare constant: its jet
+    existed to grade -11 and cancelled to zero there (R2 keeps those terms).
+    Composing f with it exactly gives f(a) plus zeros at the same grades, and
+    that is what this returns.  The bare Composite({0: f(a)}) the fast paths
+    used to return dropped them, so when f(a) is 0 -- ln(1), sin(0), tanh(0) --
+    the result was a zero with no depth, R1 converted it at grade -1, and an
+    O(1) h entered the derivatives.  Measured on a 20000-step chain: a jet
+    absorbed by float64 to exact zeros, then ln, then tanh, read d1 = 1.0 where
+    the true derivative is -4.1e-40.  Kept, the zero carries its depth and R1
+    converts it below every grade the jet computed.  A constant with no zero
+    grades (R(1), x/x) is unchanged: its zero still converts at grade -1.
+    """
+    dims, vals = x._backend.to_arrays(x._data)
+    zeros = [d for d, v in zip(dims, vals) if v == 0.0 and _dim_negative(d)]
+    if not zeros:
+        return Composite({0: value})
+    terms = {d: 0.0 for d in zeros}
+    terms[_unit_dim(x)] = value
+    return _like(x, terms)
+
+
 def _has_positive_dims(x):
     """Check if a composite has any positive-dimension components."""
     return x.max_positive_dim() is not None
@@ -3495,7 +3519,7 @@ def sin(x, terms=12):
         return _bounded_at_inf(math.sin, x)
     a = x.st()
     if not _has_infinitesimal_part(x):
-        return Composite({0: math.sin(a)})
+        return _const_like(x, math.sin(a))
     _nz = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
     # _like, not Composite({...}): the bare constructor binds whatever backend
     # is globally ACTIVE, so a vector-dimension argument had its tuples handed
@@ -3554,7 +3578,7 @@ def cos(x, terms=12):
         return _bounded_at_inf(math.cos, x)
     a = x.st()
     if not _has_infinitesimal_part(x):
-        return Composite({0: math.cos(a)})
+        return _const_like(x, math.cos(a))
     _nz = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
     # _like, not Composite({...}): the bare constructor binds whatever backend
     # is globally ACTIVE, so a vector-dimension argument had its tuples handed
@@ -3743,7 +3767,7 @@ def exp(x, terms=15):
     non_zero = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
 
     if not non_zero:
-        return Composite({0: _exp_float(a)})
+        return _const_like(x, _exp_float(a))
 
     base = _exp_float(a)
     h = _like(x, non_zero)
@@ -3943,7 +3967,7 @@ def ln(x, terms=15):
         raise ValueError("ln requires positive standard part")
 
     if not _has_infinitesimal_part(x):
-        return Composite({0: math.log(a)})
+        return _const_like(x, math.log(a))
 
     h_part = x - R(a)
     ratio = h_part / R(a)
@@ -4032,7 +4056,7 @@ def sqrt(x, terms=12):
         raise ValueError("sqrt requires non-negative standard part")
 
     if not _has_infinitesimal_part(x):
-        return Composite({0: math.sqrt(a)})
+        return _const_like(x, math.sqrt(a))
 
     # SOLVE y**2 = x ORDER BY ORDER, where the dimensions allow it.
     #
@@ -4299,7 +4323,7 @@ def atan(x, terms=15):
         return _bounded_at_inf(math.atan, x)
     a = x.st()
     if not _has_infinitesimal_part(x):
-        return Composite({0: math.atan(a)})
+        return _const_like(x, math.atan(a))
     if a == 0.0:
         # atan(z) = z - z**3/3 + z**5/5 - ...
         return _maclaurin_odd(
@@ -4369,7 +4393,7 @@ def asin(x, terms=15):
     inner = R(1) - x * x
     deriv = _reciprocal(sqrt(inner, terms), terms)
     if not _has_infinitesimal_part(x):
-        return Composite({0: math.asin(a)})
+        return _const_like(x, math.asin(a))
     if a == 0.0:
         # asin(z) = sum C(2n,n) / (4**n (2n+1)) * z**(2n+1)
         _co = []
@@ -4524,7 +4548,7 @@ def tanh(x, terms=15):
     _inf = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
     a = x.st()
     if not _inf:
-        return Composite({0: math.tanh(a)})
+        return _const_like(x, math.tanh(a))
     u = _like(x, _inf)
     _s, _c = sinh(u, terms), cosh(u, terms)
     # Carried completeness, as in tan.
@@ -4536,6 +4560,15 @@ def tanh(x, terms=15):
     e = math.exp(-2.0 * abs(a))
     sech2 = 4.0 * e / (1.0 + e) ** 2
     core = T / (R(1) + T * t)
+    if sech2 == 0.0:
+        # The whole jet is below float64: every grade past 0 is an exact zero.
+        # Kept as terms, so the result carries its depth (see _const_like); a
+        # bare |t|_0 here let ln(tanh(609 + ...)) become a depthless zero that
+        # R1 converted at grade -1, and an O(1) h entered a 20000-step chain.
+        _z = {d: 0.0 for d in core.coeffs_dict() if _dim_negative(d)}
+        _z[_unit_dim(x)] = t
+        out = _like(x, _z)
+        return _truncate_order(out, _tighter(core._complete, _min_complete(x)))
     # Scaled through the backend: sech2 is a positive number that may underflow
     # to 0.0 for |a| > ~370, and a Python 0.0 entering `core * sech2` would be
     # an expressed zero, which R1 converts.  An underflowed scale is not that.
@@ -4622,7 +4655,7 @@ def erf(x, terms=15):
         return _bounded_at_inf(math.erf, x)
     a = x.st()
     if not _has_infinitesimal_part(x):
-        return Composite({0: math.erf(a)})
+        return _const_like(x, math.erf(a))
     return antiderivative(_chained(_TWO_OVER_SQRT_PI * exp(-(x * x), terms), x),
                           math.erf(a))
 
@@ -4656,7 +4689,7 @@ def erfc(x, terms=15):
         return _bounded_at_inf(math.erfc, x)
     a = x.st()
     if not _has_infinitesimal_part(x):
-        return Composite({0: math.erfc(a)})
+        return _const_like(x, math.erfc(a))
     return antiderivative(_chained(-_TWO_OVER_SQRT_PI * exp(-(x * x), terms), x),
                           math.erfc(a))
 
@@ -4678,7 +4711,7 @@ def normal_cdf(x, terms=15):
     a = x.st()
     base = 0.5 * math.erfc(-a / math.sqrt(2.0))
     if not _has_infinitesimal_part(x):
-        return Composite({0: base})
+        return _const_like(x, base)
     return antiderivative(
         _chained(_ONE_OVER_SQRT_2PI * exp(-(x * x) * 0.5, terms), x), base)
 
@@ -4858,8 +4891,11 @@ def _series_pow(x, s, terms=15):
         if v != 0.0 or n in orders:
             y[n] = v
     out = _like(x, {-float(n): v for n, v in y.items()})
+    out = _truncate_order(out, _tighter(terms - 1, _min_complete(x)))
+    # After the truncation, which rebuilds the composite without the marker:
+    # power is not one of the wrapped transcendentals, so it carries its own.
     out._denot = _denot_of(x)
-    return _truncate_order(out, _tighter(terms - 1, _min_complete(x)))
+    return out
 
 
 def _const_pow(x, s):
@@ -4894,7 +4930,7 @@ def _const_pow(x, s):
     # same constant, correctly rounded.
     if sv == 0.0 or a == 1.0:
         return None
-    out = Composite({0: math.pow(a, sv)})
+    out = _const_like(x, math.pow(a, sv))
     out._denot = _merge_denot(_denot_of(x),
                               _denot_of(s) if isinstance(s, Composite) else None)
     return out

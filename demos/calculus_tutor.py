@@ -25,7 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from composite.composite_lib import (Composite, R, ZERO, INF, sin, cos, exp,
                                      ln, sqrt, antiderivative, integrate,
-                                     limit, taylor_coefficients)
+                                     limit, taylor_coefficients,
+                                     NotRepresentableError)
 
 # COMPOSITE transcendentals only.  This used to pair each one with its
 # math.* twin, and the twin was never read -- dead weight that would have
@@ -668,9 +669,13 @@ def lesson6():
     the composite, exactly like st() or d(k) -- one explicit operation
     crossing between two number systems.  eval_taylor() is that exit.
 
-    So: the antiderivative is computed in h, the panel arithmetic happens
-    in the reals, and the coefficients are what pass between them.  t is
-    never h and h is never substituted.
+    Be clear about what that exit is: numerically it IS putting the real
+    number t where h was.  Renaming the variable does not change that.
+    It is honest only because it happens once, at the end, as an
+    explicit exit -- the antiderivative itself is computed in h.  The
+    library's own integrate() does not do this at all: it reads the
+    integral by meeting composites, never by putting a real in for h,
+    and the practice round below prints it next to this one panel.
 
     No rectangles are involved, and for a polynomial the series is
     finite -- so the answer is not an approximation, it is exact.
@@ -803,17 +808,19 @@ def lesson8():
       diverges, zero means it is finite, negative means it vanishes.
 
       the DEEPEST term -- the smallest dimension present.  This is
-      usually the tail of a series, and often just rounding noise.
-      It tells you nothing about convergence.
+      where the series was cut off: a real Taylor coefficient, but the
+      last one kept, and it tells you nothing about convergence.
 
     Two traps, and both have caught this library in real code:
 
       1.  taking min() instead of max() -- reading the tail and calling
           it the answer.
       2.  taking max() over the KEYS rather than over the nonzero ones.
-          A key can be stored holding 0.0, and a stored zero is not a
-          term.  (1-cos h)/h^2 keeps a key at +2 with coefficient 0.0,
-          so plain max() calls a convergent expression divergent.
+          A key can be stored holding 0.0.  That zero is an inert term
+          (rule R2): it records that the values there cancelled, but it
+          does not decide how big the number is.  (1-cos h)/h^2 keeps a
+          key at +2 with coefficient 0.0, so plain max() calls a
+          convergent expression divergent.
 
     WORKED EXAMPLE""")
     h = ZERO
@@ -824,8 +831,9 @@ def lesson8():
     print(f"        max(keys)       : {max(v.c)}   -> would say 'diverges'")
     print(f"        coefficient there: {v.coeff(max(v.c))!r}   <- it is ZERO")
     print(f"        max(nonzero)    : {max(nz)}   -> finite, value {v.st()!r}")
-    print(f"        min(keys)       : {min(v.c)}  <- series tail, noise")
-    print(f"\n      limit() agrees with the second reading:"
+    print(f"        min(keys)       : {min(v.c)}  <- where the series was cut off")
+    print(f"\n      limit() takes the same reading -- it evaluates at the seed and"
+          f" reads the standard part,\n      so it is not a second opinion:"
           f" {float(limit(lambda t: (1-cos(t))/(t*t), 0.0))!r}")
 
     def round_():
@@ -841,7 +849,7 @@ def lesson8():
         if max(v.c) != max(nz):
             print(f"      key {max(v.c)} holds coefficient "
                   f"{v.coeff(max(v.c))!r} -- a stored zero, not a term")
-        print(f"      min {min(v.c)} is the series tail, not mathematics\n")
+        print(f"      min {min(v.c)} is where the series was cut off\n")
     practice(round_)
 
 
@@ -893,17 +901,14 @@ def lesson9():
       Every one of those is an error in float arithmetic and undefined
       in a jet.  None is a special case here.
 
-      One of them looks like it breaks lesson 8.  INF - INF prints as
-      |0|_1, and lesson 8 said a stored zero is not a term -- so is this
-      just zero?  No, and the difference matters.  Lesson 8 was about a
-      number that has OTHER terms, where a key holding 0.0 must not be
-      mistaken for the leading one.  Here there are no other terms: the
-      whole number is a zero, and the dimension it sits at is the only
-      thing distinguishing it from every other zero.  INF - INF vanishes
-      at the infinite scale; ZERO - ZERO vanishes at the infinitesimal
-      one, and they are not interchangeable.""")
-    print(f"      INF - INF   = {INF-INF}     a zero at dimension +1")
-    print(f"      ZERO - ZERO = {ZERO-ZERO}    a zero at dimension -1")
+      INF - INF prints as |1|_0, which looks wrong and is not.  When a
+      whole number cancels, the cancellation keeps WHAT cancelled, one
+      dimension down:  a - a = a*h.  So INF - INF is INF*h = 1, and
+      ZERO - ZERO is ZERO*h = h^2.  Neither is "just zero": each records
+      the quantity that cancelled and the scale it cancelled at, and the
+      two are not interchangeable.""")
+    print(f"      INF - INF   = {INF-INF}     INF * h: the infinity, one dimension down")
+    print(f"      ZERO - ZERO = {ZERO-ZERO}    ZERO * h: the infinitesimal, one dimension down")
 
     def round_():
         q = ask_int("build 1/h**q, pick q", 3, 1, 8)
@@ -924,8 +929,7 @@ def lesson10():
     1.  nudge(0) is NOT 0 + h.
     2.  abs() and any plain-float exit throw the nudge away.
     3.  a Python 'if' picks one branch, and the answer is that branch's.
-    4.  a value too small for float64 underflows, and R1 revives it with
-        the wrong magnitude.
+    4.  a value too small for float64 is refused, not returned.
     5.  an accumulator started at 0 is not empty.
 
     WORKED EXAMPLE 1 -- the zero that is not zero""")
@@ -934,9 +938,10 @@ def lesson10():
     print(f"      nudge(0)**2     = {(R(0)+ZERO)**2}    = (2h)^2 = 4h^2, not h^2")
     print(f"      ZERO**2         = {ZERO**2}    <- what you probably meant")
     print("""
-      Nothing is wrong here -- R(0) really is |1|_-1 by the zero rules --
-      but 'nudge(0)' reads like '0 + h' and is not.  Use ZERO directly
-      when you want a bare first-order zero.
+      Nothing is wrong here.  R(0) is the expressed zero |0|_0, and the
+      moment it is used as an operand it converts to |1|_-1 by the zero
+      rules -- so 'nudge(0)' reads like '0 + h' and is h + h.  Use ZERO
+      directly when you want a bare first-order zero.
 
     WORKED EXAMPLE 2 -- abs() drops everything""")
     x = nudge(3)
@@ -962,35 +967,25 @@ def lesson10():
       other never existed.  |x| at 0 has no derivative, and no arithmetic
       can invent one -- but nothing warned you either.
 
-    WORKED EXAMPLE 4 -- a value too small for float64, resurrected""")
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        v = exp(R(-1) / (nudge(1e-3) ** 2))
+    WORKED EXAMPLE 4 -- a value too small for float64""")
     print(f"\n      f(x) = exp(-1/x^2) at x = 1e-3.")
     print(f"        -1/x^2          = {-1/(1e-3)**2:g}")
     print(f"        math.exp(-1e6)  = {math.exp(-1e6)!r}   <- UNDERFLOWS to zero")
-    print(f"        R1 then converts that bare zero to {R(0.0)}")
-    print(f"\n      so the composite reports:")
-    for k in sorted(v.c, reverse=True)[:4]:
-        print(f"        dimension {k:>3} : {v.coeff(k):.6g}")
+    try:
+        exp(R(-1) / (nudge(1e-3) ** 2))
+        print("\n      the composite returned a value")
+    except NotRepresentableError as e:
+        print(f"\n      the composite refuses:")
+        print(f"        NotRepresentableError: {str(e).split(':')[0]}")
     print(f"""
-      Those look like derivatives exploding.  They are not.  The true
-      derivatives of exp(-1/x^2) here are all of order e^-1000000, which
-      in float64 is exactly 0 -- they VANISH, they do not grow.  What is
-      on screen is the derivative chain of the EXPONENT:
-
-        d/dx (-1/x^2) = 2/x^3 = {2/(1e-3)**3:g}    <- the dimension -2 row
-
-      multiplied by a value that underflowed to zero and was then brought
-      back as a unit zero by R1 instead of annihilating the product.  The
-      |1|_-1 at the top of that table IS the underflow.
-
-      This is not a fact about calculus -- exp(-1/x^2) being non-analytic
-      is true everywhere.  It is a fact about REPRESENTATION, and it is a
-      failure only this library can have: float64 lost the value, and the
-      zero rules gave it back with the wrong magnitude.  When a composite
-      comes back with enormous coefficients for a function you know is
-      tiny, suspect an underflow that R1 revived.
+      float64 cannot hold e^-1000000, so the value would come back as a
+      bare 0.0 -- and a 0.0 standing in for it would be an EXPRESSED zero,
+      which R1 converts into an infinitesimal of size 1.  The answer would
+      then carry derivatives that look like they explode, when the true
+      derivatives here are all of order e^-1000000.  So the library does
+      not return a number at all: it says the value is below what float64
+      can represent.  An underflow is a representation limit, and a
+      refusal is the honest report of one.
 
       One real limitation does survive underneath all that, and it is a
       fact about calculus rather than floats: at x = 0 EXACTLY, every
@@ -1025,12 +1020,15 @@ def lesson10():
     print(f"\n        acc = 0          -> {bad}")
     print(f"        acc = Composite() -> {good}")
     print(f"        f' differs by     : {bad.coeff(-1) - good.coeff(-1)!r}")
-    print(f"\n      f'(2) should be 5: d/dx(x + x^2) at 2 is 1 + 4.  The bare 0")
-    print("      added a spurious 1.  The library does warn -- its first line is:")
+    print(f"\n      The conventional f'(2) is 5: d/dx(x + x^2) at 2 is 1 + 4.  The bare")
+    print("      0 is not nothing: a written 0 is the zero x - 2 here, so the sum")
+    print("      that was actually written is x + x^2 + (x - 2), and its derivative")
+    print("      6 is correct for it.  The library flags that the jet is the")
+    print("      DENOTED one -- its first line is:")
     print(f"        \"{first_warning}\"" if first_warning else
           "        (no warning captured)")
-    print("      Start an empty sum with Composite({}), which is NOTHING --")
-    print("      not zero.  R6: an unstarted sum holds nothing.")
+    print("      If you meant an empty sum, start it with Composite({}), which is")
+    print("      NOTHING -- not zero.  R6: an unstarted sum holds nothing.")
     print("""
     AND THE ONE THAT LOOKS LIKE A FAILURE AND IS NOT""")
     print(f"\n      sqrt(ZERO) = {sqrt(ZERO)}     a HALF dimension")
