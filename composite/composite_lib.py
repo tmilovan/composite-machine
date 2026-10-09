@@ -147,6 +147,50 @@ def _is_unit(c):
     return c._backend.is_unit(c._data)
 
 
+def _unit_valued(r):
+    """r is the number 1: |1|_0, possibly beside inert zero terms (R2).
+
+    ln splits x into its leading term times a remainder that the split itself
+    makes.  When that remainder is 1, ln of it is ln(1) -- an expressed |0|_0
+    that the library, not the caller, would be writing, and R6 would add as an
+    h.  ln(h beside an inert |0|_-4) came back ln(h) + h that way.
+    """
+    return _is_unit(r) or (not _has_infinitesimal_part(r) and r.st() == 1.0)
+
+
+def _ln_lead(lead, ratio):
+    """ln(lead_term * ratio) with ratio a unit: the lead's log, bounded as ratio.
+
+    ln(1 + O(h**(c+1))) is O(h**(c+1)), so a ratio known to order c leaves the
+    log known to order c.  Returning the lead alone called it exact.
+    """
+    if ratio._complete is None:
+        return lead
+    return Composite._wrap(lead._data, lead._backend, demote=False,
+                           complete=_tighter(lead._complete, ratio._complete),
+                           denot=_denot_of(lead))
+
+
+def _unit_kept(x, unit, sign):
+    """R3: x * 1 and x / 1 return x untouched -- and keep the unit's bound.
+
+    A |1|_0 that carries a completeness bound c is 1 + (orders past c nobody
+    computed), so it is the identity on the VALUE but not on what is vouched
+    for.  Returning x as it stood dropped that: _d_deps(x) is such a 1, and
+    atan, asin, acos, erf, erfc and normal_cdf each claimed one order more than
+    their argument supports, wrong by up to 1.1 at the order they added.  The
+    value is still x unchanged, zeros latent and not converted; only the bound
+    is the product's or quotient's.
+    """
+    if unit._complete is None:
+        return x
+    bound = _tighter(x._complete, _scaled_complete(x, unit, x, unit, sign))
+    if bound == x._complete:
+        return x
+    return Composite._wrap(x._data, x._backend, demote=False,
+                           complete=bound, denot=_denot_of(x))
+
+
 def _operands(a, b):
     """Prepare two composites for an operation.
 
@@ -1459,9 +1503,9 @@ class Composite:
         if not isinstance(other, Composite):
             return NotImplemented
         if _is_unit(other):
-            return self
+            return _unit_kept(self, other, +1)
         if _is_unit(self):
-            return other
+            return _unit_kept(other, self, +1)
         a, b = _operands(self, other)
         data, complete = _capped(a._backend,
                                  a._backend.convolve(a._data, b._data),
@@ -1493,7 +1537,7 @@ class Composite:
         if not isinstance(other, Composite):
             return NotImplemented
         if _is_unit(other):
-            return self
+            return _unit_kept(self, other, -1)
 
         # Under conventional() a zero divisor is an error, as it is anywhere
         # that has an additive identity.  Checked BEFORE _operands, which is
@@ -1584,7 +1628,9 @@ class Composite:
         # and a bound of 1 made exp((x*x/x)*x) drop every order from 2.
         got = [_dim_order(d) for d in out.c if _dim_order(d) >= 0]
         if got and cut:
-            out._complete = _tighter(out._complete, max(got))
+            # + 0.0: _dim_order reads a log-axis grade as -0.0, and a bound of
+            # -0.0 printed as a negative completeness.  It is 0.
+            out._complete = _tighter(out._complete, max(got) + 0.0)
         return out
 
     def __rtruediv__(self, other):
@@ -1691,6 +1737,11 @@ class Composite:
             if n.denominator == 1:
                 return self ** int(n)
             return _rational_power(self, n)
+        _c = _const_pow(self, n) if isinstance(n, (float, Composite)) else None
+        if _c is None:
+            _c = _series_pow(self, n)
+        if _c is not None:
+            return _c
         if isinstance(n, float):
             return exp(Composite(n) * ln(self))
         if isinstance(n, Composite):
@@ -2602,6 +2653,10 @@ def _rational_power(x, r):
     u = Composite({}) if _is_unit(q) else q - Composite({0: 1.0})
 
     acc = Composite({0: 1.0})
+    if _is_unit(q):
+        # Nothing left to expand -- but a unit quotient that carries a bound is
+        # 1 + (orders past it nobody computed), and so is its rth power.
+        acc._complete = q._complete
     term = Composite({0: 1.0})
     coef = _Fraction(1)
     for k in range(1, _effective_terms(15) + 1):
@@ -3641,6 +3696,14 @@ def exp(x, terms=15):
                         {_zero: _exp_float(_rest.get(_zero, 0.0))})
                 else:
                     out = out * exp(_vec_composite(_rest), terms)
+            # The argument's bound: an error d past order C in x multiplies
+            # the result by (1 + d), so it is known to C past ITS lead.  Built
+            # from the log terms alone, the result had no bound and power()
+            # through this branch called a truncated base exact.
+            _cx = getattr(x, "_complete", None)
+            _lo = out.lead_order()
+            if _cx is not None and _lo is not None:
+                out._complete = _tighter(out._complete, _lo + _cx)
             return out
 
     # OUTSIDE THE VALUE GROUP.  exp of a positive grade is not a large number,
@@ -3746,8 +3809,8 @@ def _ln_vector(x, terms):
         return lead
     # x = lead_term * (1 + r); ln(x) = ln(lead_term) + ln(1 + r)
     ratio = x / _vec_composite({lead_d: lead_c})
-    if _is_unit(ratio):
-        return lead
+    if _unit_valued(ratio):
+        return _ln_lead(lead, ratio)
     return lead + ln(ratio, terms)
 
 
@@ -3813,8 +3876,8 @@ def ln(x, terms=15):
                     _t[(0, 0)] = _lc
                 _lead = _vec_composite(_t)
                 _rest = x / _like(x, {_pd: _pc})
-                if _is_unit(_rest):
-                    return _lead
+                if _unit_valued(_rest):
+                    return _ln_lead(_lead, _rest)
                 return _lead + ln(_rest, terms)
 
     a = x.st()
@@ -3823,9 +3886,23 @@ def ln(x, terms=15):
         # Check for positive infinitesimal: st=0 but positive coeff
         # at a negative dimension (e.g. ZERO = |1|_{-1})
         coeffs = x.c
-        neg_dims = {d: c for d, c in coeffs.items() if _dim_negative(d)}
+        # The LEADING term of an infinitesimal is its DOMINANT one, the
+        # shallowest grade with a nonzero coefficient -- chosen as the infinity
+        # branch above chooses it.  min() took the DEEPEST grade, zeros
+        # included: ln(h - h**4) raised on the -h**4, though h - h**4 is
+        # positive, and an inert |0|_-4 beside h (R2) made ln(h) raise too.
+        # ln(h + h**4) came out right only because the remainder h**-3 + 1 was
+        # rescued by the infinity branch.
+        #
+        # Only when the standard part IS zero.  For a < 0 the leading term is
+        # the standard part itself, negative, and there is nothing to take the
+        # log of: picking the dominant INFINITESIMAL instead took ln(ln(0.7)+...)
+        # as ln of a positive infinitesimal and returned an unbounded value.
+        neg_dims = {d: c for d, c in coeffs.items()
+                    if _dim_negative(d) and c != 0.0} if a == 0.0 else {}
         if neg_dims:
-            min_dim = min(neg_dims.keys())
+            from composite.backends.vector_dim_backend import dom_max as _dom_max
+            min_dim = _dom_max(neg_dims)
             coeff = neg_dims[min_dim]
             if coeff > 0:
                 # ln(|c|_d) = ln(c) + d*ln(h), and ln(h) needs a dimension that
@@ -3850,8 +3927,8 @@ def ln(x, terms=15):
                         _lead_terms[(0, 0)] = _lc
                     _lead = _vec_composite(_lead_terms)
                     _rest = x / _like(x, {min_dim: coeff})
-                    if _is_unit(_rest):
-                        return _lead
+                    if _unit_valued(_rest):
+                        return _ln_lead(_lead, _rest)
                     return _lead + ln(_rest, terms)
                 raise ValueError(
                     f"ln(|{coeff}|_{min_dim}): the log SCALE cannot be "
@@ -4725,10 +4802,102 @@ def power(x, s, terms=15):
         x = Composite({0: float(x)})
     if isinstance(s, int):
         return x ** s
+    _c = _const_pow(x, s)
+    if _c is not None:
+        return _c
+    _c = _series_pow(x, s, terms)
+    if _c is not None:
+        return _c
     if isinstance(s, Composite):
         return exp(s * ln(x, terms), terms)
     _warn_non_dyadic_exponent(x, s)
     return exp(R(s) * ln(x, terms), terms)
+
+
+def _series_pow(x, s, terms=15):
+    """x**s for a Taylor series x with positive standard part, or None.
+
+    J.C.P. Miller's recurrence for y = x**s, with x = sum x_k h**k, x_0 = a > 0:
+
+        y_0 = a**s,   y_n = (1/(n a)) * sum_{k=1..n} ((s+1)k - n) x_k y_(n-k)
+
+    exp(s*ln(x)) builds the same series through two transcendental series and
+    a composition, and loses about two digits doing it: power(x**4, 0.5) at
+    0.35 read d6 = 5.1e-9 where it is 0, sqrt(x**4) read 4.9e-11.  s = 0.5 IS
+    sqrt, so it is sqrt: power(x, 0.5) - sqrt(x) then cancels exactly, which two
+    different computations of one function do not.
+
+    Only the shape sqrt's own recurrence takes -- integer, non-positive grades,
+    no log axis -- and a nonzero real exponent: a written 0 is an expressed
+    zero, and exp(s*ln(x)) is what converts it.
+    """
+    if not isinstance(s, float) or s == 0.0 or not isinstance(x, Composite):
+        return None
+    if _has_positive_dims(x) or not _has_infinitesimal_part(x):
+        return None
+    orders = {}
+    for d, c in x.coeffs_dict().items():
+        if isinstance(d, tuple):
+            return None
+        k = -float(d)
+        if k < 0 or k != int(k):
+            return None
+        orders[int(k)] = c
+    a = orders.get(0, 0.0)
+    if not a > 0.0:
+        return None
+    if s == 0.5:
+        return sqrt(x, terms)
+    y = {0: math.pow(a, s)}
+    for n in range(1, terms):
+        acc = 0.0
+        for k in range(1, n + 1):
+            if k in orders and (n - k) in y:
+                acc += ((s + 1.0) * k - n) * orders[k] * y[n - k]
+        v = acc / (n * a)
+        if v != 0.0 or n in orders:
+            y[n] = v
+    out = _like(x, {-float(n): v for n, v in y.items()})
+    out._denot = _denot_of(x)
+    return _truncate_order(out, _tighter(terms - 1, _min_complete(x)))
+
+
+def _const_pow(x, s):
+    """x**s for a plain positive constant x and a constant exponent, or None.
+
+    Every transcendental hands a constant argument to its math function; power
+    went through exp(s*ln(x)) regardless, which is not correctly rounded:
+    power(R(2), 0.5) came out 1.414213562373095 where sqrt(R(2)) and math.pow
+    give 1.4142135623730951, so power(2, 0.5) - sqrt(2) left -2.2e-16 instead
+    of cancelling, and the residue a - a = a*h never formed.  Only a POSITIVE
+    standard part takes this path: a negative base still refuses through ln,
+    and a zero is an operand R1 converts, as before.
+    """
+    if not isinstance(x, Composite) or _has_infinitesimal_part(x) \
+            or _has_positive_dims(x):
+        return None
+    if isinstance(s, Composite):
+        if _has_infinitesimal_part(s) or _has_positive_dims(s):
+            return None
+        sv = s.st()
+    elif isinstance(s, (int, float)):
+        sv = float(s)
+    else:
+        return None
+    a = x.st()
+    if not a > 0.0:
+        return None
+    # NOT when s*ln(a) holds an expressed zero: a written exponent 0, or
+    # ln(1) = 0.  Those zeros convert (R1) and the composite route builds the
+    # denoted value -- c**h, or exp(s*h) for (x/x)**s -- which math.pow would
+    # flatten to a plain 1.  Anywhere else no zero arises, and math.pow is the
+    # same constant, correctly rounded.
+    if sv == 0.0 or a == 1.0:
+        return None
+    out = Composite({0: math.pow(a, sv)})
+    out._denot = _merge_denot(_denot_of(x),
+                              _denot_of(s) if isinstance(s, Composite) else None)
+    return out
 
 
 # =============================================================================
