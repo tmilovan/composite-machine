@@ -539,7 +539,7 @@ class SparseDenseBackend(CompositeBackend):
     # With expressed zero preservation, the highest dim may have coeff 0.0,
     # which would cause division by zero / NaN in the quotient step.
     # Also clean near-zero remainder artifacts after each step.
-    def deconvolve_cut(self, a: SparseData, b: SparseData) -> tuple:
+    def deconvolve_cut(self, a: SparseData, b: SparseData, min_terms: int = 50) -> tuple:
         """Polynomial long division in sparse form.
 
         Computes Q such that A = Q * B (approximately).
@@ -566,7 +566,7 @@ class SparseDenseBackend(CompositeBackend):
         q_dims = []
         q_vals = []
 
-        max_iter = max(len(a.dims) + len(b.dims), 50)
+        max_iter = max(len(a.dims) + len(b.dims), min_terms)
         for _ in range(max_iter):
             if len(remainder_dims) == 0:
                 break

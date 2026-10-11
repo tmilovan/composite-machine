@@ -212,8 +212,12 @@ class CompositeBackend(ABC):
         """
 
     @abstractmethod
-    def deconvolve_cut(self, a: object, b: object) -> tuple:
+    def deconvolve_cut(self, a: object, b: object, min_terms: int = 50) -> tuple:
         """Composite division via deconvolution: (quotient, cut).
+
+        A non-terminating quotient is cut after max(len(a) + len(b), min_terms)
+        steps.  min_terms is the depth the caller asked for; 50 when nothing
+        asked, so a derivative scope deeper than 50 is not cut short.
 
         The leading term of the divisor is its highest dimension with a
         NONZERO coefficient: retained zeros may sit above it.  Zero-valued

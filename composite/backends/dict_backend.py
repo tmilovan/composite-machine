@@ -195,7 +195,7 @@ class DictBackend(CompositeBackend):
     # With expressed zero preservation, the highest dim may have coeff 0.0,
     # which would cause division by zero / NaN in the quotient step.
     # Also clean near-zero terms from inputs before division.
-    def deconvolve_cut(self, a: DictData, b: DictData) -> tuple:
+    def deconvolve_cut(self, a: DictData, b: DictData, min_terms: int = 50) -> tuple:
         if not b.terms:
             raise ZeroDivisionError("Cannot deconvolve by empty Composite")
 
@@ -215,7 +215,7 @@ class DictBackend(CompositeBackend):
         lead_dim, lead_val = b_sorted[-1]
         quotient = {}
 
-        max_iter = max(len(a.terms) + len(b.terms), 50)
+        max_iter = max(len(a.terms) + len(b.terms), min_terms)
         for _ in range(max_iter):
             if not remainder:
                 break

@@ -259,7 +259,7 @@ class DenseSeriesBackend(CompositeBackend):
         return self._make(a.offset + b.offset, a.step,
                           np.convolve(a.vals, b.vals))
 
-    def deconvolve_cut(self, a: DenseData, b: DenseData) -> tuple:
+    def deconvolve_cut(self, a: DenseData, b: DenseData, min_terms: int = 50) -> tuple:
         """Long division, highest dimension first.
 
         The quotient of a non-terminating division is cut at `terms`; that is
@@ -278,7 +278,7 @@ class DenseSeriesBackend(CompositeBackend):
         lead_k = int(nz[-1])                       # highest expressed dim of b
         lead_v = float(b.vals[lead_k])
         bv = b.vals[:lead_k + 1][::-1]             # descending powers
-        terms = max(len(a.vals) + len(b.vals), 50)
+        terms = max(len(a.vals) + len(b.vals), min_terms)
         # EXTEND the remainder before dividing.  A non-terminating quotient
         # continues BELOW the dividend's lowest expressed grade -- 1/(1+h) is
         # the geometric series 1 - h + h**2 - ... and none of those terms exist

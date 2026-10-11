@@ -208,7 +208,7 @@ class VectorDimBackend(DictBackend):
                 out[k] = out.get(k, 0.0) + va * vb
         return DictData(out)
 
-    def deconvolve_cut(self, a: DictData, b: DictData) -> tuple:
+    def deconvolve_cut(self, a: DictData, b: DictData, min_terms: int = MIN_QUOTIENT_TERMS) -> tuple:
         """Long division; dimensions SUBTRACT componentwise."""
         if not b.terms:
             raise ZeroDivisionError("Cannot deconvolve by empty Composite")
@@ -227,7 +227,7 @@ class VectorDimBackend(DictBackend):
         # divisor has a leading coefficient smaller than its lower terms
         # DIVERGES -- each step multiplies the remainder by their ratio -- so
         # without this the loop runs until the coefficients overflow to inf.
-        limit = max(len(rem) + len(bnz), MIN_QUOTIENT_TERMS)
+        limit = max(len(rem) + len(bnz), min_terms)
         while rem and limit > 0:
             limit -= 1
             r_dim = dom_max(rem)

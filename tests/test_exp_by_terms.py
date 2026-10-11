@@ -104,3 +104,18 @@ def test_underflow_is_absent_not_a_manufactured_infinitesimal():
     d = r.coeffs_dict()
     print(f"\n  exp(1e-200 h) = {d}")
     assert d == {0: 1.0, -1: 1e-200}
+
+
+def test_several_integer_terms_order_50_against_mpmath():
+    # The recurrence path: exp(-(x*x)) at 1.3 was 3e-12 out at order 50 as a
+    # product of exp(-2.6h) and exp(-h^2), whose alternating terms cancel.
+    import composite.composite_lib as cl
+    for label, a, fc, fm in (("exp(-(x^2)) at 1.3", 1.3, lambda x: exp(-(x * x)), lambda t: mp.exp(-t * t)),
+                             ("exp(sin x) at 0.7", 0.7, lambda x: exp(sin(x)), lambda t: mp.exp(mp.sin(t)))):
+        with cl._derivative_scope(50, 52):
+            r = fc(R(a) + ZERO)
+        K = min(int(r.complete_order), 50)
+        print(f"\n  {label}: complete_order {r.complete_order}")
+        assert r.complete_order >= 50
+        ref = _taylor(fm, mp.mpf(a), 50)
+        check_series(f"{label}, orders 0..{K}", r.coeffs_dict(), {-n: ref[n] for n in range(K + 1)}, 1e-13)

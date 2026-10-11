@@ -340,7 +340,7 @@ class FractionalDictBackend(CompositeBackend):
                 out[k] = out.get(k, 0.0) + va * vb
         return FracData(out, L)
 
-    def deconvolve_cut(self, a: FracData, b: FracData) -> tuple:
+    def deconvolve_cut(self, a: FracData, b: FracData, min_terms: int = 50) -> tuple:
         L, ta, tb = self._align(a, b)
         if not tb:
             raise ZeroDivisionError("Cannot deconvolve by empty Composite")
@@ -351,7 +351,7 @@ class FractionalDictBackend(CompositeBackend):
         lead_k = max(bnz, key=_key_sort)
         lead_v = bnz[lead_k]
         quot = {}
-        for _ in range(max(len(ta) + len(tb), 50)):
+        for _ in range(max(len(ta) + len(tb), min_terms)):
             if not rem:
                 break
             rk = max(rem, key=_key_sort)

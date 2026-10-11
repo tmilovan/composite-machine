@@ -1613,7 +1613,11 @@ class Composite:
         if _spans_multiple_axes(b) and _expandable_about_st(b):
             return a * _reciprocal(b, terms=_effective_terms(15))
 
-        result, cut = a._backend.deconvolve_cut(a._data, b._data)
+        # The requested depth: a derivative scope raises _min_terms, and a
+        # quotient cut at the backend's floor of 50 stopped 1/(1+x^2) at order
+        # 49 under _derivative_scope(50, 52).
+        result, cut = a._backend.deconvolve_cut(a._data, b._data,
+                                                min_terms=max(50, _min_terms[0]))
         out = Composite._wrap(_truncate_dims(a._backend, result), a._backend,
                               complete=_scaled_complete(self, other, a, b, -1),
                               denot=_denot_quotient(a, b))
@@ -3692,8 +3696,33 @@ def _exp_by_terms(x, terms, base, bound):
 
     A coefficient that underflows to 0.0 ends its factor: written into the
     composite it would be an expressed zero standing in for a positive number.
+
+    SEVERAL INTEGER GRADES take the recurrence instead.  The factors are
+    alternating series whose product cancels heavily -- exp(-(x*x)) at 1.3 is
+    exp(-2.6h) exp(-h^2), and its order-50 coefficient came out 3e-12 relative
+    from that product.  E' = u'E read coefficient by coefficient,
+
+        E_0 = e^a,   E_n = (1/n) sum_{k=1..n} k u_k E_(n-k),
+
+    adds only terms of the series being built, as Miller's recurrence does in
+    _series_pow, and holds float64 precision to order 50.  Fractional grades
+    keep the factors: the recurrence is over integer orders.
     """
     zero = _zero_dim_like(x)
+    if len(terms) > 1 and all(not isinstance(d, tuple) and float(d).is_integer()
+                              for d in terms):
+        u = {int(round(-float(d))): c for d, c in terms.items()}
+        K = int(math.floor(bound))
+        E = [base]
+        for n in range(1, K + 1):
+            acc = 0.0
+            for k, uk in u.items():
+                if k <= n:
+                    acc += k * uk * E[n - k]
+            E.append(acc / n)
+        series = {zero: E[0]}
+        series.update({dim_cast(-n): v for n, v in enumerate(E) if n})
+        return _join(_truncate_order(_like(x, series), bound), x)
     out = None
     for i, (d, c) in enumerate(sorted(terms.items(), key=lambda t: _lead_order(t[0]))):
         p = _lead_order(d)
