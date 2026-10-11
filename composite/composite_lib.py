@@ -2692,12 +2692,23 @@ def _rational_power(x, r):
         acc._complete = q._complete
     term = Composite({0: 1.0})
     coef = _Fraction(1)
-    for k in range(1, _effective_terms(15) + 1):
+    K = _effective_terms(15)
+    for k in range(1, K + 1):
         coef = coef * (r - (k - 1)) / k
         term = term * u
         if not term.c or all(v == 0.0 for v in term.c.values()):
             break
         acc = acc + term * float(coef)
+    else:
+        # The series ran all K powers without ending, so (1 + u)**r is known
+        # through order m*K, m the lowest order in u, and no further.  It used
+        # to report nothing -- complete_order None, "exact" -- and a read past
+        # the last power came back 0.0: (1.6 + h)**(3/2) at order 16 is 5.1e-7.
+        # Orders past the bound hold partial sums when u has several terms, so
+        # they are cut, as exp and ln cut theirs.
+        u_terms = {d: v for d, v in u.c.items() if v != 0.0 and _dim_nonzero(d)}
+        acc = _truncate_order(acc, _tighter(_complete_order(u_terms, K + 1),
+                                            _min_complete(u)))
     return acc * Composite({new_dim: scale})
 
 
@@ -5003,6 +5014,10 @@ def _series_pow(x, s, terms=15):
         return None
     if _has_positive_dims(x) or not _has_infinitesimal_part(x):
         return None
+    # The depth a derivative scope asks for, as every transcendental takes it:
+    # without this, power(x, 1.5) and x ** 1.5 stopped at order 14 under
+    # _derivative_scope(50, 52) while sqrt and exp reached 51.
+    terms = _effective_terms(terms)
     orders = {}
     for d, c in x.coeffs_dict().items():
         if isinstance(d, tuple):
