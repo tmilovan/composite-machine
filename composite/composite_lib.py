@@ -3912,6 +3912,58 @@ def _ln_vector(x, terms):
     return lead + ln(ratio, terms)
 
 
+def _ln_monomial(x, terms, a, bound):
+    """ln(a + |c|_g) = ln(a) + sum_n (-1)^(n+1) (c/a)^n / n at grade n*g.
+
+    One term, so each power of u = |c/a|_g is again one term and each order
+    receives exactly one contribution: the series is written out, nothing is
+    multiplied and nothing can cancel.  A coefficient that underflows to 0.0
+    ends the series rather than being written as an expressed zero.
+    """
+    (d, c), = terms.items()
+    p, q = _lead_order(d), c / a
+    lead = math.log(a)
+    series = {} if lead == 0.0 else {_zero_dim_like(x): lead}
+    pw, n = 1.0, 1
+    while n * p <= bound:
+        pw = pw * q
+        if pw == 0.0:
+            break
+        series[_dim_scaled(d, n)] = (pw if n % 2 else -pw) / n
+        n += 1
+    return _join(_truncate_order(_like(x, series), bound), x)
+
+
+def _ln_by_derivative(x, a, bound):
+    """ln(x) = ln(a) + antiderivative(x' / x), for an argument of several terms.
+
+    Summing powers of u = (x - a)/a, as the series below does, gives every
+    order k contributions from every power between k/2 and k, with alternating
+    signs and binomial weights far larger than the coefficient they sum to.
+    Rounding in those survives the cancellation: ln(1 + x^2) at 0.7 was 4e-10
+    out at order 30 and 3e-6 at order 50, whatever the depth.  Here there are
+    no powers -- D is a grade shift, x'/x one series division, antiderivative
+    the reverse shift -- and the same coefficients are within 3e-15 at order 50.
+
+    The bound is the series' own, the argument's, and one past the quotient's
+    (the antiderivative's shift), whichever is tightest: division runs at least
+    50 steps and longer for longer operands, so a short polynomial argument at
+    a depth beyond 50 reports that instead of claiming it.  The antiderivative's
+    constant slot is not used -- the standard part is ln(a), and a = 1 leaves
+    grade 0 absent, as the series does.
+    """
+    quot = x.D(1) / x
+    F = antiderivative(quot)
+    zero = _zero_dim_like(F)
+    parts = {d: v for d, v in F.c.items() if _dim_nonzero(d)}
+    lead = math.log(a)
+    if lead != 0.0:
+        parts[zero] = lead
+    out = _like(F, parts)
+    qc = getattr(quot, "_complete", None)
+    return _join(_truncate_order(out, _tighter(bound, None if qc is None else qc + 1)), x)
+
+
 @_honours_terms
 def ln(x, terms=15):
     """Natural logarithm for composite numbers.
@@ -4043,6 +4095,15 @@ def ln(x, terms=15):
     if not _has_infinitesimal_part(x):
         return _const_like(x, math.log(a))
 
+    nz = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
+    if nz and not any(isinstance(d, tuple) or _dim_positive(d) for d in nz):
+        bound = _tighter(_complete_order(nz, terms), _min_complete(x))
+        if bound is not None:
+            if len(nz) == 1:
+                return _ln_monomial(x, nz, a, bound)
+            return _ln_by_derivative(x, a, bound)
+
+    # Vector (log-axis) dimensions keep the power loop.
     h_part = x - R(a)
     ratio = h_part / R(a)
 

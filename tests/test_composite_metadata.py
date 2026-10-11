@@ -40,12 +40,34 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
+
 import composite.backends.config as cfg
-cfg.use_dict()
 from composite.composite_lib import Composite          # noqa: E402
 import composite.composite_lib as cl                   # noqa: E402
 
 EMPTY = Composite({})
+
+
+def _use_dict():
+    """This module's records run on the dict backend.  Switched here and not at
+    import: a module-level use_dict() ran during pytest's COLLECTION and was
+    never undone, so every test collected after this file ran on dict while
+    holding constants built on the default backend -- R(2) + ZERO * ln(ZERO)
+    then failed to promote."""
+    global EMPTY
+    cfg.use_dict()
+    cl._refresh_constants()
+    EMPTY = Composite({})
+
+
+@pytest.fixture(autouse=True, scope="module")
+def dict_backend():
+    before = cfg.get_backend()
+    _use_dict()
+    yield
+    cfg.set_backend(before)
+    cl._refresh_constants()
 
 
 def dims(c):
@@ -220,6 +242,7 @@ def test_accumulate_a_route_through_records():
 
 
 if __name__ == "__main__":
+    _use_dict()
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     print("=" * 70)
     print("composite records: data in the negative half, metadata in the positive")
