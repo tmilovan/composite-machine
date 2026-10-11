@@ -56,6 +56,13 @@ addition cannot represent, and the library refuses inexact grade addition --
 correctly.  Measuring in units of A makes the indices integers and their
 addition exact, which is also the standard resurgence convention.
 
+AN INDEX THAT IS NOT AN INTEGER IS A Sector.  exp(2.5/h), exp(1/h^2),
+exp(h^-1/2) and exp(ln(1/h)/h) are carried with the infinite quantity of the
+exponent as their index, combined by parts and ordered in the composite order
+(see Sector).  Integer indices stay ints and every path above is unchanged for
+them; the units-of-the-action convention is still the way to keep a family of
+irrational multiples on exact integers.
+
 ORDERING IS THE CONTENT.  Sector first, smaller index dominating (sector -1 is
 exp(+1/h), beyond every power upward; sector +1 is exp(-1/h), beyond every
 power downward), then the existing order inside the sector.  If that
@@ -137,6 +144,121 @@ def _term_mul(a, b):
             k = _dim_add(da, db)
             out[k] = out.get(k, 0.0) + va * vb
     return _rebuild(out)
+
+
+class Sector:
+    """A sector index that is not a whole multiple of 1/h.
+
+    The index q names the sector exp(-q): an integer n is q = n/h, so sector n
+    is exp(-n/h) as before, and stays a plain int -- every integer index is
+    canonicalised back to one, so the existing paths never see this class.
+    Anything else -- exp(2.5/h), exp(1/h^2), exp(h^-1/2), exp(ln(1/h)/h) --
+    is a Sector holding q as {grade: coefficient}, positive grades only: the
+    infinite quantity of the exponent, negated.
+
+    Indices combine as grades do in a product: exp(-q1) exp(-q2) = exp(-(q1+q2))
+    with q1 + q2 formed coefficient by coefficient, by parts.  A product
+    cancels nothing, so nothing is recorded: exp(3/h) exp(-3/h) is sector 0,
+    with no residue, whichever order the factors come in.  (exp(3/h - 3/h) is
+    a different expression: the subtraction is a cancellation and its residue
+    is kept, so it is e.)
+
+    Ordered by q in the composite order, smaller dominating, as integer
+    sectors are: exp(1/h^2) leads exp(2.5/h) leads exp(1/h) leads exp(h^-1/2).
+
+    Coefficients are floats, so A+A+A and 3A can differ in the last bit for an
+    irrational A and name two sectors.  Measuring the exponent in units of the
+    action keeps such a family on integers -- see the module docstring.
+    """
+
+    __slots__ = ("q", "_key")
+
+    def __init__(self, q):
+        self.q = {d: float(v) for d, v in q.items() if v != 0.0}
+        self._key = tuple(sorted(self.q.items(), key=lambda t: _dim_key(t[0])))
+
+    @staticmethod
+    def of(q):
+        """The canonical index for q = {grade: coeff}: 0, an int n for n/h,
+        else a Sector."""
+        q = {d: float(v) for d, v in q.items() if v != 0.0}
+        if not q:
+            return 0
+        if len(q) == 1:
+            (d, v), = q.items()
+            if not isinstance(d, tuple) and float(d) == 1.0 and v.is_integer():
+                return int(v)
+        return Sector(q)
+
+    def composite(self):
+        """q itself, as a Composite."""
+        return _rebuild(dict(self.q))
+
+    def exponent(self):
+        """-q, the infinite quantity in exp(...), as a Composite."""
+        return _rebuild({d: -v for d, v in self.q.items()})
+
+    def __repr__(self):
+        return f"Sector({self.composite()!r})"
+
+    def __hash__(self):
+        return hash(self._key)
+
+    def __eq__(self, other):
+        return isinstance(other, Sector) and self._key == other._key
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def _cmp(self, other):
+        from .composite_lib import _compare
+        return _compare(_index_composite(self), _index_composite(other))
+
+    def __lt__(self, other): return self._cmp(other) < 0
+    def __le__(self, other): return self._cmp(other) <= 0
+    def __gt__(self, other): return self._cmp(other) > 0
+    def __ge__(self, other): return self._cmp(other) >= 0
+
+    def __add__(self, other):
+        out = dict(_index_q(self))
+        for d, v in _index_q(other).items():
+            out[d] = out.get(d, 0.0) + v
+        return Sector.of(out)
+
+    __radd__ = __add__
+
+    def __neg__(self):
+        return Sector.of({d: -v for d, v in self.q.items()})
+
+    def __sub__(self, other):
+        return self + Sector.of({d: -v for d, v in _index_q(other).items()})
+
+    def __rsub__(self, other):
+        return (-self) + other
+
+
+def _index_q(n):
+    """An index as {grade: coefficient}: n/h for an integer."""
+    if isinstance(n, Sector):
+        return n.q
+    return {1.0: float(n)} if n else {}
+
+
+def _index_composite(n):
+    """An index as a Composite; sector 0 is NOTHING, which orders as zero."""
+    q = _index_q(n)
+    return _rebuild(dict(q)) if q else Composite({})
+
+
+def _canon_index(n):
+    return n if isinstance(n, Sector) else int(n)
+
+
+def _weight(n, h_value):
+    """exp(-q) at h = h_value."""
+    if isinstance(n, Sector):
+        return math.exp(-_eval_composite(n.composite(), h_value))
+    return math.exp(-n / h_value)
 
 
 def _lead_sign(c):
@@ -255,7 +377,8 @@ def resum_sector(c, h_value, L=None, M=None, force=None):
 
 
 class Transseries:
-    """A sparse map {sector: Composite}.  Sector n carries exp(-n/h)."""
+    """A sparse map {sector: Composite}.  Sector n carries exp(-n/h); a Sector
+    index q carries exp(-q)."""
 
     __slots__ = ("sectors",)
 
@@ -267,7 +390,7 @@ class Transseries:
         # supplied is absent.
         s = {}
         for n, c in (sectors or {}).items():
-            s[int(n)] = c if isinstance(c, Composite) else Composite(c)
+            s[_canon_index(n)] = c if isinstance(c, Composite) else Composite(c)
         self.sectors = s
 
     # -- construction --------------------------------------------------------
@@ -310,7 +433,8 @@ class Transseries:
         parts = []
         for n in sorted(self.sectors):
             c = self.sectors[n]
-            tag = "" if n == 0 else f"*exp({-n}/h)"
+            tag = ("" if n == 0 else f"*exp({n.exponent()!r})" if isinstance(n, Sector)
+                   else f"*exp({-n}/h)")
             parts.append(f"[{c}]{tag}")
         return "Transseries(" + " + ".join(parts) + ")"
 
@@ -492,7 +616,7 @@ class Transseries:
         out = {}
         for n, c in self.sectors.items():
             v, _ = resum_sector(c, h_value, L, M, force=borel)
-            out[n] = math.exp(-n / h_value) * v
+            out[n] = _weight(n, h_value) * v
         return out
 
     def flat_part(self, h_value, borel=None, L=None, M=None):
@@ -512,7 +636,7 @@ class Transseries:
                              f"got {h_value!r}")
         total, amb = 0.0, 0.0
         for n, c in self.sectors.items():
-            w = math.exp(-n / h_value)
+            w = _weight(n, h_value)
             v, a = resum_sector(c, h_value, L, M, force=borel)
             total += w * v
             amb += w * a
@@ -624,7 +748,7 @@ def from_series(coeffs, L=None, M=None, action=None):
 
 def sector(n, c=1.0):
     """The transseries c*exp(-n/h)."""
-    return Transseries({int(n): c if isinstance(c, Composite) else Composite(c)})
+    return Transseries({_canon_index(n): c if isinstance(c, Composite) else Composite(c)})
 
 
 def flat(n=1):
@@ -699,9 +823,11 @@ def ts_exp(x):
     sector -- which is the step the powers-and-logs group cannot take, because
     exp of something infinite is not in it.
 
-    Only level one is supported: the infinite part must be k*h^-1 for an
-    INTEGER k, giving sector -k.  A non-integer k means the action has not
-    been normalised -- see the module docstring on units.
+    The infinite part is the index, negated, whatever it is: k/h for an
+    integer k is sector -k as it always was, and anything else -- 2.5/h,
+    1/h^2, h^-1/2, ln(1/h)/h, or a sum of them -- is a Sector carrying that
+    quantity.  Level one only: exp of a transseries that already has a
+    non-zero sector is exp of exp, and is refused.
     """
     if isinstance(x, Transseries):
         if set(x.sectors) - {0}:
@@ -718,24 +844,8 @@ def ts_exp(x):
         (inf if _dim_is_positive(d) else rest)[d] = v
     if not inf:
         return Transseries({0: _c_exp(x)})
-    if len(inf) > 1 or 1.0 not in {float(d) if not isinstance(d, tuple) else None
-                                   for d in inf}:
-        raise NotImplementedError(
-            f"exp of an infinite part {inf!r}: only k*h^-1 is supported "
-            f"(level one).  Anything faster than 1/h needs a further level.")
-    k = list(inf.values())[0]
-    if abs(k - round(k)) > 0:
-        # NotRepresentableError, a ValueError: callers catching ValueError are
-        # unchanged, and one that falls back on "not representable" can tell
-        # this apart from a genuine failure.
-        from .composite_lib import NotRepresentableError
-        raise NotRepresentableError(
-            f"exp({k}/h) would sit at sector {-k}, and a non-integer sector "
-            f"cannot be added exactly -- 3*{k} is not representable, and "
-            f"inexact grade addition is refused.  Measure the exponent in "
-            f"units of the action so the sectors are integers.")
-    body = Composite({d: v for d, v in rest.items()})
-    return Transseries({-int(round(k)): _c_exp(body) if rest else R(1)})
+    index = Sector.of({d: -v for d, v in inf.items()})
+    return Transseries({index: _c_exp(_rebuild(rest)) if rest else R(1)})
 
 
 def _d_composite(c):
@@ -779,7 +889,8 @@ def ts_d(x):
     for n, c in x.sectors.items():
         term = _d_composite(c)
         if n != 0:
-            boost = c * Composite({2.0: float(n)})      # C(h) * n/h^2
+            # d/dh exp(-q) = -q' exp(-q); for q = n/h that is C(h) * n/h^2
+            boost = c * (-_d_composite(_index_composite(n)))
             term = boost if _is_zero(term) else term + boost
         out[n] = term
     return Transseries(out)
@@ -801,7 +912,7 @@ def ts_ln(x):
     n, c = next(iter(x.sectors.items()))
     body = _c_ln(c)
     if n:
-        lin = Composite({1.0: -float(n)})               # -n/h
+        lin = -_index_composite(n)                      # -q; -n/h for an integer
         body = lin if _is_zero(body) else body + lin
     return Transseries({0: body})
 

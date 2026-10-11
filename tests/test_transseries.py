@@ -27,9 +27,11 @@ value group has been extended.  Arithmetic is only tested here as far as the
 ordering questions need it.
 
 The sector index is in UNITS OF THE ACTION: sector n carries exp(-n/h), so
-the indices are integers and their addition is exact.  A float action would
-put 3A on a grade that float addition cannot represent, and the library
-refuses inexact grade addition -- correctly.
+the indices are integers and their addition is exact.  Any other index --
+exp(-A/h) for a float A, exp(1/h^2), exp(h^-1/2) -- is a Sector carrying the
+infinite quantity itself (T9).  Its coefficients are floats, so a family of
+irrational multiples is still best measured in units of the action: 0.1 + 0.2
+names a different sector from 0.3 (T2.04c).
 """
 import math
 import os
@@ -42,7 +44,7 @@ sys.path.insert(0, _HERE)
 import composite.composite_lib as cl
 from composite.composite_lib import Composite, R, ZERO
 from composite.resummation import borel, SingularityKind
-from composite.transseries import (Transseries, flat, sector, ts_exp, ts_st,
+from composite.transseries import (Transseries, Sector, flat, sector, ts_exp, ts_st,
                                    is_infinitesimal, is_infinite,
                                    resum_sector, sector_coefficients,
                                    ts_d, ts_ln, from_series, action_from_growth)
@@ -119,8 +121,22 @@ def t2_sector_arithmetic(t):
            flat(2) < flat(1), "sector order")
     t.true("T2.03 exp(1/h)*exp(-1/h) == 1", ts_exp(R(1) / h) * flat(1) == 1,
            f"{ts_exp(R(1) / h) * flat(1)}")
-    t.true("T2.04 sector index must be an INTEGER (units of the action)",
-           _refuses(ts_exp, R(-1.7706910715) / h), "a float action must refuse")
+    A = 1.7706910715
+    idx = list(ts_exp(R(-A) / h).sectors)
+    t.true("T2.04 a float action is a Sector carrying it, not a refusal",
+           len(idx) == 1 and isinstance(idx[0], Sector)
+           and idx[0].exponent().coeffs_dict() == {1: -A},
+           f"index {idx}, exponent {idx[0].exponent().coeffs_dict() if idx else None}"
+           f"  want {{1: {-A}}}")
+    idx3 = list(ts_exp(R(3) / h).sectors)
+    t.true("T2.04b an integer multiple of 1/h stays an int index",
+           idx3 == [-3] and type(idx3[0]) is int, f"index {idx3!r}, type {type(idx3[0]).__name__}")
+    p, q = ts_exp(R(-0.1) / h) * ts_exp(R(-0.2) / h), ts_exp(R(-0.3) / h)
+    t.true("T2.04c units of the action still matter: exp(-0.1/h)exp(-0.2/h) and "
+           "exp(-0.3/h) are two sectors in float",
+           list(p.sectors) != list(q.sectors),
+           f"{[k.exponent().coeffs_dict() for k in p.sectors]} vs "
+           f"{[k.exponent().coeffs_dict() for k in q.sectors]}")
     # Within a sector the ordinary series still works, untouched.
     s = flat(1) * Transseries.lift(Composite({0: 2.0, -1: 3.0}))
     t.close("T2.05 a sector carries a full power series: coeff of h^1 is 3",
@@ -568,11 +584,104 @@ def t8_zero_sectors(t):
            d((Ac + B).sectors[0]) == {0: 1.0}, f"{d((Ac + B).sectors[0])}")
 
 
+def t9_sector_index(t):
+    head("T9  sectors indexed by any infinite quantity: exp(2.5/h), exp(1/h^2), "
+         "exp(h^-1/2), exp(ln(1/h)/h)")
+    INF = R(1) / h
+    L = cl.ln(INF)                                   # ln(1/h), the log axis
+
+    def key(T):
+        (k,) = T.sectors
+        return k
+
+    def nz(c):
+        return {g: v for g, v in c.coeffs_dict().items() if v != 0.0}
+
+    for tag, arg in (("2.5/h", R(2.5) * INF), ("1/h^2", INF * INF),
+                     ("1/h^2 + 3/h", INF * INF + R(3) * INF),
+                     ("h^-1/2", cl.sqrt(INF)), ("ln(1/h)/h", INF * L)):
+        k = key(ts_exp(arg))
+        t.true(f"T9.01 exp({tag}) is one Sector whose exponent is the argument",
+               isinstance(k, Sector) and nz(k.exponent()) == nz(arg),
+               f"exponent {nz(k.exponent())}  argument {nz(arg)}")
+
+    T = ts_exp(R(2.5) * INF + R(1) + h)
+    t.true("T9.02 the finite and infinitesimal part become the sector's series, "
+           "exactly exp(1 + h)",
+           nz(T.sectors[key(T)]) == nz(cl.exp(R(1) + h)),
+           f"series {str(T.sectors[key(T)])[:50]}")
+
+    a, b = ts_exp(R(2.5) * INF), ts_exp(R(-2.5) * INF)
+    for lbl, P in (("exp(2.5/h) exp(-2.5/h)", a * b), ("exp(-2.5/h) exp(2.5/h)", b * a)):
+        t.true(f"T9.03 {lbl} is sector 0 with series 1: a product records no "
+               f"cancellation, in either order",
+               list(P.sectors) == [0] and nz(P.sectors[0]) == {0: 1.0}, f"{P}")
+    P = ts_exp(R(3) * INF + R(2)) * ts_exp(R(-3) * INF)
+    t.close("T9.04 exp(3/h + 2) exp(-3/h) = e^2", P.sectors[0].st(), math.exp(2.0), tol=1e-15)
+    D = ts_exp(R(2.5) * INF - R(2.5) * INF)
+    t.close("T9.05 exp(2.5/h - 2.5/h) = e^2.5: the SUBTRACTION cancels and keeps "
+            "its residue |2.5|_0", D.sectors[0].st(), math.exp(2.5), tol=1e-14)
+
+    x, y = R(2.5) * INF + R(1) + h, INF * INF - INF + h
+    lhs, rhs = ts_exp(x) * ts_exp(y), ts_exp(x + y)
+    k = key(rhs)
+    worst = max(abs(lhs.sectors[k].coeff(-n) - rhs.sectors[k].coeff(-n)) /
+                abs(rhs.sectors[k].coeff(-n)) for n in range(15))
+    t.true("T9.06 exp(x) exp(y) = exp(x + y) where x + y cancels nothing: same "
+           "sector, series equal through order 14",
+           list(lhs.sectors) == list(rhs.sectors) and worst <= 1e-14,
+           f"sector {k}, worst relative difference {worst:.1e}  tol 1e-14")
+
+    chain = [("h^-1/2", cl.sqrt(INF)), ("1/h", INF), ("2.5/h", R(2.5) * INF),
+             ("ln(1/h)/h", INF * L), ("1/h^2", INF * INF)]
+    for (n1, a1), (n2, a2) in zip(chain, chain[1:]):
+        t.true(f"T9.07 exp({n1}) < exp({n2})", ts_exp(a1) < ts_exp(a2), "ordered by the exponent")
+    t.true("T9.08 exp(h^-1/2) > h^-100: any exp of an infinite quantity beats every power",
+           ts_exp(cl.sqrt(INF)) > Transseries.lift(INF ** 100), "")
+    t.true("T9.09 exp(-h^-1/2) < h^100: and its inverse is below every power",
+           ts_exp(-cl.sqrt(INF)) < Transseries.lift(h ** 100), "")
+    t.true("T9.10 is_infinite(exp(h^-1/2)), is_infinitesimal(exp(-2.5/h))",
+           is_infinite(ts_exp(cl.sqrt(INF))) and is_infinitesimal(ts_exp(R(-2.5) * INF)), "")
+
+    for tag, arg, want in (("2.5/h", R(2.5) * INF, {2: -2.5}),
+                           ("1/h^2", INF * INF, {3: -2.0}),
+                           ("h^-1/2", cl.sqrt(INF), {1.5: -0.5})):
+        T = ts_d(ts_exp(arg))
+        got = nz(T.sectors[key(T)])
+        t.true(f"T9.11 d/dh exp({tag}) = (d/dh {tag}) exp({tag})",
+               got == want, f"got {got}  want {want}")
+
+    for tag, arg in (("1/h^2 + 3/h - 2", INF * INF + R(3) * INF - R(2)),
+                     ("2.5/h + 1 + h", R(2.5) * INF + R(1) + h)):
+        back = ts_ln(ts_exp(arg)).sectors[0]
+        diff = max(abs(back.coeff(g) - arg.coeff(g)) for g in (2, 1, 0, -1, -2, -3))
+        t.true(f"T9.12 ln(exp({tag})) returns the argument", diff <= 1e-15,
+               f"worst |diff| over grades 2..-3: {diff:.1e}  tol 1e-15")
+
+    t.close("T9.13 exp(2.5/h) at h = 0.1 is e^25",
+            ts_exp(R(2.5) * INF).evaluate(0.1) / math.exp(25.0), 1.0, tol=1e-15)
+    t.close("T9.14 exp(-h^-1/2) at h = 0.25 is e^-2",
+            ts_exp(-cl.sqrt(INF)).evaluate(0.25) / math.exp(-2.0), 1.0, tol=1e-15)
+
+    t.true("T9.15 integrate_jets refuses a Sector it cannot integrate: exp(-x^2) "
+           "at x = 1/h is exp(-1/h^2)",
+           _raises_not_implemented(cl.integrate_jets_tail, lambda u: cl.exp(-(u * u)), 1.0),
+           "NotImplementedError, which improper_integral catches and falls back on")
+
+
+def _raises_not_implemented(fn, *a):
+    try:
+        fn(*a)
+        return False
+    except NotImplementedError:
+        return True
+
+
 def run_all():
     t = Suite()
     for fn in (t1_ordering, t2_sector_arithmetic, t3_against_the_oracle,
                t4_the_bridge, t5_separability, t6_closure,
-               t7_from_series, t8_zero_sectors):
+               t7_from_series, t8_zero_sectors, t9_sector_index):
         try:
             fn(t)
         except Exception as e:

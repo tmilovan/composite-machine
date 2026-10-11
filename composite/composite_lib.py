@@ -2267,6 +2267,39 @@ INF = Composite.infinity()    # |1|₁ (infinity)
 h = ZERO                      # Alias: h is the infinitesimal
 
 
+def round_digits(x, digits=14):
+    """A result rounded to `digits` significant decimal digits, for READING.
+
+    float64 carries about 15.9 digits and every operation rounds, so the last
+    one or two digits of a result depend on the order the arithmetic ran in --
+    which differs between backends and between spellings of one expression.
+    Rounding on the way out drops that noise.  A float comes back rounded; a
+    Composite comes back with every coefficient rounded and its grades, zero
+    terms and metadata untouched.  A nonzero never rounds to zero.
+
+    Read-side only.  Fed back into arithmetic it would make values that differ
+    by noise compare equal, and a - b of two such values is then a wholly zero
+    result -- a cancellation event the computation never had.  The zero rules
+    need the exact float underneath, so round what you read, not what you
+    compute with.
+
+    Consistent almost always, not always: two values a few ulp apart can sit on
+    either side of a rounding boundary and round apart.  Fewer digits makes that
+    rarer; only exact arithmetic removes it.
+    """
+    def one(v):
+        v = float(v)
+        return v if v == 0.0 or not math.isfinite(v) else float(f"{v:.{int(digits)}g}")
+
+    if isinstance(x, Composite):
+        dims, vals = x._backend.to_arrays(x._data)
+        out = Composite._wrap(
+            x._backend.create_from_terms(dims, np.array([one(v) for v in vals], dtype=np.float64)),
+            x._backend, demote=False, complete=x._complete, denot=x._denot)
+        return _join(out, x)
+    return one(x)
+
+
 # -----------------------------------------------------------------------------
 # Degeneracy tracking: the switch
 # -----------------------------------------------------------------------------
@@ -3631,6 +3664,42 @@ def _exp_float(a):
     return v
 
 
+def _exp_by_terms(x, terms, base, bound):
+    """e^a * exp(sum_g |c_g|_g), one factor per term, each written out.
+
+    A single term is a monomial, and the exponentiation rule keeps its powers
+    single terms: (|c|_g)^n = |c^n|_(gn).  So exp(|c|_g) = sum_n |c^n/n!|_(gn)
+    is written directly; no product is formed, so nothing can cancel.  This is
+    the seeded case, exp(a + h), and it used to cost three composite
+    operations per term of the series.
+
+    Several terms are the terms of ONE number, not operands of an addition, so
+    taking them apart creates no cancellation event, and the factors are put
+    back together by multiplication, which cancels nothing either.  A term of
+    order p contributes the powers n with n*p <= bound and no more, so each
+    factor is only as deep as its own grade needs.
+
+    A coefficient that underflows to 0.0 ends its factor: written into the
+    composite it would be an expressed zero standing in for a positive number.
+    """
+    zero = _zero_dim_like(x)
+    out = None
+    for i, (d, c) in enumerate(sorted(terms.items(), key=lambda t: _lead_order(t[0]))):
+        p = _lead_order(d)
+        coef = base if i == 0 else 1.0       # e^a rides in the first factor
+        series = {zero: coef}
+        n = 1
+        while n * p <= bound:
+            coef = coef * c / n              # c^n / n!, times e^a on the first
+            if coef == 0.0:
+                break
+            series[_dim_scaled(d, n)] = coef
+            n += 1
+        f = _like(x, series)
+        out = f if out is None else out * f
+    return _truncate_order(out, bound)
+
+
 def exp(x, terms=15):
     """Exponential function for Composite numbers."""
     terms = _effective_terms(terms)
@@ -3770,6 +3839,11 @@ def exp(x, terms=15):
         return _const_like(x, _exp_float(a))
 
     base = _exp_float(a)
+    bound = _tighter(_complete_order(non_zero, terms), _min_complete(x))
+    if bound is not None and not any(isinstance(d, tuple) for d in non_zero):
+        return _exp_by_terms(x, non_zero, base, bound)
+
+    # Vector (log-axis) dimensions keep the power loop.
     h = _like(x, non_zero)
     one = _like(x, {_unit_dim(x): 1.0})
 
@@ -6544,9 +6618,13 @@ def _sector_antiderivative(C, n, order):
 
 def _ts_antiderivative(T, order):
     """antiderivative() of a Transseries, sector by sector."""
-    from composite.transseries import Transseries
+    from composite.transseries import Transseries, Sector
     out = {}
     for n, C in T.sectors.items():
+        if isinstance(n, Sector):
+            raise NotImplementedError(
+                "integrate_jets: no antiderivative for the sector exp(%r); "
+                "only exp(-n/h) with an integer n is integrated" % (n.exponent(),))
         out[n] = antiderivative(C) if n == 0 else _sector_antiderivative(C, n, order)
     return Transseries(out)
 
@@ -6555,10 +6633,15 @@ def _compose_ts(G, u):
     """A transseries antiderivative carried to the finite composite point u:
     sector n contributes compose(P_n, u) * exp(-n/u), and with u finite that
     exp is an ordinary composite -- the flat term is flat only AT u = h."""
+    from composite.transseries import Sector
     out = None
     for n, P in G.sectors.items():
         if not P.c:
             continue
+        if isinstance(n, Sector):
+            raise NotImplementedError(
+                "integrate_jets: cannot carry the sector exp(%r) to a finite "
+                "point" % (n.exponent(),))
         if n != 0 and math.exp(-float(n) / u.st()) == 0.0:
             # exp(-n/u) underflows float64 to exactly 0.0 here (u = 0.001:
             # e**-1000).  Built anyway, that 0.0 is a WRITTEN zero, R1 converts

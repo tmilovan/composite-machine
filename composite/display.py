@@ -270,9 +270,16 @@ def transseries_html(transseries):
     # Key on the sector alone.  Keying on the whole item put the Composite
     # through _axis, which read it as a log exponent and called float() on it --
     # and float() of an unbounded composite raises.
-    rows = [(sector, notation(series), "exp(-%s/h)" % sector if sector else "perturbative")
-            for sector, series in sorted(transseries.sectors.items(),
-                                         key=lambda item: _axis(item[0]))]
+    from composite.transseries import Sector
+    items = transseries.sectors.items()
+    # A Sector index orders against ints by its own comparison; _axis reads ints only.
+    items = (sorted(items, key=lambda item: item[0])
+             if any(isinstance(k, Sector) for k, _ in items)
+             else sorted(items, key=lambda item: _axis(item[0])))
+    rows = [(sector, notation(series),
+             ("exp(%s)" % notation(sector.exponent())) if isinstance(sector, Sector)
+             else "exp(-%s/h)" % sector if sector else "perturbative")
+            for sector, series in items]
     return (_header("transseries", None, ["%d sector%s" % (len(rows), "" if len(rows) == 1 else "s")])
             + _table(["sector", "series", "weight"], rows) + "</div>")
 

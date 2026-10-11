@@ -32,6 +32,7 @@ from composite.resummation import (
 
 from composite.transseries import (
     Transseries,        # a sparse map sector -> Composite; sector n is exp(-n/h)
+    Sector,             # a sector index that is not an integer: exp(-q), q infinite
     from_series,        # build one FROM a divergent series: the problem does it
     action_from_growth, # the action from the coefficient ratio, stride-aware
     resum_sector,       # the bridge: a sector's series -> a number
