@@ -101,6 +101,11 @@ class LimitDoesNotExistError(ValueError):
     """Raised when a limit provably does not exist."""
     pass
 
+class PrecisionLossWarning(UserWarning):
+    """An operation's float rounding was amplified past the digits it reports:
+    the coefficients are within their completeness bound but not trustworthy."""
+
+
 class RoundingResidueWarning(UserWarning):
     """limit() dropped terms above grade 0 as float rounding residue.
 
@@ -1016,6 +1021,22 @@ def _cancellation_residue(a, b, result):
     return out
 
 
+def _untouched(x, nothing):
+    """x as it was, for x + NOTHING -- a fresh object, so a caller tightening a
+    bound on the result in place does not reach back into the operand.
+
+    The VALUE is untouched; the completeness bound is not.  An empty composite
+    can be what truncation left of a term -- h**7 under set_max_order(6) is
+    empty and complete to 6 -- and that bound still says orders past 6 are
+    unknown.  Dropping it with the term made sin report complete 11 while
+    holding order 6."""
+    out = Composite._wrap(x._data, x._backend, demote=False,
+                          complete=_tighter(getattr(x, "_complete", None),
+                                            getattr(nothing, "_complete", None)),
+                          denot=getattr(x, "_denot", None))
+    return _join(out, x, nothing)
+
+
 def _scalar_operand(other):
     """A Python or numpy scalar entering an operation as the other operand.
 
@@ -1445,15 +1466,25 @@ class Composite:
 
     def __add__(self, other):
         """Addition never shifts dimensions (R4).  A zero OPERAND converts (R1);
-        a zero TERM does not (R2)."""
+        a zero TERM does not (R2).
+
+        Adding NOTHING is a no-op, and it is checked BEFORE R1: the other
+        operand comes back as it was, a written zero still latent.  Decided
+        2026-10-12 -- R1 had converted it, so <0_0> + NOTHING was <1_-1>."""
         if isinstance(other, (int, float)):
             other = _scalar_operand(other)
         if not isinstance(other, Composite):
             return NotImplemented
+        if _is_nothing(other):
+            return _untouched(self, other)
+        if _is_nothing(self):
+            return _untouched(other, self)
         a, b = _operands(self, other)
         out = Composite._wrap(a._backend.add(a._data, b._data), a._backend,
                               complete=_min_complete(self, other),
                               denot=_denot_additive(a, b))
+        if _CANCEL_WARN[0]:
+            _check_cancellation(a, b, out, self is other, 1)
         return _cancellation_residue(a, b, out)
 
     def __radd__(self, other):
@@ -1470,11 +1501,15 @@ class Composite:
             other = _scalar_operand(other)
         if not isinstance(other, Composite):
             return NotImplemented
+        if _is_nothing(other):
+            return _untouched(self, other)    # subtracting NOTHING: a no-op, before R1
         a, b = _operands(self, other)
         out = Composite._wrap(a._backend.add(a._data, a._backend.negate(b._data)),
                               a._backend,
                               complete=_min_complete(self, other),
                               denot=_denot_additive(a, b))
+        if _CANCEL_WARN[0]:
+            _check_cancellation(a, b, out, self is other, -1)
         return _cancellation_residue(a, b, out)
 
     def __rsub__(self, other):
@@ -1618,9 +1653,10 @@ class Composite:
         # 49 under _derivative_scope(50, 52).
         result, cut = a._backend.deconvolve_cut(a._data, b._data,
                                                 min_terms=max(50, _min_terms[0]))
-        out = Composite._wrap(_truncate_dims(a._backend, result), a._backend,
-                              complete=_scaled_complete(self, other, a, b, -1),
+        data, comp = _capped(a._backend, result, _scaled_complete(self, other, a, b, -1))
+        out = Composite._wrap(data, a._backend, complete=comp,
                               denot=_denot_quotient(a, b))
+        _announce_amplification(a, b, out, max(50, _min_terms[0]))
         # A multi-term divisor generally yields a NON-TERMINATING quotient that
         # the backend cuts at a fixed length: 1/(1-x) comes back as 50 correct
         # coefficients, not as a closed form.  Every order produced is right,
@@ -2356,6 +2392,77 @@ def track_degeneracy(on=True):
     finally:
         set_degeneracy_tracking(previous)
 
+_CANCEL_WARN = [False]
+
+
+def set_cancellation_warnings(on):
+    """Announce cancellations that float64 rounding may have decided.  Returns
+    the PREVIOUS setting.  Off by default.
+
+    When on, + and - raise PrecisionLossWarning in two cases:
+
+      near-cancellation  at some grade the result is so much smaller than the
+                         operands that their own rounding alone gives it an
+                         estimated relative error above 1e-9 -- 0.1 + 0.2 - 0.3
+                         leaves 5.6e-17 whose every digit is rounding;
+      exact cancellation between two DIFFERENT operand objects at some grade --
+                         equal in float64, but the equality may itself be a
+                         rounding: 0.05 + 0.3 lands exactly on 0.35, and
+                         `- 0.35` then records a whole a - a residue that exact
+                         arithmetic would not have.  x - x on one object is a
+                         cancellation by identity and stays silent.
+
+    The composite arithmetic battery measured both at roughly 8% of
+    expressions with ordinary decimal coefficients, which is why this is not on
+    by default: on decimal data it fires often, and on dyadic data almost never.
+    Prefer cancellation_warnings() to setting it by hand.
+    """
+    previous = _CANCEL_WARN[0]
+    _CANCEL_WARN[0] = bool(on)
+    return previous
+
+
+@_contextlib.contextmanager
+def cancellation_warnings(on=True):
+    """Announce rounding-decided cancellations for the duration."""
+    previous = set_cancellation_warnings(on)
+    try:
+        yield
+    finally:
+        set_cancellation_warnings(previous)
+
+
+def _check_cancellation(a, b, raw, same_object, sign):
+    """The two cases set_cancellation_warnings describes, grade by grade."""
+    ad, bd, rd = a.coeffs_dict(), b.coeffs_dict(), raw.coeffs_dict()
+    worst, at, exact = 0.0, None, None
+    for g, r in rd.items():
+        x, y = ad.get(g, 0.0), bd.get(g, 0.0)
+        if x == 0.0 or y == 0.0:
+            continue                          # nothing was combined at this grade
+        if r == 0.0:
+            if not same_object and exact is None:
+                exact = g
+            continue
+        est = 2.0 ** -53 * max(abs(x), abs(y)) / abs(r)
+        if est > 1e-9 and est > worst:
+            worst, at = est, g
+    import warnings
+    if at is not None:
+        warnings.warn(
+            "%s lost precision: at grade %s the result is %.3g from operands of "
+            "size %.3g; estimated relative error %.1e from the operands' rounding "
+            "alone" % ("subtraction" if sign < 0 else "addition", at, rd[at],
+                       max(abs(ad.get(at, 0.0)), abs(bd.get(at, 0.0))), worst),
+            PrecisionLossWarning, stacklevel=3)
+    if exact is not None:
+        warnings.warn(
+            "exact cancellation at grade %s between two different operands: they "
+            "are equal in float64, which may itself be a rounding (0.05 + 0.3 "
+            "lands on 0.35), and the cancellation residue follows from it" % (exact,),
+            PrecisionLossWarning, stacklevel=3)
+
+
 def _refresh_constants():
     """Rebuild the module constants under the active backend.
 
@@ -2415,6 +2522,9 @@ def _capped(backend, data, complete):
     if _order_cap.bit:
         complete = _tighter(complete, getattr(backend, "max_order", None))
         _order_cap.bit = False
+    if _truncate_dims.bound is not None:
+        complete = _tighter(complete, _truncate_dims.bound)
+        _truncate_dims.bound = None
     return out, complete
 
 
@@ -2425,39 +2535,58 @@ def _truncate_dims(backend, data):
     Without this, sin(atan(sin(atan(x)))) produces 100k+ dims
     with overflow that corrupts the derivative tower.
     """
+    _truncate_dims.bound = None
     data = _order_cap(backend, data)
     # Check the count BEFORE materialising: this runs on every multiply, and
     # the overwhelming majority of products are under the cap, so flattening
     # first meant paying for the flat form purely to discover it was not needed.
     if backend.term_count(data) <= MAX_ACTIVE_DIMS:
         return data
-    _warn_truncated(backend.term_count(data) - MAX_ACTIVE_DIMS,
-                    "MAX_ACTIVE_DIMS = %d" % MAX_ACTIVE_DIMS, None)
     dims, vals = backend.to_arrays(data)
-    # Sort by distance from dim 0, keep closest.
-    if dims.dtype == object:
-        # VECTOR dimensions: np.abs cannot take a tuple.  Rank by magnitude in
-        # dominance order -- the power component first, then the log -- so the
-        # terms kept are the ones nearest dimension zero in the same sense the
-        # comparison uses.  Without this the whole truncation path raised
-        # TypeError the moment a log-scale composite grew past the cap, which
-        # is only reachable at the DEFAULT cap and so went unseen while every
-        # standalone check ran with MAX_ACTIVE_DIMS raised.
-        # A scalar dimension IS the vector (d, 0, ...), so pad it rather than
-        # assuming every object-array entry is iterable.  An object array holds
-        # tuples for the log axes AND Fractions for an exact fractional grade,
-        # and `tuple(abs(c) for c in Fraction(1,3))` raises "'Fraction' object
-        # is not iterable" -- which crashed every product that grew past the cap
-        # on a fractional backend, reached by (h**3 + h**4) ** Fraction(1,2)
-        # squared back.
-        def _mag(d):
-            return tuple(abs(c) for c in d) if isinstance(d, tuple) else (abs(d),)
-        order = np.array(sorted(range(len(dims)), key=lambda i: _mag(dims[i])))
-    else:
-        order = np.argsort(np.abs(dims))
-    keep = order[:MAX_ACTIVE_DIMS]
-    keep.sort()  # restore dimension order
+    # WHICH terms to drop.  Only infinitesimal ones, deepest first.  The grades
+    # at and above 0 are the number's size: the infinite terms dominate it, and
+    # st(), < and every later product read them first.  Ranking all grades by
+    # |grade| dropped the HIGHEST infinities of a product with many positive
+    # grades -- a dense lattice of thirds lost its grade-8 term of 10 and kept
+    # grade -1/3 -- which changes the number, not its precision.  So every
+    # non-infinitesimal grade is kept, even when they alone pass the cap: an
+    # uncapped number is right, a capped one would not be.  Among the
+    # infinitesimal grades the shallowest are kept, which is the order the
+    # completeness bound below assumes.
+    #
+    # The magnitude tiebreak keeps vector dimensions in dominance order, power
+    # component first, then the log -- and pads a scalar or a Fraction rather
+    # than iterating it: `tuple(abs(c) for c in Fraction(1,3))` raised on a
+    # fractional backend, reached by (h**3 + h**4) ** Fraction(1,2) squared back.
+    def _mag(d):
+        return tuple(abs(c) for c in d) if isinstance(d, tuple) else (abs(d),)
+    lead = [_lead_order(d) for d in dims]
+    fixed = [i for i in range(len(dims)) if lead[i] <= 0]
+    deep = sorted((i for i in range(len(dims)) if lead[i] > 0),
+                  key=lambda i: (lead[i], _mag(dims[i])))
+    keep = np.array(sorted(fixed + deep[:max(MAX_ACTIVE_DIMS - len(fixed), 0)]), dtype=np.int64)
+    dropped_n = len(dims) - len(keep)
+    if dropped_n == 0:
+        return data
+    # What the cap costs in completeness.  Dropping the dimensions farthest from
+    # 0 removes infinitesimal orders from the deepest down, so the result is
+    # right only below the shallowest order it dropped -- and that has to be
+    # recorded, or the bound a series already carried goes on claiming orders
+    # that are gone: (1 + h)/(1 + h^4) kept terms to order 117 and reported
+    # complete_order 196, reading 0 at orders 120, 121, 160 and 196.
+    kept = set(keep.tolist())
+    lost = [_lead_order(dims[i]) for i in range(len(dims))
+            if i not in kept and _lead_order(dims[i]) > 0]
+    if lost:
+        lo = min(lost)
+        below = [_lead_order(dims[i]) for i in keep if 0 < _lead_order(dims[i]) < lo]
+        _truncate_dims.bound = max(below) if below else 0
+    _warn_truncated(dropped_n, "MAX_ACTIVE_DIMS = %d" % MAX_ACTIVE_DIMS,
+                    _truncate_dims.bound)
     return backend.create_from_terms(dims[keep], vals[keep])
+
+
+_truncate_dims.bound = None
 
 
 def _exact_dims(dims):
@@ -3535,6 +3664,63 @@ def _has_infinitesimal_part(x):
     # infinitesimal.  sin then built its series with a = st(x) AND h still
     # holding that same standard part, so sin(5) came back as sin(10).
     return any(_dim_nonzero(d) and v != 0.0 for d, v in zip(dims, vals))
+
+
+def _announce_amplification(a, b, q, min_terms):
+    """Warn when a long division amplified its rounding past 1e-9.
+
+    Each step subtracts q_n times the divisor's lower terms, so where those
+    exceed the leading coefficient the rounding of every step is multiplied on
+    into the next, and the quotient can be wrong in every digit while its
+    completeness bound still covers it: a divisor running -3, 28, -280, 2801,
+    ... returned -2.2e32 at order 42 where the quotient is 7.4e-8.  Only that
+    shape is checked -- some lower coefficient larger than the leading one --
+    and then by measurement, not by bound: the division is repeated with the
+    lower coefficients scaled by (1 + 2**-40) and the move in each quotient
+    coefficient, per unit of that perturbation, is the factor its own rounding
+    was amplified by.  Values are not changed; this only announces.
+    """
+    be = b._backend
+    bd, bv = be.to_arrays(b._data)
+    nz = [i for i in range(len(bv)) if bv[i] != 0.0]
+    if len(nz) < 2:
+        return
+    lead = max(nz, key=lambda i: tuple(_dim_order_key(bd[i])))
+    lv = abs(float(bv[lead]))
+    if not any(abs(float(bv[i])) > lv for i in nz if i != lead):
+        return
+    delta = 2.0 ** -40
+    pv = np.array([float(v) if i == lead else float(v) * (1.0 + delta)
+                   for i, v in enumerate(bv)], dtype=np.float64)
+    try:
+        qp, _ = be.deconvolve_cut(a._data, be.create_from_terms(bd, pv), min_terms=min_terms)
+    except Exception:
+        return
+    qd, qp_ = q.coeffs_dict(), Composite._wrap(qp, be).coeffs_dict()
+    bound = q.complete_order
+    worst, at = 0.0, None
+    for d, v in qd.items():
+        if v == 0.0 or d not in qp_:
+            continue
+        o = _lead_order(d)
+        if bound is not None and o > bound:
+            continue
+        est = abs(qp_[d] - v) / abs(v) / delta * 2.0 ** -53
+        if est > 1e-9 and (at is None or o < at):
+            worst, at = est, o
+    if at is not None:
+        import warnings
+        warnings.warn(
+            "long division amplified its rounding: from order %s the quotient's "
+            "estimated relative error is %.1e and above (the divisor has a lower "
+            "coefficient larger than its leading one).  complete_order still covers "
+            "these orders; their digits are not to be trusted." % (at, worst),
+            PrecisionLossWarning, stacklevel=3)
+
+
+def _dim_order_key(d):
+    """Dominance key for a dimension, scalar or vector: higher grade first."""
+    return d if isinstance(d, tuple) else (d,)
 
 
 def _is_nothing(x):

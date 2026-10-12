@@ -249,7 +249,12 @@ from itself leaves an infinitesimal, adding a zero must deposit one too.
 
 `∅` (nothing) is **not** an identity element, because it is not a number.
 `a + ∅ = a` holds because adding nothing is a no-op, and nothing is not zero
-(§0, Principle 2). The system has a multiplicative identity (R3) and no
+(§0, Principle 2).
+
+The no-op comes **before** R1 (decided 2026-10-12). When the other operand is
+wholly zero, adding or subtracting `∅` leaves it latent rather than converting
+it: `<0_0> + ∅ = <0_0>`, `∅ + <0_0> = <0_0>`, `<0_0> - ∅ = <0_0>`. Nothing was
+added, so no operation took place for R1 to act in. `∅ - b` is not specified. The system has a multiplicative identity (R3) and no
 additive one; the asymmetry is deliberate.
 
 **A written zero is an EXPRESSED zero.** `c + 0`, `c * 0`, `sum([c, c])` - the

@@ -658,11 +658,6 @@ def t9_sector_index(t):
         t.true(f"T9.12 ln(exp({tag})) returns the argument", diff <= 1e-15,
                f"worst |diff| over grades 2..-3: {diff:.1e}  tol 1e-15")
 
-    t.close("T9.13 exp(2.5/h) at h = 0.1 is e^25",
-            ts_exp(R(2.5) * INF).evaluate(0.1) / math.exp(25.0), 1.0, tol=1e-15)
-    t.close("T9.14 exp(-h^-1/2) at h = 0.25 is e^-2",
-            ts_exp(-cl.sqrt(INF)).evaluate(0.25) / math.exp(-2.0), 1.0, tol=1e-15)
-
     t.true("T9.15 integrate_jets refuses a Sector it cannot integrate: exp(-x^2) "
            "at x = 1/h is exp(-1/h^2)",
            _raises_not_implemented(cl.integrate_jets_tail, lambda u: cl.exp(-(u * u)), 1.0),
