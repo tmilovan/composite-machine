@@ -238,12 +238,23 @@ def _operands(a, b):
     # on the default path with the mode never entered (0.1078s against 0.0522s).
     # _sealed is one ContextVar read that returns False immediately when the mode
     # is off, so it goes first and short-circuits.
-    if _TAGGED.get() is not None:
-        if _sealed(a) and _is_infinitesimal_operand(a):
-            a = _like(a, {0: 0.0})
-        if _sealed(b) and _is_infinitesimal_operand(b):
-            b = _like(b, {0: 0.0})
-    return _r1(a), _r1(b)
+    return _prepared(a), _prepared(b)
+
+
+def _prepared(x):
+    """ONE operand made ready for an operation: the TAG demotion, then R1.
+
+    Split out of _operands so the operations that take a Python number as the
+    other side -- `x * 2`, `x / 2`, `-x` -- prepare their composite the same
+    way.  They went straight to scalar_multiply and skipped it, so a written
+    zero stayed latent: R(0)*2 was <0_0>, which R1 later reads as h, while
+    R(0)*R(2) is 2h -- `x*x + R(0)*2` read d(1) = 7 and `x*x + R(2)*0` read 8,
+    and `x*x - R(0)` read 5 against 7 for `x*x + (-R(0))`.
+    """
+    if (_TAGGED.get() is not None and _sealed(x)
+            and _is_infinitesimal_operand(x)):
+        x = _like(x, {0: 0.0})
+    return _r1(x)
 
 
 _CONVENTIONAL = _contextvars.ContextVar("composite_conventional_zero", default=False)
@@ -840,7 +851,28 @@ class CancellationWarning(UserWarning):
     """
 
 
+class IncompleteOrderWarning(UserWarning):
+    """d(n) read an order past complete_order: a term no series vouches for.
+
+    The number returned is whatever the arithmetic left at that grade -- an
+    absent term reads 0.0, a leaked one reads a convolution missing what the
+    operands cut away -- so it is usually wrong, not merely imprecise.
+    Measured: sin(0.5 + h).d(12) is 0.0 where the derivative is 0.479, and
+    (exp(x)*exp(x)).d(15) is 89067 against 89073.  Registered `always` for the
+    reason NotConventionalWarning gives: it is a fact about the value.
+    """
+
+
 _warnings.filterwarnings("always", category=NotConventionalWarning)
+_warnings.filterwarnings("always", category=IncompleteOrderWarning)
+
+
+_INCOMPLETE_MSG = (
+    "d(%s) is past this value's complete_order (%s): no series vouches for "
+    "that order, and the number returned is what the arithmetic left there -- "
+    "0.0 for a term that was never computed. Raise `terms=` on the function "
+    "that set the bound, or use nth_derivative / all_derivatives, which raise "
+    "the depth to the order asked for.")
 
 
 _DENOT_MSG = (
@@ -1488,7 +1520,16 @@ class Composite:
         return _cancellation_residue(a, b, out)
 
     def __radd__(self, other):
-        return self.__add__(other)
+        # `other + self`, kept in that order.  Delegating to self.__add__ swapped
+        # the operands, and a cancellation reads its residue off the LEFT one:
+        # 2 + R(-2) came back -2h where R(2) + R(-2) is 2h.  A composite left
+        # operand (a subclass on the right) goes through the base operation,
+        # as in __rsub__.
+        if isinstance(other, Composite):
+            return Composite.__add__(other, self)
+        if isinstance(other, (int, float)):
+            return _scalar_operand(other).__add__(self)
+        return NotImplemented
 
     def __sub__(self, other):
         """Subtraction never shifts dimensions (R4).
@@ -1513,12 +1554,23 @@ class Composite:
         return _cancellation_residue(a, b, out)
 
     def __rsub__(self, other):
+        # A COMPOSITE left operand is used as it is.  Python reaches here with
+        # one whenever the right operand is a subclass (forensics' _Audited,
+        # TracedComposite), and _scalar_operand ran it through float(), which is
+        # st(): B - A with B = 3+5h, A = 2+h read d(1) = -1 instead of 4.
+        # Composite.__sub__ rather than left.__sub__, so a subclass left operand
+        # does not re-dispatch into its own override from inside this one.
+        if isinstance(other, Composite):
+            return Composite.__sub__(other, self)
         left = _scalar_operand(other)
         return left.__sub__(self)
 
     def __neg__(self):
-        return Composite._wrap(self._backend.negate(self._data), self._backend,
-                               complete=self._complete, denot=_denot_of(self))
+        # Negation is an operation, so a zero operand converts first (R1):
+        # -R(0) is -h, as R(0) * R(-1) and NOTHING - R(0) already were.
+        a = _prepared(self)
+        return Composite._wrap(a._backend.negate(a._data), a._backend,
+                               complete=self._complete, denot=_denot_of(a))
 
     def __mul__(self, other):
         """Multiplication: dimensions add, coefficients multiply.
@@ -1531,10 +1583,13 @@ class Composite:
             if other == 0:
                 other = Composite({0: 0.0})
             else:
+                # x * 1 is R3's identity and returns x as written; any other
+                # number is an operation, so x is prepared first (_prepared).
+                a = self if other == 1 else _prepared(self)
                 return Composite._wrap(
-                    self._backend.scalar_multiply(self._data, float(other)),
-                    self._backend, complete=self._complete,
-                    denot=_denot_of(self))
+                    a._backend.scalar_multiply(a._data, float(other)),
+                    a._backend, complete=self._complete,
+                    denot=_denot_of(a))
         if not isinstance(other, Composite):
             return NotImplemented
         if _is_unit(other):
@@ -1561,14 +1616,15 @@ class Composite:
             if other == 0:
                 other = Composite({0: 0.0})
             else:
+                a = self if other == 1 else _prepared(self)    # as in __mul__
                 return Composite._wrap(
-                    self._backend.scalar_multiply(self._data, 1.0 / other),
+                    a._backend.scalar_multiply(a._data, 1.0 / other),
                     # self._backend, not the global one: __mul__ passes it and
                     # __truediv__ did not, so `x / 2` on a vector composite
                     # wrapped DictData in sparse-dense methods.  sinh, cosh,
                     # tanh and atan all divide by a scalar at the end.
-                    self._backend, complete=self._complete,
-                    denot=_denot_of(self))
+                    a._backend, complete=self._complete,
+                    denot=_denot_of(a))
         if not isinstance(other, Composite):
             return NotImplemented
         if _is_unit(other):
@@ -1666,7 +1722,12 @@ class Composite:
         # Only a CUT quotient is bounded.  One whose remainder emptied is exact,
         # and bounding it is the same mistake the other way round: x*x/x is x,
         # and a bound of 1 made exp((x*x/x)*x) drop every order from 2.
-        got = [_dim_order(d) for d in out.c if _dim_order(d) >= 0]
+        #
+        # Every order counts, negative ones included.  Keeping only orders >= 0
+        # left a cut quotient whose grades are ALL positive with no bound at
+        # all: INF**51 / (INF + 1) stopped at grade 1, read 0.0 at grade 0
+        # where the value is 1, and called itself exact.  Its bound is -1.
+        got = [_dim_order(d) for d in out.c]
         if got and cut:
             # + 0.0: _dim_order reads a log-axis grade as -0.0, and a bound of
             # -0.0 printed as a negative completeness.  It is 0.
@@ -1675,13 +1736,35 @@ class Composite:
 
     def __rtruediv__(self, other):
         # other / self -- the operands are reversed, so no unit-divisor
-        # short-circuit applies here.
+        # short-circuit applies here.  A composite left operand is kept whole,
+        # for the reason given in __rsub__.
+        if isinstance(other, Composite):
+            return Composite.__truediv__(other, self)
         left = _scalar_operand(other)
         return left.__truediv__(self)
 
     def __abs__(self):
-        """Absolute value of the standard part."""
-        return abs(self.st())
+        """|x| as a composite: x itself, negated when its DOMINANT term is negative.
+
+        This returned abs(self.st()), a float, so every grade but 0 was dropped
+        and |x| entered the rest of an expression as a constant:
+        derivative(lambda x: x*abs(x), 0.5) read 0.5 where it is 1.0, with no
+        warning.  The sign of a composite is the sign of its dominant term, so
+        abs(-3 + h) is 3 - h, abs(-h) is h and abs(-1/h) is 1/h.
+
+        A zero operand converts first (R1), as in any operation: abs(R(0)) is h.
+        NOTHING has no term to take a sign from and stays NOTHING.
+        """
+        x = _r1(self)
+        lead = x.lead_dim()
+        if lead is not None:
+            dims, vals = x._backend.to_arrays(x._data)
+            for d, v in zip(dims, vals):
+                if v != 0.0 and (d is lead or d == lead):
+                    if v < 0.0:
+                        return -x
+                    break
+        return _untouched(x, Composite({}))
 
     def __float__(self):
         """Float conversion returns standard part.
@@ -1868,10 +1951,19 @@ class Composite:
         to.  The value returned is still a true derivative -- of the function
         the expression denotes -- so this warns by default rather than
         refusing; CONVENTIONAL_STRICT = True raises instead.
+
+        Also WARNS (IncompleteOrderWarning) when n is past complete_order: the
+        order was never vouched for, and the value read there is usually 0.0
+        or a leaked convolution term rather than the derivative.
         """
         _dn = _denot_of(self)
         if _dn is not None and n >= _dn:
             _report_denotation(n, _dn)
+        _co = getattr(self, "_complete", None)
+        if _co is not None and n > _co:
+            import warnings
+            warnings.warn(_INCOMPLETE_MSG % (n, _co), IncompleteOrderWarning,
+                          stacklevel=2)
         dims, vals = self._backend.to_arrays(self._data)
         for _g, _v in zip(dims, vals):
             if _v == 0.0:
@@ -3390,9 +3482,22 @@ def _bounded_at_inf(func, x, terms=12):
         u2 = u * u
         acc = R(sign * math.pi / 2)
         term = u
-        for k in range(_effective_terms(terms)):
+        n_terms = _effective_terms(terms)
+        for k in range(n_terms):
             acc = acc + (term / float(2 * k + 1)) * (1.0 if k % 2 else -1.0)
             term = term * u2
+        # The series stops after n_terms, so the first term NOT added is
+        # u**(2*n_terms + 1), and with u of leading order m everything from
+        # order m*(2*n_terms + 1) on is missing.  Unrecorded, atan(1/h) read
+        # as exact while stopping at h**23, and atan(1/h + 1) took u's bound of
+        # 50 and was wrong from order 25 (h**27: -290.44 against -303.41).
+        # The same bound _maclaurin_odd records for the finite case.
+        # Power axis only: a log-axis u is the open item "completeness is not
+        # tracked along the log axis", and an order there is not this one.
+        lead = u.lead_dim()
+        if lead is not None and not (isinstance(lead, tuple)
+                                     and any(c != 0 for c in lead[1:])):
+            acc = _truncate_order(acc, _lead_order(lead) * (2 * n_terms + 1) - 1)
         return acc
 
     try:
@@ -4681,7 +4786,7 @@ def atan(x, terms=15):
     # rather than |1|_-0.5 -- the half grade IS the branch point.
     x = _r1(x)
     if _has_positive_dims(x):
-        return _bounded_at_inf(math.atan, x)
+        return _bounded_at_inf(math.atan, x, terms)
     a = x.st()
     if not _has_infinitesimal_part(x):
         return _const_like(x, math.atan(a))
