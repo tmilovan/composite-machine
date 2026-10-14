@@ -322,6 +322,9 @@ class DenseSeriesBackend(CompositeBackend):
             return self._make(0.0, 1.0, np.array([]))
         return self._make(data.offset, data.step, data.vals * float(scalar))
 
+    def scalar_divide(self, data: DenseData, scalar: float) -> DenseData:
+        return self._make(data.offset, data.step, data.vals / float(scalar))
+
     def negate(self, data: DenseData) -> DenseData:
         return self._make(data.offset, data.step, -data.vals)
 

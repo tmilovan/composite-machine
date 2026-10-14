@@ -248,5 +248,8 @@ class DictBackend(CompositeBackend):
             return DictData({})
         return DictData({d: v * scalar for d, v in data.terms.items()})
 
+    def scalar_divide(self, data: DictData, scalar: float) -> DictData:
+        return DictData({d: v / scalar for d, v in data.terms.items()})
+
     def negate(self, data: DictData) -> DictData:
         return DictData({d: -v for d, v in data.terms.items()})

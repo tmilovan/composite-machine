@@ -374,6 +374,10 @@ class FractionalDictBackend(CompositeBackend):
         return FracData({k: v * scalar for k, v in data.terms.items()},
                         data.L, canon=False)
 
+    def scalar_divide(self, data: FracData, scalar: float) -> FracData:
+        return FracData({k: v / scalar for k, v in data.terms.items()},
+                        data.L, canon=False)
+
     def negate(self, data: FracData) -> FracData:
         return FracData({k: -v for k, v in data.terms.items()},
                         data.L, canon=False)

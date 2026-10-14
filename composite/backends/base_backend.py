@@ -238,6 +238,17 @@ class CompositeBackend(ABC):
     def scalar_multiply(self, data: object, scalar: float) -> object:
         """Multiply all coefficients by a scalar."""
 
+    def scalar_divide(self, data: object, scalar: float) -> object:
+        """Divide all coefficients by a nonzero scalar -- a true division.
+
+        Not scalar_multiply(data, 1.0 / scalar): that rounds twice, once for
+        the reciprocal and once for the product, so x / 105.0 and x / R(105.0)
+        (whose single-term path divides) disagreed in the last bit.  This
+        generic version works for any backend; the built-in ones override it.
+        """
+        dims, vals = self.to_arrays(data)
+        return self.create_from_terms(dims, vals / float(scalar))
+
     @abstractmethod
     def negate(self, data: object) -> object:
         """Negate all coefficients."""

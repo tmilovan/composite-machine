@@ -144,14 +144,24 @@ def test_no_warning_when_nothing_is_dropped():
         assert dropped == 0, f"{label} warned with nothing to drop"
 
 
-def test_a_lone_transcendental_is_not_touched_by_set_max_order():
-    """Documenting what the knob does NOT do, because I assumed otherwise and
-    reported a cap as mattering when it did not: set_max_order applies at
-    _order_cap, which products pass through and a bare sin() does not."""
+def test_a_lone_transcendental_stops_at_set_max_order():
+    """The series builders read the cap (2026-10-14).  They used to build to 15
+    terms and leave the cap to the next product, which threw the rest away: a
+    seeded Black-Scholes price() under set_max_order(3) raised 90 truncation
+    warnings, products dropping 9-19 terms each.  Now a capped series holds the
+    orders up to the cap, identical to the uncapped ones, nothing past it, and
+    says it is complete to the cap."""
     cl.set_max_order(None)
-    uncapped = len(sin(h).coeffs_dict())
+    uncapped = sin(h)
     cl.set_max_order(4)
-    assert len(sin(h).coeffs_dict()) == uncapped
+    capped = sin(h)
+    deepest = max(-g for g in capped.coeffs_dict())
+    print(f"\n  sin(h) uncapped {uncapped}\n  sin(h) under set_max_order(4) {capped}, "
+          f"complete {capped.complete_order}, deepest order {deepest}")
+    assert deepest <= 4
+    assert capped.complete_order == 4
+    for k in range(5):
+        assert capped.coeff(-k) == uncapped.coeff(-k), f"order {k} moved"
 
 
 # --- the cap must be recorded, on every backend ---------------------------------------

@@ -1617,8 +1617,12 @@ class Composite:
                 other = Composite({0: 0.0})
             else:
                 a = self if other == 1 else _prepared(self)    # as in __mul__
+                # A true division, so x / c is x / R(c) exactly: multiplying by
+                # 1.0 / other rounded twice, and S / 105.0 entered ln(S/K)
+                # one ulp off what S / R(105.0) gave (order 3 of a seeded
+                # Black-Scholes price 5.8e-14 against 9.5e-15).
                 return Composite._wrap(
-                    a._backend.scalar_multiply(a._data, 1.0 / other),
+                    a._backend.scalar_divide(a._data, float(other)),
                     # self._backend, not the global one: __mul__ passes it and
                     # __truediv__ did not, so `x / 2` on a vector composite
                     # wrapped DictData in sparse-dense methods.  sinh, cosh,
@@ -1707,12 +1711,12 @@ class Composite:
         # The requested depth: a derivative scope raises _min_terms, and a
         # quotient cut at the backend's floor of 50 stopped 1/(1+x^2) at order
         # 49 under _derivative_scope(50, 52).
-        result, cut = a._backend.deconvolve_cut(a._data, b._data,
-                                                min_terms=max(50, _min_terms[0]))
+        steps = _quotient_steps(a, b, max(50, _min_terms[0]))
+        result, cut = a._backend.deconvolve_cut(a._data, b._data, min_terms=steps)
         data, comp = _capped(a._backend, result, _scaled_complete(self, other, a, b, -1))
         out = Composite._wrap(data, a._backend, complete=comp,
                               denot=_denot_quotient(a, b))
-        _announce_amplification(a, b, out, max(50, _min_terms[0]))
+        _announce_amplification(a, b, out, steps)
         # A multi-term divisor generally yields a NON-TERMINATING quotient that
         # the backend cuts at a fixed length: 1/(1-x) comes back as 50 correct
         # coefficients, not as a closed form.  Every order produced is right,
@@ -3091,8 +3095,47 @@ def taylor_degeneracy(f, at, name="f"):
 
 
 def _effective_terms(default):
-    """Return max(default, global minimum) for Taylor series length."""
-    return max(default, _min_terms[0])
+    """Taylor series length: max(default, global minimum), stopped at the order cap.
+
+    set_max_order(n) says "I only want orders up to n back".  The series builders
+    used to ignore it and build to 15 terms, and the cap then threw the rest away
+    at the next product: under set_max_order(3) a seeded Black-Scholes price()
+    raised 90 truncation warnings, products dropping 9-19 terms each.  n + 1
+    terms reach order n in an argument whose lowest order is 1; a shallower
+    argument records a lower bound, it does not get a wrong coefficient.  A
+    derivative scope lifts the cap to what it extracts, so the depth follows it.
+    """
+    n = max(default, _min_terms[0])
+    cap = getattr(get_backend(), "max_order", None)
+    if cap is not None:
+        n = min(n, int(math.floor(cap)) + 1)
+    return max(n, 1)
+
+
+def _quotient_steps(a, b, default):
+    """How many quotient coefficients a long division produces.
+
+    `default` with no order cap.  Under set_max_order(n), only the orders up to
+    n, counted from the quotient's leading order lead(a) - lead(b): the division
+    used to run its 50 steps regardless and _capped then dropped 46 of them,
+    nine times per seeded Black-Scholes price().  Quotient order k depends only
+    on operand orders up to k, so the orders kept are the ones it computed
+    before.  Integer power-axis grades only; anything else keeps `default`.
+    """
+    cap = getattr(a._backend, "max_order", None)
+    if cap is None:
+        return default
+    la, lb = a.lead_order(), b.lead_order()
+    if la is None or lb is None:
+        return default
+    for x in (a, b):
+        dims, _ = x._backend.to_arrays(x._data)
+        if getattr(dims, "dtype", None) is None or dims.dtype == object:
+            return default
+        if not np.all(dims == np.round(dims)):
+            return default
+    need = int(math.floor(cap - (la - lb))) + 1
+    return max(1, min(default, need))
 
 
 @_contextlib.contextmanager
@@ -5178,8 +5221,85 @@ def normal_cdf(x, terms=15):
     base = 0.5 * math.erfc(-a / math.sqrt(2.0))
     if not _has_infinitesimal_part(x):
         return _const_like(x, base)
+    fast = _normal_cdf_by_terms(x, terms, base)
+    if fast is not None:
+        return fast
     return antiderivative(
         _chained(_ONE_OVER_SQRT_2PI * exp(-(x * x) * 0.5, terms), x), base)
+
+
+def _normal_cdf_by_terms(x, terms, base):
+    """Phi(x) written from coefficient recurrences, wrapped once; None if not the common case.
+
+    The general path builds the same number from public operations -- x*x, *0.5,
+    exp, *1/sqrt(2 pi), _chained, antiderivative -- and each is a full Composite
+    operation with R1 checks, completeness and denotation bookkeeping, the order
+    cap and a wrap.  Profiled on a 4-term argument: 165 us per call, 4.8% of it
+    arithmetic.  This writes the series directly, as _exp_by_terms does for exp:
+
+        g = -x^2/2,   E = exp(g):  E_0 = e^(g_0),  n E_n = sum_k k g_k E_(n-k)
+        y = Phi(x):   y_0 = base,  n y_n = sum_k k x_k E_(n-k) / sqrt(2 pi)
+
+    with the orders, the cap and the completeness bound the general path
+    produces.  Measured against it on 440 arguments per backend, capped and not:
+    identical grades, complete_order and denotation, coefficients within
+    1.4e-13; 27.7 us per call against 163.6.
+
+    The common case only: integer power-axis grades, nothing positive, a
+    nonzero standard part, and a grade -1 term.  A zero standard part or a
+    deeper leading order changes the exp bound's lowest order; fractional and
+    log-axis grades are not on the integer recurrence; an infinite argument has
+    no standard part to expand about.  All of those return None and take the
+    general path.
+    """
+    dims, vals = x._backend.to_arrays(x._data)
+    if getattr(dims, "dtype", None) is None or dims.dtype == object or len(dims) == 0:
+        return None
+    if np.any(dims > 0) or not np.all(dims == np.round(dims)):
+        return None
+    coef = {int(-d): float(v) for d, v in zip(dims, vals)}
+    a = coef.get(0)
+    if a is None or a == 0.0 or coef.get(1, 0.0) == 0.0:
+        return None
+    maxo = max(coef)
+    t = _effective_terms(terms)
+    cap = getattr(x._backend, "max_order", None)
+    cx = x._complete
+
+    # g = -x*x/2, as the product would leave it: up to 2*maxo, cut at the cap
+    top_g = 2 * maxo if cap is None else min(2 * maxo, int(math.floor(cap)))
+    xs = np.array([coef.get(k, 0.0) for k in range(maxo + 1)])
+    g = -0.5 * np.convolve(xs, xs)[:top_g + 1]
+    g_complete = cx                                  # x*x with lead order 0
+    if cap is not None and 2 * maxo > cap:
+        g_complete = _tighter(g_complete, cap)
+    K = int(_tighter(t - 1, g_complete))             # exp's bound, lowest order 1
+
+    # E = exp(g), the recurrence of _exp_by_terms, summed highest order first
+    E = np.empty(K + 1)
+    E[0] = _exp_float(float(g[0]))
+    for n in range(1, K + 1):
+        acc = 0.0
+        for k in range(min(n, top_g), 0, -1):
+            if g[k] != 0.0:
+                acc += k * g[k] * E[n - k]
+        E[n] = acc / n
+
+    # Phi' = E/sqrt(2 pi) times x', cut at K (and the cap); antiderivative
+    dx = np.array([k * coef.get(k, 0.0) for k in range(1, maxo + 1)])
+    prod = np.convolve(E * _ONE_OVER_SQRT_2PI, dx)[:K + 1]
+    if cap is not None:
+        prod = prod[:int(math.floor(cap)) + 1]
+    terms_out = {0: base}
+    for j, v in enumerate(prod):
+        terms_out[-(j + 1)] = float(v) / (j + 1)
+
+    bound = K if cx is None else min(K, cx - 1)
+    if cap is not None and K + maxo - 1 > cap:
+        bound = min(bound, cap)
+    out = _like(x, terms_out)
+    out._complete = bound + 1
+    return out
 
 
 Phi = normal_cdf          # the name the finance literature uses

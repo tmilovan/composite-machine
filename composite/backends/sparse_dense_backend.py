@@ -645,5 +645,8 @@ class SparseDenseBackend(CompositeBackend):
             return SparseData(runs=[])
         return self._map_vals(data, lambda v: v * scalar)
 
+    def scalar_divide(self, data: SparseData, scalar: float) -> SparseData:
+        return self._map_vals(data, lambda v: v / scalar)
+
     def negate(self, data: SparseData) -> SparseData:
         return self._map_vals(data, lambda v: -v)
