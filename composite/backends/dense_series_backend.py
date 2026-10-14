@@ -25,6 +25,7 @@ exactly the reason that the two regimes want opposite representations.
     from composite.backends import config
     config.use_dense_series()
 """
+import math
 from typing import Tuple
 
 import numpy as np
@@ -60,7 +61,21 @@ def _lattice(dims):
     lo = float(d.min())
     spread = d - lo
     pos = spread[spread > 0]
-    step = float(pos.min()) if pos.size else 1.0
+    # The step is the GREATEST COMMON DIVISOR of the spreads, not the smallest
+    # spread.  -12, -7.5, -3, 0, 1, 2 spread by 4.5, 9, 12, 13, 14: the smallest
+    # is 4.5, 12 is not a multiple of it, and the data was refused although it
+    # sits on step 0.5.  Same for an antiderivative's -50.5 ... -0.5 beside the
+    # constant at 0 (spreads 0, 1, ..., 50, 50.5): step 1 was taken, 50.5
+    # failed, and integrate(cos(x)/sqrt(x), 0, 1) raised on this backend only.
+    if pos.size:
+        step = pos[0]
+        for s in pos[1:]:
+            step = _float_gcd(step, s)
+            if step is None:
+                return None
+    else:
+        step = 1.0
+    step = float(step)
     k = spread / step
     kr = np.rint(k)
     # A tolerance is needed because the dims are float64 dyadics; 1e-9 is far
@@ -70,13 +85,40 @@ def _lattice(dims):
     return lo, step, kr.astype(np.int64)
 
 
-def _common_step(s1: float, s2: float):
-    """Finest step both lattices sit on, or None if they are incommensurable."""
-    lo, hi = (s1, s2) if s1 <= s2 else (s2, s1)
-    if lo <= 0:
+def _float_gcd(a: float, b: float):
+    """Greatest common step of two positive spacings, or None if they have none.
+
+    Euclid on floats.  A remainder within 1e-9 (relative) of zero or of the
+    divisor counts as exact -- the same tolerance _lattice uses for membership,
+    far below any real spacing and far above float64 representation error of
+    dyadic grades.  Spacings with no common step (an irrational ratio) drive the
+    divisor down toward the tolerance; below 1e-6 of the larger spacing that is
+    reported as None rather than as a lattice of millions of empty slots.
+    """
+    a, b = abs(float(a)), abs(float(b))
+    if a <= 0.0 or b <= 0.0:
         return None
-    r = hi / lo
-    return lo if abs(r - round(r)) < 1e-9 else None
+    scale = max(a, b)
+    tol = 1e-9 * scale
+    if a < b:
+        a, b = b, a
+    while b > tol:
+        r = math.fmod(a, b)
+        if r <= tol or b - r <= tol:
+            r = 0.0
+        a, b = b, r
+    return a if a >= 1e-6 * scale else None
+
+
+def _common_step(s1: float, s2: float):
+    """Finest step both lattices sit on, or None if they are incommensurable.
+
+    The greatest common divisor, not "one is a multiple of the other": steps 1
+    and 1.5 were refused although both sit on 0.5.
+    """
+    if s1 <= 0 or s2 <= 0:
+        return None
+    return _float_gcd(s1, s2)
 
 
 class DenseSeriesBackend(CompositeBackend):
