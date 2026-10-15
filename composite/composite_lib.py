@@ -971,6 +971,9 @@ def _warn_cancelled(dim, order, mag):
     # a half grade is a branch point, and the two must not look alike.
     if not isinstance(dim, tuple) and float(dim).is_integer():
         dim = int(dim)
+    if mag.__class__.__name__ == "Lanes":
+        # a batch (batch-dense backend): the largest magnitude across its rows
+        mag = float(np.max(np.abs(np.asarray(getattr(mag.v, "val", mag.v)))))
     warnings.warn(_CANCELLED_MSG % (dim, order, mag, order),
                   CancellationWarning, stacklevel=4)
 
@@ -1018,7 +1021,7 @@ def _cancellation_residue(a, b, result):
         sdims, svals = src._backend.to_arrays(src._data)
         if len(sdims) == 0:
             return result                   # nothing was annihilated
-        shifted = {_dim_shift(sd, -1): float(sv) for sd, sv in zip(sdims, svals)}
+        shifted = {_dim_shift(sd, -1): _coeff_value(sv) for sd, sv in zip(sdims, svals)}
         out = _like(src, shifted)
         if _is_wholly_zero(out):
             return result                   # would recurse: leave it to _r1
@@ -1067,6 +1070,16 @@ def _untouched(x, nothing):
                                             getattr(nothing, "_complete", None)),
                           denot=getattr(x, "_denot", None))
     return _join(out, x, nothing)
+
+
+def _batch_operand(other):
+    """A batch vector operand (batch-dense backend, Lanes) as the composite
+    constant holding it, Composite({0: lanes}); anything else NotImplemented.
+    Reached only on the branch where the operand is not a Composite, so
+    composite operands pay nothing for it."""
+    if other.__class__.__name__ == "Lanes":
+        return Composite({0: other})
+    return NotImplemented
 
 
 def _scalar_operand(other):
@@ -1185,6 +1198,96 @@ def is_zero(x):
     return is_nothing(x) or is_vanishing(x)
 
 
+
+def _coeff_array(values):
+    """Coefficients as an array: float64, or object when they are batch vectors.
+
+    The batch-dense backend stores one composite for many numbers, each
+    coefficient a vector over the batch (backends.batch_dense_backend.Lanes);
+    casting those to float64 would collapse the batch.  Plain floats come out
+    exactly as before."""
+    values = list(values)
+    if any(getattr(v, "__class__", None).__name__ == "Lanes" for v in values):
+        out = np.empty(len(values), dtype=object)
+        for i, v in enumerate(values):
+            out[i] = v
+        return out
+    return np.array(values, dtype=np.float64)
+
+
+def _coeff_value(v):
+    """One coefficient for a dict read: a float, or the batch vector as it is."""
+    return v if v.__class__.__name__ == "Lanes" else float(v)
+
+
+class _MathDispatch:
+    """math.* on a standard part: math for a number, the array's own module for
+    a batch vector (batch-dense backend, backends/batch_dense_backend.Lanes).
+
+    math.f would call float() on a batch vector, which a Lanes refuses.  numpy
+    returns inf or nan where math raises, so a batch result that is not finite
+    where its argument was raises math's error: OverflowError for a value too
+    large, ValueError outside the domain.  Plain numbers go to math as before."""
+
+    _OVERFLOWS = ("exp", "sinh", "cosh", "pow")
+
+    @staticmethod
+    def _lanes(x):
+        return x.__class__.__name__ == "Lanes"
+
+    def _apply(self, mfun, name, *xs):
+        lanes = next((x for x in xs if self._lanes(x)), None)
+        if lanes is None:
+            return mfun(*xs)
+        vs = [x.v if self._lanes(x) else x for x in xs]
+        v = vs[0]
+        if getattr(v, "_batch_array", False):              # recording (batch_replay)
+            return lanes.__class__(getattr(v.xp, name)(*vs))
+        if type(v).__module__.startswith("jax"):
+            import jax.numpy as jnp
+            import jax.scipy.special as jsp
+            if name in ("erf", "erfc"):
+                fn = getattr(jsp, name)
+            else:
+                fn = getattr(jnp, {"asin": "arcsin", "acos": "arccos", "atan": "arctan",
+                                   "pow": "power"}.get(name, name))
+            return lanes.__class__(fn(*vs))
+        if name in ("erf", "erfc"):
+            fn = np.vectorize(getattr(math, name), otypes=[np.float64])   # numpy has no erf
+        else:
+            fn = getattr(np, {"asin": "arcsin", "acos": "arccos", "atan": "arctan",
+                              "pow": "power"}.get(name, name))
+        with np.errstate(all="ignore"):
+            out = fn(*vs)
+            ok_in = np.ones(np.shape(out), dtype=bool)
+            for u in vs:
+                ok_in &= np.isfinite(u)
+            bad = ok_in & ~np.isfinite(out)
+        if np.any(bad):
+            if name in self._OVERFLOWS and not np.any(bad & np.isnan(out)):
+                raise OverflowError("math range error")
+            raise ValueError("math domain error")
+        return lanes.__class__(out)
+
+    def exp(self, x): return self._apply(math.exp, "exp", x)
+    def log(self, x): return self._apply(math.log, "log", x)
+    def sqrt(self, x): return self._apply(math.sqrt, "sqrt", x)
+    def erf(self, x): return self._apply(math.erf, "erf", x)
+    def erfc(self, x): return self._apply(math.erfc, "erfc", x)
+    def sin(self, x): return self._apply(math.sin, "sin", x)
+    def cos(self, x): return self._apply(math.cos, "cos", x)
+    def tan(self, x): return self._apply(math.tan, "tan", x)
+    def atan(self, x): return self._apply(math.atan, "atan", x)
+    def asin(self, x): return self._apply(math.asin, "asin", x)
+    def acos(self, x): return self._apply(math.acos, "acos", x)
+    def tanh(self, x): return self._apply(math.tanh, "tanh", x)
+    def sinh(self, x): return self._apply(math.sinh, "sinh", x)
+    def cosh(self, x): return self._apply(math.cosh, "cosh", x)
+    def pow(self, x, y): return self._apply(math.pow, "pow", x, y)
+
+
+_mf = _MathDispatch()
+
 class Composite:
     """
     Composite number: |coefficient|_dimension
@@ -1261,7 +1364,7 @@ class Composite:
                         dims[_i] = _d
                 else:
                     dims = np.array(sorted_dims, dtype=DIM_DTYPE)
-                vals = np.array([coefficients[d] for d in sorted_dims], dtype=np.float64)
+                vals = _coeff_array(coefficients[d] for d in sorted_dims)
                 self._data = self._backend.create_from_terms(dims, vals)
             else:
                 self._data = self._backend.create_from_terms(
@@ -1309,7 +1412,7 @@ class Composite:
         TracedComposite keep working without changes.
         """
         dims, vals = self._backend.to_arrays(self._data)
-        return {dim_cast(d): float(v) for d, v in zip(dims, vals)}
+        return {dim_cast(d): _coeff_value(v) for d, v in zip(dims, vals)}
 
     # -------------------------------------------------------------------------
     # Constructors (UNCHANGED)
@@ -1352,6 +1455,8 @@ class Composite:
                 "Composite.real() takes a real number, not a Composite -- "
                 "converting one collapses it to its standard part. If the "
                 "value is already a composite, use it directly.")
+        if value.__class__.__name__ == "Lanes":
+            return cls({0: value})       # a batch of reals (batch-dense backend)
         return cls({0: float(value)})
 
     # -------------------------------------------------------------------------
@@ -1408,6 +1513,8 @@ class Composite:
             return "₋" + ''.join(sub[int(d)] for d in str(-n))
 
         def fmt_coeff(c):
+            if c.__class__.__name__ == "Lanes":
+                return repr(c)       # a batch coefficient (batch-dense backend)
             c = float(c)
             # int(nan) raises ValueError and int(inf) raises OverflowError, and
             # `c == int(c)` evaluates the int FIRST -- so printing a composite
@@ -1506,7 +1613,9 @@ class Composite:
         if isinstance(other, (int, float)):
             other = _scalar_operand(other)
         if not isinstance(other, Composite):
-            return NotImplemented
+            other = _batch_operand(other)
+            if other is NotImplemented:
+                return NotImplemented
         if _is_nothing(other):
             return _untouched(self, other)
         if _is_nothing(self):
@@ -1529,7 +1638,8 @@ class Composite:
             return Composite.__add__(other, self)
         if isinstance(other, (int, float)):
             return _scalar_operand(other).__add__(self)
-        return NotImplemented
+        other = _batch_operand(other)
+        return NotImplemented if other is NotImplemented else other.__add__(self)
 
     def __sub__(self, other):
         """Subtraction never shifts dimensions (R4).
@@ -1541,7 +1651,9 @@ class Composite:
         if isinstance(other, (int, float)):
             other = _scalar_operand(other)
         if not isinstance(other, Composite):
-            return NotImplemented
+            other = _batch_operand(other)
+            if other is NotImplemented:
+                return NotImplemented
         if _is_nothing(other):
             return _untouched(self, other)    # subtracting NOTHING: a no-op, before R1
         a, b = _operands(self, other)
@@ -1562,7 +1674,9 @@ class Composite:
         # does not re-dispatch into its own override from inside this one.
         if isinstance(other, Composite):
             return Composite.__sub__(other, self)
-        left = _scalar_operand(other)
+        left = _batch_operand(other)
+        if left is NotImplemented:
+            left = _scalar_operand(other)
         return left.__sub__(self)
 
     def __neg__(self):
@@ -1591,7 +1705,9 @@ class Composite:
                     a._backend, complete=self._complete,
                     denot=_denot_of(a))
         if not isinstance(other, Composite):
-            return NotImplemented
+            other = _batch_operand(other)
+            if other is NotImplemented:
+                return NotImplemented
         if _is_unit(other):
             return _unit_kept(self, other, +1)
         if _is_unit(self):
@@ -1630,7 +1746,9 @@ class Composite:
                     a._backend, complete=self._complete,
                     denot=_denot_of(a))
         if not isinstance(other, Composite):
-            return NotImplemented
+            other = _batch_operand(other)
+            if other is NotImplemented:
+                return NotImplemented
         if _is_unit(other):
             return _unit_kept(self, other, -1)
 
@@ -1744,7 +1862,9 @@ class Composite:
         # for the reason given in __rsub__.
         if isinstance(other, Composite):
             return Composite.__truediv__(other, self)
-        left = _scalar_operand(other)
+        left = _batch_operand(other)
+        if left is NotImplemented:
+            left = _scalar_operand(other)
         return left.__truediv__(self)
 
     def __abs__(self):
@@ -2153,7 +2273,7 @@ class Composite:
         resummation checks.  So the leak is reported, not hidden.
         """
         dims, vals = self._backend.to_arrays(self._data)
-        return {dim_cast(d): float(v) for d, v in zip(dims, vals)}
+        return {dim_cast(d): _coeff_value(v) for d, v in zip(dims, vals)}
 
     @property
     def complete_order(self):
@@ -2941,6 +3061,8 @@ def _rational_power(x, r):
     return acc * Composite({new_dim: scale})
 
 
+
+
 class Degeneracy:
     """Whether a Taylor reading of this result is conventionally degenerate.
 
@@ -3698,7 +3820,7 @@ def _like(x, terms):
             dims[_i] = _d
     else:
         dims = np.array(sorted_dims, dtype=DIM_DTYPE)
-    vals = np.array([terms[d] for d in sorted_dims], dtype=np.float64)
+    vals = _coeff_array(terms[d] for d in sorted_dims)
     # Provenance follows x: a series built from x is a value DERIVED from it,
     # not a new source.  Without this every transcendental would look like a
     # leaf and sin(exp(sqrt(x))) would flag.
@@ -3829,6 +3951,8 @@ def _announce_amplification(a, b, q, min_terms):
     was amplified by.  Values are not changed; this only announces.
     """
     be = b._backend
+    if getattr(be, "BATCH", False):
+        return               # not ported to batch coefficients (prototype)
     bd, bv = be.to_arrays(b._data)
     nz = [i for i in range(len(bv)) if bv[i] != 0.0]
     if len(nz) < 2:
@@ -3901,7 +4025,7 @@ def sin(x, terms=12):
         return _bounded_at_inf(math.sin, x)
     a = x.st()
     if not _has_infinitesimal_part(x):
-        return _const_like(x, math.sin(a))
+        return _const_like(x, _mf.sin(a))
     _nz = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
     # _like, not Composite({...}): the bare constructor binds whatever backend
     # is globally ACTIVE, so a vector-dimension argument had its tuples handed
@@ -3912,7 +4036,7 @@ def sin(x, terms=12):
     # zero.  The scalar spelling let the vector zero (0, 0) through, so the
     # standard part was counted twice -- once as a, once inside h.
     h = _like(x, {d: c for d, c in x.c.items() if _dim_nonzero(d)})
-    sin_a, cos_a = math.sin(a), math.cos(a)
+    sin_a, cos_a = _mf.sin(a), _mf.cos(a)
     _one = _like(x, {_unit_dim(x): 1.0})
     sin_h = _like(x, {})
     cos_h = _one
@@ -3960,7 +4084,7 @@ def cos(x, terms=12):
         return _bounded_at_inf(math.cos, x)
     a = x.st()
     if not _has_infinitesimal_part(x):
-        return _const_like(x, math.cos(a))
+        return _const_like(x, _mf.cos(a))
     _nz = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
     # _like, not Composite({...}): the bare constructor binds whatever backend
     # is globally ACTIVE, so a vector-dimension argument had its tuples handed
@@ -3971,7 +4095,7 @@ def cos(x, terms=12):
     # zero.  The scalar spelling let the vector zero (0, 0) through, so the
     # standard part was counted twice -- once as a, once inside h.
     h = _like(x, {d: c for d, c in x.c.items() if _dim_nonzero(d)})
-    sin_a, cos_a = math.sin(a), math.cos(a)
+    sin_a, cos_a = _mf.sin(a), _mf.cos(a)
     _one = _like(x, {_unit_dim(x): 1.0})
     sin_h = _like(x, {})
     cos_h = _one
@@ -4004,7 +4128,7 @@ def _exp_float(a):
     value is e**-800.  So it is refused, as exp(-1/h) is: the value exists and
     this representation cannot carry it.
     """
-    v = math.exp(a)
+    v = _mf.exp(a)
     if v == 0.0:
         raise NotRepresentableError(
             "exp(%r) underflows float64: the value is positive but below the "
@@ -4268,7 +4392,7 @@ def _ln_vector(x, terms):
             "the logarithm needs a positive leading term.")
     w = ensure_depth(len(lead_d) + 1)
     out = {}
-    lc = math.log(lead_c)
+    lc = _mf.log(lead_c)
     if lc != 0.0:
         out[tuple(0 for _ in range(w))] = lc
     for k, e in enumerate(lead_d):
@@ -4296,7 +4420,7 @@ def _ln_monomial(x, terms, a, bound):
     """
     (d, c), = terms.items()
     p, q = _lead_order(d), c / a
-    lead = math.log(a)
+    lead = _mf.log(a)
     series = {} if lead == 0.0 else {_zero_dim_like(x): lead}
     pw, n = 1.0, 1
     while n * p <= bound:
@@ -4330,7 +4454,7 @@ def _ln_by_derivative(x, a, bound):
     F = antiderivative(quot)
     zero = _zero_dim_like(F)
     parts = {d: v for d, v in F.c.items() if _dim_nonzero(d)}
-    lead = math.log(a)
+    lead = _mf.log(a)
     if lead != 0.0:
         parts[zero] = lead
     out = _like(F, parts)
@@ -4395,7 +4519,7 @@ def ln(x, terms=15):
             _pc = _pos[_pd]
             if _pc > 0:
                 _t = {(0, 1): float(_pd)}
-                _lc = math.log(_pc)
+                _lc = _mf.log(_pc)
                 if _lc != 0.0:
                     _t[(0, 0)] = _lc
                 _lead = _vec_composite(_t)
@@ -4446,7 +4570,7 @@ def ln(x, terms=15):
                     # ln(x) = ln(lead) + ln(x/lead), and x/lead has standard
                     # part 1 so the second term takes the ordinary Taylor path.
                     _lead_terms = {(0, 1): float(min_dim)}
-                    _lc = math.log(coeff)
+                    _lc = _mf.log(coeff)
                     if _lc != 0.0:
                         _lead_terms[(0, 0)] = _lc
                     _lead = _vec_composite(_lead_terms)
@@ -4467,7 +4591,7 @@ def ln(x, terms=15):
         raise ValueError("ln requires positive standard part")
 
     if not _has_infinitesimal_part(x):
-        return _const_like(x, math.log(a))
+        return _const_like(x, _mf.log(a))
 
     nz = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
     if nz and not any(isinstance(d, tuple) or _dim_positive(d) for d in nz):
@@ -4484,7 +4608,7 @@ def ln(x, terms=15):
     # R6: there is no additive identity.  A summation that has not yet added a
     # term holds NOTHING, not zero -- seeding with Composite({0: 0.0}) would
     # assert a zero, which R1 converts to |1|_-1 and adds to the series.
-    lead = math.log(a)
+    lead = _mf.log(a)
     result = _like(x, {}) if lead == 0.0 else _like(x, {_unit_dim(x): lead})
     power = _like(x, {_unit_dim(x): 1.0})
 
@@ -4565,7 +4689,7 @@ def sqrt(x, terms=12):
         raise ValueError("sqrt requires non-negative standard part")
 
     if not _has_infinitesimal_part(x):
-        return _const_like(x, math.sqrt(a))
+        return _const_like(x, _mf.sqrt(a))
 
     # SOLVE y**2 = x ORDER BY ORDER, where the dimensions allow it.
     #
@@ -4594,7 +4718,7 @@ def sqrt(x, terms=12):
             _scalar_orders = {int(-float(d)): c
                               for d, c in x.coeffs_dict().items()}
     if _scalar_orders is not None:
-        y = {0: math.sqrt(a)}
+        y = {0: _mf.sqrt(a)}
         for n in range(1, terms):
             acc = 0.0
             for k in range(1, n):
@@ -4606,7 +4730,7 @@ def sqrt(x, terms=12):
         out = _like(x, {-float(n): c for n, c in y.items()})
         return _truncate_order(out, _tighter(terms - 1, _min_complete(x)))
 
-    sqrt_a = math.sqrt(a)
+    sqrt_a = _mf.sqrt(a)
     h_part = x - R(a)
     ratio = h_part / R(a)
 
@@ -4832,7 +4956,7 @@ def atan(x, terms=15):
         return _bounded_at_inf(math.atan, x, terms)
     a = x.st()
     if not _has_infinitesimal_part(x):
-        return _const_like(x, math.atan(a))
+        return _const_like(x, _mf.atan(a))
     if a == 0.0:
         # atan(z) = z - z**3/3 + z**5/5 - ...
         return _maclaurin_odd(
@@ -4846,7 +4970,7 @@ def atan(x, terms=15):
     # ordering was the whole reason.
     one_plus_x2 = R(1) + x * x
     deriv = _reciprocal(one_plus_x2, terms)
-    _lead = math.atan(a)
+    _lead = _mf.atan(a)
     result = {} if _lead == 0.0 else {_zero_dim_like(x): _lead}   # R6, see ln
     deriv = deriv * _d_deps(x)          # chain rule; see _d_deps
     for dim, coeff in deriv.c.items():
@@ -4902,14 +5026,14 @@ def asin(x, terms=15):
     inner = R(1) - x * x
     deriv = _reciprocal(sqrt(inner, terms), terms)
     if not _has_infinitesimal_part(x):
-        return _const_like(x, math.asin(a))
+        return _const_like(x, _mf.asin(a))
     if a == 0.0:
         # asin(z) = sum C(2n,n) / (4**n (2n+1)) * z**(2n+1)
         _co = []
         for n in range(terms):
             _co.append(math.comb(2 * n, n) / (4.0 ** n * (2 * n + 1)))
         return _maclaurin_odd(x, _co, terms)
-    _lead = math.asin(a)
+    _lead = _mf.asin(a)
     result = {} if _lead == 0.0 else {_zero_dim_like(x): _lead}   # R6, see ln
     deriv = deriv * _d_deps(x)          # chain rule; see _d_deps
     for dim, coeff in deriv.c.items():
@@ -5057,7 +5181,7 @@ def tanh(x, terms=15):
     _inf = {d: c for d, c in x.c.items() if _dim_nonzero(d) and c != 0.0}
     a = x.st()
     if not _inf:
-        return _const_like(x, math.tanh(a))
+        return _const_like(x, _mf.tanh(a))
     u = _like(x, _inf)
     _s, _c = sinh(u, terms), cosh(u, terms)
     # Carried completeness, as in tan.
@@ -5065,8 +5189,8 @@ def tanh(x, terms=15):
     T = _truncate_order(_q, _tighter(_q._complete, _min_complete(_s, _c, x)))
     if a == 0.0:
         return T                       # t = 0 and sech**2 = 1: the formula is T
-    t = math.tanh(a)
-    e = math.exp(-2.0 * abs(a))
+    t = _mf.tanh(a)
+    e = _mf.exp(-2.0 * abs(a))
     sech2 = 4.0 * e / (1.0 + e) ** 2
     core = T / (R(1) + T * t)
     if sech2 == 0.0:
@@ -5218,7 +5342,7 @@ def normal_cdf(x, terms=15):
         return _bounded_at_inf(
             lambda v: 0.5 * math.erfc(-v / math.sqrt(2.0)), x)
     a = x.st()
-    base = 0.5 * math.erfc(-a / math.sqrt(2.0))
+    base = 0.5 * _mf.erfc(-a / math.sqrt(2.0))
     if not _has_infinitesimal_part(x):
         return _const_like(x, base)
     fast = _normal_cdf_by_terms(x, terms, base)
@@ -5252,6 +5376,8 @@ def _normal_cdf_by_terms(x, terms, base):
     no standard part to expand about.  All of those return None and take the
     general path.
     """
+    if getattr(x._backend, "BATCH", False):
+        return None          # batch coefficients: the general path (prototype)
     dims, vals = x._backend.to_arrays(x._data)
     if getattr(dims, "dtype", None) is None or dims.dtype == object or len(dims) == 0:
         return None
@@ -5471,7 +5597,7 @@ def _series_pow(x, s, terms=15):
         return None
     if s == 0.5:
         return sqrt(x, terms)
-    y = {0: math.pow(a, s)}
+    y = {0: _mf.pow(a, s)}
     for n in range(1, terms):
         acc = 0.0
         for k in range(1, n + 1):
@@ -5520,7 +5646,7 @@ def _const_pow(x, s):
     # same constant, correctly rounded.
     if sv == 0.0 or a == 1.0:
         return None
-    out = _const_like(x, math.pow(a, sv))
+    out = _const_like(x, _mf.pow(a, sv))
     out._denot = _merge_denot(_denot_of(x),
                               _denot_of(s) if isinstance(s, Composite) else None)
     return out

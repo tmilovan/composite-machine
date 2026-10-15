@@ -83,9 +83,36 @@ class Runs:
         return self._runs.keys()
 
 
+def _number(v):
+    """A point value as f receives it: a plain number as it is; a batch of
+    values (batch-dense backend) as the composite constant holding them."""
+    if isinstance(v, (int, float, Composite)):
+        return v
+    return Composite({0: v})
+
+
+def _is_batch(v):
+    return v.__class__.__name__ == "Lanes"
+
+
 def _unit(x0):
-    """The unit a seed measures its input in: x0, or 1 at x0 = 0."""
+    """The unit a seed measures its input in: x0, or 1 at x0 = 0.  For a batch
+    (batch-dense backend) decided per row: x0 where it is nonzero, 1 where 0."""
+    if _is_batch(x0):
+        from composite.backends.batch_dense_backend import _xp
+        xp = _xp(x0.v)
+        return x0.__class__(xp.where(x0.v == 0.0, 1.0, x0.v))
     return x0 if x0 != 0 else 1.0
+
+
+def _same_seed(xi, xj, qi, qj):
+    """Would two inputs get the identical seed (same value, same quantity)?
+    For a batch: in ANY row -- one such row is enough for x - y to cancel."""
+    if not (_is_batch(xi) or _is_batch(xj) or _is_batch(qi) or _is_batch(qj)):
+        return xi == xj and qi == qj
+    import numpy as np
+    v = lambda z: np.asarray(getattr(getattr(z, "v", z), "val", getattr(z, "v", z)))
+    return bool(np.any((v(xi) == v(xj)) & (v(qi) == v(qj))))
 
 
 def _run(f, at, seeds, runs, order):
@@ -98,9 +125,15 @@ def _run(f, at, seeds, runs, order):
     h = _cl.TAG(Composite({0: 0.0}))       # a composite zero: TAG(0) routes a plain 0
                                            # through the integrator's float warning
     try:
-        args = dict(at)
+        args = {name: _number(v) for name, v in at.items()}
         for name, c in key:
-            args[name] = h * c if at[name] == 0 else (R(1.0) + h * c) * at[name]
+            hc = h * _number(c)
+            if _is_batch(at[name]):
+                # per row: x0 + c*unit*h, the zero seed <c_-1> where x0 = 0
+                # and the relative x0*(1 + c h) elsewhere, in one composite
+                args[name] = args[name] + hc * _number(_unit(at[name]))
+            else:
+                args[name] = hc if at[name] == 0 else (R(1.0) + hc) * args[name]
         v = f(**args)
     finally:
         _cl.UNTAG()
@@ -131,6 +164,29 @@ def _record(f, at, quantities, runs, order):
             run = _run(f, at, [(x, quantities[x]) for x in subset], runs, order)
             total = total + run if (k - size) % 2 == 0 else total - run
     return total
+
+
+def _batch_scales(sizes, n):
+    """The same scaling for a batch (batch-dense backend), decided per row:
+    if any row is unbalanced every row gets its own scale -- scaling is valid in
+    a balanced row too -- else all stay 1, as for a single number.  Written in
+    the batch's own array module, so a recorded run (batch_replay) keeps it."""
+    import numpy as np
+    from composite.backends.batch_dense_backend import Lanes, _xp
+    ref = next(z.v for z in sizes if isinstance(z, Lanes))
+    xp = _xp(ref)
+    z = [z.v if isinstance(z, Lanes) else xp.full(ref.shape, float(z)) for z in sizes]
+    live = xp.stack([xp.where(v > 0, v, xp.nan) for v in z])
+    with np.errstate(all="ignore"):
+        ratio = xp.nanmax(live, axis=0) / xp.nanmin(live, axis=0)
+        if not Lanes((z[0] > 0) & (ratio > BALANCE)):
+            return [1.0] * len(sizes)
+        out = [1.0]
+        for j in range(1, len(sizes)):
+            ok = (z[0] > 0) & (z[j] > 0)
+            safe = xp.where(ok, z[j], 1.0)
+            out.append(Lanes(xp.where(ok, (z[0] / safe) ** (1.0 / n), 1.0)))
+    return out
 
 
 def _rank(rows):
@@ -186,11 +242,14 @@ def _partial(f, at, orders, runs, order):
     # first input keeps 1.
     sizes = [abs(_run(f, at, [(x, 1)], runs, order).coeff(-n)) for x in names]
     s = [1.0] * k
-    live = [z for z in sizes if z > 0]
-    if sizes[0] > 0 and live and max(live) / min(live) > BALANCE:
-        for j in range(1, k):
-            if sizes[j] > 0:
-                s[j] = (sizes[0] / sizes[j]) ** (1.0 / n)
+    if any(hasattr(z, "v") for z in sizes):
+        s = _batch_scales(sizes, n)
+    else:
+        live = [z for z in sizes if z > 0]
+        if sizes[0] > 0 and live and max(live) / min(live) > BALANCE:
+            for j in range(1, k):
+                if sizes[j] > 0:
+                    s[j] = (sizes[0] / sizes[j]) ** (1.0 / n)
 
     # every multi-index reaching grade -n with every input moving
     unknowns = [m for m in product(range(1, n - k + 2), repeat=k) if sum(m) == n]
@@ -205,7 +264,7 @@ def _partial(f, at, orders, runs, order):
                     candidates.append(c)
     chosen, rows = [], []
     for c in candidates:
-        if any(at[names[i]] == at[names[j]] and c[i] * s[i] == c[j] * s[j]
+        if any(_same_seed(at[names[i]], at[names[j]], c[i] * s[i], c[j] * s[j])
                for i in range(k) for j in range(i + 1, k)):
             continue                                   # identical seeds
         row = [prod(Fraction(cj) ** mj for cj, mj in zip(c, m)) for m in unknowns]

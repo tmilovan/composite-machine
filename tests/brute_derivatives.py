@@ -208,6 +208,14 @@ def ev(t, seed, a, events):
     raise ValueError(k)
 
 
+def _one(v):
+    """A value as a float.  On the batch-dense backend (a batch of one) a
+    coefficient is a batch vector; its single row is the value."""
+    if v.__class__.__name__ == "Lanes":
+        return float(v.v[0])
+    return v
+
+
 def ref_derivs(f, a):
     """Derivatives 0..NMAX, or 'domain' / 'unreliable'."""
     runs = []
@@ -279,7 +287,7 @@ def run(ncases, zeros, rng_seed):
             got = []
             for n in range(NMAX + 1):
                 try:
-                    got.append(comp.st() if n == 0 else comp.d(n))
+                    got.append(_one(comp.st() if n == 0 else comp.d(n)))
                 except cl.StandardPartUndefinedError:
                     got.append(float("inf"))
                 except NotImplementedError:
@@ -332,14 +340,22 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=1,
                     help="base seed; the zero-injected class uses seed + 1")
     ap.add_argument("--backend", default="sparse_dense",
-                    choices=["sparse_dense", "dict", "dense_series", "fractional_dict"])
+                    choices=["sparse_dense", "dict", "dense_series", "fractional_dict",
+                             "batch_dense"])
+    ap.add_argument("--max-order", type=int, default=None,
+                    help="set_max_order(n) for the run (default: no cap)")
     args = ap.parse_args()
-    getattr(config, "use_" + args.backend)()
+    if args.backend == "batch_dense":
+        config.use_batch_dense(1)          # a batch of one: every case on the batch path
+    else:
+        getattr(config, "use_" + args.backend)()
     cl._refresh_constants()
+    cl.set_max_order(args.max_order)
     # the module-level names were bound at import, before the switch
     ZERO = cl.ZERO
     print(f"backend {type(get_backend()).__name__}, orders 0..{NMAX}, tol {TOL} rel, "
-          f"mpmath taylor at 40 and 60 digits (agree {AGREE}), seed {args.seed}/+1",
+          f"mpmath taylor at 40 and 60 digits (agree {AGREE}), seed {args.seed}/+1, "
+          f"max order {args.max_order}",
           flush=True)
     for label, zeros, rs in (("classical (no injected zeros)", False, args.seed),
                              ("zero-injected", True, args.seed + 1)):

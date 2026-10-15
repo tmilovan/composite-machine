@@ -8,6 +8,7 @@ import sys as _sys
 from .sparse_dense_backend import SparseDenseBackend
 from .dict_backend import DictBackend
 from .dense_series_backend import DenseSeriesBackend
+from .batch_dense_backend import BatchDenseBackend
 from .fractional_backend import (FractionalDictBackend,
                                  FractionalNumpyBackend,
                                  FractionalTorchBackend)
@@ -90,3 +91,10 @@ def use_fractional_torch(device="cpu", min_pairs=1 << 20, allow_float32=False):
     """
     set_backend(FractionalTorchBackend(device=device, min_pairs=min_pairs,
                                        allow_float32=allow_float32))
+
+
+def use_batch_dense(size, max_span=1 << 16, xp="numpy"):
+    """PROTOTYPE.  One composite holds a batch of `size` numbers sharing their
+    grades; each coefficient is a vector over the batch.  For dense work over
+    many inputs at once.  See batch_dense_backend.py for what it covers."""
+    set_backend(BatchDenseBackend(size, max_span=max_span, xp=xp))
