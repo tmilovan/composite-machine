@@ -11,6 +11,7 @@ Complete reference for the Composite Calculus library.
 - [Arithmetic Operations](#arithmetic-operations)
 - [Transcendental Functions](#transcendental-functions)
 - [High-Level Calculus API](#high-level-calculus-api)
+- [Partial Derivatives](#partial-derivatives)
 - [Extraction Methods](#extraction-methods)
 - [Zero Handling](#zero-handling)
 - [Utility Functions](#utility-functions)
@@ -658,6 +659,132 @@ fitted. Returns (Composite, nan): no error is estimated.
 val, err = improper_integral_to(lambda x: 1/sqrt(x), 0, 1)
 # val is <2_0 -2_-0.5>: 2, and the -2 sqrt(h) its lower limit h leaves
 ```
+
+---
+
+## Partial Derivatives
+
+`composite.partials` -- pure and mixed partial derivatives of a function of
+several inputs, read from seeded runs.
+
+```python
+from composite.partials import partial, partials, Runs, PartialError
+```
+
+Not exported from `composite` itself: a top-level `partial` would shadow
+`functools.partial` under `from composite import *`.
+
+### `partial(f, at, orders, runs=None, names=None)`
+
+One partial derivative of `f` at the point `at`, as a float in the units of `f`
+and its inputs.
+
+- **`f`** - any function written in composite operations, taking its inputs as
+  keywords. A function that takes them positionally works with `names=`.
+- **`at`** - the point: `{input: value}` with plain numbers, or a sequence in
+  `names` order.
+- **`orders`** - `{input: order}`. `{"x": 1}` is df/dx, `{"x": 2}` is d2f/dx2,
+  `{"x": 1, "y": 1}` is d2f/dxdy, `{"x": 2, "y": 1, "z": 1}` is d4f/dx2dydz.
+- **`runs`** - a `Runs` shared between calls at the same point, so each seeded
+  run is made once.
+
+```python
+from composite.composite_lib import exp, sin
+from composite.partials import partial, Runs
+
+f = lambda x, y, z: exp(x * y) * sin(z) + x * y**2 * z**3
+p = dict(x=0.5, y=1.2, z=0.7)
+runs = Runs()
+
+fx   = partial(f, p, {"x": 1}, runs)
+fxy  = partial(f, p, {"x": 1, "y": 1}, runs)
+fxxy = partial(f, p, {"x": 2, "y": 1}, runs)
+fxyz = partial(f, p, {"x": 1, "y": 1, "z": 1}, runs)
+```
+
+### `partials(f, at, requests, runs=None, names=None)`
+
+Several derivatives at one point, sharing their runs. `requests` maps a label to
+its `orders`; the result maps the same labels to values.
+
+```python
+from composite.partials import partials
+
+g = partials(f, p, {"fx":   {"x": 1},
+                    "fxy":  {"x": 1, "y": 1},
+                    "fxxy": {"x": 2, "y": 1},
+                    "fyz":  {"y": 1, "z": 1}})
+g["fxy"]
+```
+
+### How it works
+
+A **run** is one evaluation of `f` with some inputs carrying a zero. One run
+holds every order of what it seeds, so a pure partial is one run read at a grade
+-- `d(n)`, no differencing.
+
+A **mixed** partial is one **joint** run of its inputs minus the runs of every
+smaller combination of them (inclusion-exclusion over records). What remains
+starts at the target grade and holds only the terms that move every input. When
+several of those share the grade -- d3f/dx2dy and d3f/dxdy2 both reach grade -3
+-- joint runs with a different quantity of zero on an input separate them, with
+weights solved exactly in rationals and applied in composite arithmetic. The
+only finite-difference step is that final subtraction of records.
+
+This is a different method from `composite_multivar.partial_derivative`, which
+combines directional evaluations with interpolation weights.
+
+The run count follows what is asked for, not every possible combination. All
+sixteen derivative Greeks of a Black-Scholes price -- eleven pure, vanna, zomma,
+charm, color, veta -- take twelve runs.
+
+### Seeds
+
+The seeding is internal; the result never depends on it, only its precision
+does.
+
+- **Relative.** Each input carries a zero in its own units,
+  `x0 * (1 + c*h)` = `<x0_0 c*x0_-1>`, so the subtractions cancel terms of
+  comparable size. With a unit zero on inputs of very different sizes (100
+  beside 0.25) the mixed terms lose up to six digits.
+- **An input at 0** is seeded as the zero itself, `<c_-1>`.
+- **Equal inputs** never get the same quantity of zero: their seeds would be the
+  same number, and a difference like `x - y` at `x = y` would cancel exactly.
+- **Adaptive.** Where the inputs' own terms at the target grade are more than
+  `BALANCE` (1e3) apart, the quantities are scaled so they arrive at the same
+  size. That leaves a mixed term at |f_xy| / sqrt(|f_xx| |f_yy|) of its
+  coefficient, which is a property of `f`: below about 1e-13 of that, float64
+  holds no digit of it whatever the seeding. On a Black-Scholes price this
+  happens only deep in the money, for vol-time cross terms of order 1e-20 and
+  below.
+
+### Zeros and denotation
+
+Every run blesses one infinitesimal with `TAG` and builds every seed from it.
+Any other zero -- a data `0.0` meeting a seed (`r - q` at `q = 0`), `ln(1.0)`
+when two inputs have equal ratio, a cancellation -- then behaves as an ordinary
+zero, which is what holding the other inputs fixed means. A run that still comes
+back denoted (`f` cancels a seeded input exactly against itself) raises
+`PartialError` rather than returning the derivative of a different function.
+
+Calling `partial` inside `TAG()` or `single_infinitesimal()` raises
+`RuntimeError`: it blesses its own infinitesimal per run.
+
+### Depth
+
+The order cap is set to the order requested for the duration of the call and
+restored afterwards; no `set_max_order` is needed around it. A `Runs` remembers
+the order each run was made to and remakes one that is too shallow for a later
+request. `partials` runs everything to its deepest request, so its values can
+differ from separate `partial` calls in the last bit.
+
+### Errors
+
+- `TypeError` - `f` returned something that is not a composite (a `math.*` call
+  or a float cast dropped the seed).
+- `PartialError` - a run came back denoted.
+- `RuntimeError` - called inside TAG mode.
+- `KeyError` - an input in `orders` is not in `at`.
 
 ---
 

@@ -15,6 +15,7 @@ After months of experimenting, learning, building and testing different implemen
 
 **What it adds:**
 
+- pure and mixed partials of any order
 - refinements to zero handling edge cases
 - adds float dimensions, so we can finally take a square roots on composites with exact precision and remain composite
 - adds experimental support for vector dimensions which enables taking log of an
@@ -41,12 +42,12 @@ Out of a desire to create a computational system that doesn't lose data on opera
 In essence this system converts zeros to infinitesimals and tries to do arithmetic with them.
 
 ## What does it give? ##
- 
+
 The implementation leads to a data structure that implements a number system, letting different parts of non-standard (and standard) math work together.
 
 For example, it gives you derivatives, integrals, and limits as a side effect of normal computation. No symbolic engine, no computation graph, no tape. Tag a number, do your math, read the results off the dimensional coefficients.
 
-> Here *1 − 1 ≠ 0 - it is zero with residue* 
+> Here *1 − 1 ≠ 0 - it is zero with residue*
 >
 
 > *The residue is infinitesimal, structured, and it contains the derivative of every operation that produced it.*
@@ -214,6 +215,17 @@ gradient_at(lambda x, y: x**2 + y**2, [3, 4])  # [6, 8]
 laplacian_at(lambda x, y: x**2 + y**2, [3, 4]) # 4
 ```
 
+Pure and mixed partials of any order, read from seeded runs:
+
+```python
+from composite.composite_lib import exp
+from composite.partials import partial
+
+f = lambda x, y: exp(x * y) + x * y**3
+partial(f, dict(x=0.5, y=1.2), {"x": 1, "y": 1})   # d2f/dxdy
+partial(f, dict(x=0.5, y=1.2), {"x": 2, "y": 1})   # d3f/dx2dy
+```
+
 ### Complex analysis
 
 ```python
@@ -229,6 +241,7 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 
 - **[composite_lib.py](composite/composite_lib.py)** - Core engine. Composite class, all arithmetic, transcendentals, derivatives, limits, integration.
 - **[composite_multivar.py](composite/composite_multivar.py)** - Multivariable calculus by directional composites: ordinary composites evaluated along several directions. Partial derivatives, gradient, Hessian, Jacobian, Laplacian, divergence, curl, limits. (The former MC class is parked in `composite_multivar_mc.py`.)
+- **[partials.py](composite/partials.py)** - Pure and mixed partial derivatives of any order from seeded runs: one run per input, mixed terms by subtracting the records of joint runs. Handles zero and equal inputs and badly balanced scales; see the API Reference.
 - **[composite_extended.py](composite/composite_extended.py)** - Complex analysis. Complex composites, residues, poles, contour integrals, asymptotics, ODE solver.
 - **[composite_vector.py](composite/composite_vector.py)** - Vector calculus. Triple integrals, line integrals, surface integrals.
 - **[backends/](composite/backends/)** - Interchangeable storage for the dimension map: dict, sparse-dense, vector-dimension, dense-series, and fractional (exact rational lattice; dict, NumPy and PyTorch flavours).
@@ -427,6 +440,7 @@ Pytest modules:
 | `test_degeneracy.py` | 70 | flagging a Taylor reading that a second infinitesimal source has entered |
 | `test_multivar_disprove.py` | 71 | multivariable vs single-variable, Black-Scholes Greeks |
 | `test_multivar_jets.py` | 85 | directional composites against 50-digit mpmath |
+| `test_partials.py` | 30 | pure and mixed partials against exact formulas and 50-digit mpmath: zero, equal and unbalanced inputs, shared runs, refusals |
 | `test_multivar_backends.py` | 65 | the multivariable functions on every storage backend |
 | `test_conventional_zero.py` | 51 | `conventional()`: an expressed zero as the ordinary zero, in scope |
 | `test_single_infinitesimal.py` | 37 | `TAG()` and `single_infinitesimal()`: one blessed infinitesimal, conventional rest |
