@@ -717,6 +717,14 @@ def _r1(c, sibling=None):
         return c                       # not the tagged lineage: conventional
     if not _is_wholly_zero(c):
         return c
+    if getattr(c, "_batch_data", False):
+        # A batch of values handed in through R(lanes) is DATA,
+        # and its zeros behave as TAG() treats every zero outside its lineage:
+        # conventionally.  R(a) + ZERO over a batch is then <a_0 1_-1> in every
+        # row -- TAG's own seed at a -- whether the zeros are in some rows or in
+        # all of them.  Converting only when every row is zero gave <|2|_-1> for
+        # an all-zero batch and <|0|_0 |1|_-1> for the same row among nonzero ones.
+        return c
     dims, vals = c._backend.to_arrays(c._data)
     if len(dims) == 0:
         return c                       # NOTHING has no dimension to convert
@@ -1264,9 +1272,13 @@ class _MathDispatch:
                 ok_in &= np.isfinite(u)
             bad = ok_in & ~np.isfinite(out)
         if np.any(bad):
+            # name the rows, so a batch can set them aside (run_batch)
             if name in self._OVERFLOWS and not np.any(bad & np.isnan(out)):
-                raise OverflowError("math range error")
-            raise ValueError("math domain error")
+                err = OverflowError("math range error")
+            else:
+                err = ValueError("math domain error")
+            err.batch_rows = np.asarray(bad, dtype=bool)
+            raise err
         return lanes.__class__(out)
 
     def exp(self, x): return self._apply(math.exp, "exp", x)
@@ -1310,7 +1322,7 @@ class Composite:
     # It cannot be inferred from the coefficients: _seeded(t) is exact with max
     # order 1, sin(x*x) is truncated with max order 11, and both merely look
     # like "max order K".  So it is carried.
-    __slots__ = ['_data', '_backend', '_complete', '_denot', '_src', '_deg']
+    __slots__ = ['_data', '_backend', '_complete', '_denot', '_src', '_deg', '_batch_data']
 
     def __init__(self, coefficients=None, _data=None):
         self._backend = get_backend()
@@ -1456,7 +1468,13 @@ class Composite:
                 "converting one collapses it to its standard part. If the "
                 "value is already a composite, use it directly.")
         if value.__class__.__name__ == "Lanes":
-            return cls({0: value})       # a batch of reals (batch-dense backend)
+            # A batch of reals handed in (batch-dense backend) is DATA: R1 leaves
+            # its zeros alone, as TAG does (see _r1).  Only R() marks it -- the
+            # library builds Composite({...}) from batch coefficients internally,
+            # and those zeros are written ones that must still convert.
+            c = cls({0: value})
+            c._batch_data = True
+            return c
         return cls({0: float(value)})
 
     # -------------------------------------------------------------------------
@@ -2514,6 +2532,8 @@ def R(x):
             "to its standard part -- float(|2|_0 + |1|_-1) is 2.0 -- which is how "
             "power(1+x, 1/x) returned 1.0. If the value is already a composite, "
             "use it directly.")
+    if x.__class__.__name__ == "Lanes":
+        return Composite.real(x)       # batch data, before `x == 0`: see real()
     if x == 0:
         return Composite({0: 0.0})     # latent: _r1 converts it at the point of use
     return Composite.real(x)

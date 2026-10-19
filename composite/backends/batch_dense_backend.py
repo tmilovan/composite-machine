@@ -82,7 +82,20 @@ def _all(a):
 
 
 class BatchDecisionError(ValueError):
-    """A decision the library makes per number differs between batch rows."""
+    """A decision the library makes per number differs between batch rows.
+
+    batch_rows: a boolean mask of the rows to set aside -- the minority side of
+    the decision -- or None when it is not known."""
+
+    def __init__(self, message, batch_rows=None):
+        super().__init__(message)
+        self.batch_rows = batch_rows
+
+
+def _minority(r):
+    """The smaller side of a per-row decision, as a boolean mask."""
+    r = np.asarray(getattr(r, "val", r), dtype=bool)
+    return r if r.sum() <= r.size - r.sum() else ~r
 
 
 class Lanes:
@@ -135,11 +148,13 @@ class Lanes:
     def __eq__(self, o):
         o = Lanes._o(o)
         if isinstance(o, (int, float)) and o == 0:
-            return _all(self.v == 0.0)
+            # one pass, no temporary: any() reads -0.0 as zero and NaN as
+            # nonzero, exactly as v == 0 does
+            return not _any(self.v)
         return self._order(self.v == o)
 
     def __ne__(self, o): return not self.__eq__(o)
-    def __bool__(self): return _any(self.v != 0.0)
+    def __bool__(self): return _any(self.v)      # nonzero in any row
     def __hash__(self):          # consistent with ==: equal in every row
         # (equal hashes compare with ==, which raises only for rows that differ
         # in part; a key with equal bytes is equal in every row)
@@ -152,7 +167,8 @@ class Lanes:
             return False
         raise BatchDecisionError(
             "a comparison the library makes per number has different answers "
-            "in different batch rows; split the batch or use a per-number backend")
+            "in different batch rows; split the batch or use a per-number backend",
+            batch_rows=_minority(r))
 
     def __lt__(self, o): return self._order(self.v < Lanes._o(o))
     def __le__(self, o): return self._order(self.v <= Lanes._o(o))
@@ -267,7 +283,10 @@ class BatchDenseBackend(CompositeBackend):
             out = self._zeros(span).at[idx].add(rows)
         else:
             out = self._zeros(span)
-            np.add.at(out, idx, rows)
+            if np.unique(idx).size == idx.size:
+                out[idx] = rows          # distinct grades: a plain write
+            else:
+                np.add.at(out, idx, rows)   # a grade repeats: sum its rows
         return BatchData(offset, step, out)
 
     # ---- access ------------------------------------------------------------
@@ -382,7 +401,8 @@ class BatchDenseBackend(CompositeBackend):
         lead = b.vals[lead_k]
         if not _all(lead != 0.0):
             raise BatchDecisionError(
-                "the divisor's leading grade is zero in some batch rows and not others")
+                "the divisor's leading grade is zero in some batch rows and not others",
+                batch_rows=_minority(lead != 0.0))
         bv = b.vals[:lead_k + 1][::-1]                 # descending
         terms = max(a.vals.shape[0] + b.vals.shape[0], min_terms)
         rem = self._set_at(self._zeros(max(terms, a.vals.shape[0])),
@@ -419,3 +439,109 @@ class BatchDenseBackend(CompositeBackend):
 
     def negate(self, data: BatchData) -> BatchData:
         return BatchData(data.offset, data.step, -data.vals)
+
+
+# --- running a batch that may fail in some rows ---------------------------------
+
+class BatchResult:
+    """What run_batch returns.
+
+    values  {name: float64 array over every input row}; NaN in a row that failed
+            (empty if no run succeeded, so no output name is known)
+    errors  {row index: "ExceptionType: message"} for every row that failed --
+            NaN alone is not the signal, a computed value can be NaN
+    runs    how many batch runs it took, the first included
+    rows    how many input rows there were
+    """
+
+    def __init__(self, values, errors, runs, rows):
+        self.values, self.errors, self.runs, self.rows = values, errors, runs, rows
+
+    def __repr__(self):
+        return f"BatchResult({self.rows} rows, {len(self.errors)} failed, {self.runs} runs)"
+
+
+def _as_rows(v, n):
+    v = getattr(v, "v", v)
+    return np.broadcast_to(np.asarray(v, dtype=np.float64), (n,)).copy()
+
+
+def run_batch(fn, inputs, strict=False, max_runs=64):
+    """Run fn over a batch; when it fails, set aside the rows that caused it and
+    run the rest again.
+
+        fn       fn(**{name: Lanes}) -> {name: value} or one value; each value a
+                 Lanes, an array over the rows, or a number
+        inputs   {name: array}, every array the same length
+        strict   raise the first error, as a plain batch call does
+
+    A row is never computed it can not be vouched for: an error that names its
+    rows (a decision that differs between rows, an overflow or domain error in
+    some rows) has those rows taken out and the rest run again.  Rows taken out
+    by a DECISION are not wrong, they take another path: they are run again as
+    their own batch, through this same function.  Rows taken out by a numeric
+    error are reported in BatchResult.errors.
+
+    An error that names no rows, raised while every row decided alike, is the
+    same error for every row of that batch and is reported for all of them.
+    Errors other than ValueError and ArithmeticError -- a fault in the code
+    rather than in the data -- are raised.
+
+    The backend in force before the call is restored afterwards.
+    """
+    import composite.composite_lib as cl
+    from composite.backends import config
+    names = list(inputs)
+    arrays = {k: np.asarray(inputs[k], dtype=np.float64) for k in names}
+    n = len(arrays[names[0]])
+    if any(a.shape != (n,) for a in arrays.values()):
+        raise ValueError("run_batch: inputs of different lengths")
+    old = config.get_backend()
+    values, errors, runs = {}, {}, [0]
+
+    def attempt(rows):
+        config.use_batch_dense(len(rows))
+        cl._refresh_constants()
+        runs[0] += 1
+        out = fn(**{k: Lanes(arrays[k][rows]) for k in names})
+        single = not isinstance(out, dict)
+        out = {None: out} if single else out
+        for key, v in out.items():
+            col = values.setdefault(key, np.full(n, np.nan))
+            col[rows] = _as_rows(v, len(rows))
+
+    def solve(rows):
+        pending = [rows]
+        while pending:
+            rows = pending.pop()
+            while len(rows):
+                if runs[0] >= max_runs:
+                    for i in rows:
+                        errors[int(i)] = "RuntimeError: run_batch stopped after max_runs runs"
+                    return
+                try:
+                    attempt(rows)
+                    break
+                except (ValueError, ArithmeticError) as e:
+                    if strict:
+                        raise
+                    mask = getattr(e, "batch_rows", None)
+                    if mask is None or np.shape(mask) != (len(rows),) or not np.any(mask):
+                        for i in rows:
+                            errors[int(i)] = f"{type(e).__name__}: {e}"
+                        break
+                    out_rows, rows = rows[mask], rows[~mask]
+                    if isinstance(e, BatchDecisionError):
+                        pending.append(out_rows)            # another path, not an error
+                    else:
+                        for i in out_rows:
+                            errors[int(i)] = f"{type(e).__name__}: {e}"
+
+    try:
+        solve(np.arange(n))
+    finally:
+        config.set_backend(old)
+        cl._refresh_constants()
+    if None in values and len(values) == 1:
+        values = {"value": values[None]}
+    return BatchResult(values, errors, runs[0], n)

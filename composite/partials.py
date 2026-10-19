@@ -85,10 +85,11 @@ class Runs:
 
 def _number(v):
     """A point value as f receives it: a plain number as it is; a batch of
-    values (batch-dense backend) as the composite constant holding them."""
+    values (batch-dense backend) as R() of it, the composite constant holding
+    them, marked as data."""
     if isinstance(v, (int, float, Composite)):
         return v
-    return Composite({0: v})
+    return R(v)                  # batch data: R() marks it as a value
 
 
 def _is_batch(v):
@@ -171,13 +172,17 @@ def _batch_scales(sizes, n):
     if any row is unbalanced every row gets its own scale -- scaling is valid in
     a balanced row too -- else all stay 1, as for a single number.  Written in
     the batch's own array module, so a recorded run (batch_replay) keeps it."""
+    import warnings
     import numpy as np
     from composite.backends.batch_dense_backend import Lanes, _xp
     ref = next(z.v for z in sizes if isinstance(z, Lanes))
     xp = _xp(ref)
     z = [z.v if isinstance(z, Lanes) else xp.full(ref.shape, float(z)) for z in sizes]
     live = xp.stack([xp.where(v > 0, v, xp.nan) for v in z])
-    with np.errstate(all="ignore"):
+    with np.errstate(all="ignore"), warnings.catch_warnings():
+        # a row with no input's term at the grade is all NaN: its ratio is NaN,
+        # which is not > BALANCE, so the row stays unscaled -- the intended reading
+        warnings.filterwarnings("ignore", message="All-NaN slice", category=RuntimeWarning)
         ratio = xp.nanmax(live, axis=0) / xp.nanmin(live, axis=0)
         if not Lanes((z[0] > 0) & (ratio > BALANCE)):
             return [1.0] * len(sizes)
