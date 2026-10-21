@@ -55,6 +55,7 @@ from composite.composite_lib import Composite, R, ZERO
 from composite.uncertainty import (Quantity, budget, montecarlo,
                                    NORMAL, RECTANGULAR, SENSITIVITY_ALARM)
 from test_dimension_scales import Suite, head
+from tests.zero_modes import cancellation
 
 cl.MAX_ACTIVE_DIMS = 10 ** 9
 
@@ -383,9 +384,21 @@ def u12_zero_estimate_is_absent(t):
     from composite.uncertainty import _seed
     bare = _seed({"a": 0.0, "b": 0.0}, {"a": 1.0}, zero_absent=False)
     absent = _seed({"a": 0.0, "b": 0.0}, {"a": 1.0}, zero_absent=True)
-    t.close(f"U12.05 bare 0.0 for the un-seeded input gives df/da = "
-            f"{_comparison_loss(**bare).d(1)}, which is wrong",
-            _comparison_loss(**bare).d(1), -1.0, tol=1e-15)
+    # 1 - a*a - b*b with b a bare 0.0: b*b is the float 0.0, and the last
+    # subtraction meets a WRITTEN zero.  What that zero does is the
+    # cancellation rule, so the hazard is pinned per rule:
+    #   mechanical        R1 converts it and the minus applies: -ZERO, df/da = -1
+    #   convert_and_keep  it converts and is kept (K1), then the minus applies
+    #                     (K2): -ZERO, df/da = -1, as under mechanical
+    #   natural           it is counted and adds nothing (N4): df/da = 0, the
+    #                     same as the absent spelling -- no hazard under this rule
+    for rule, want, verdict in (("mechanical", -1.0, "which is wrong"),
+                                ("convert_and_keep", -1.0, "which is wrong"),
+                                ("natural", 0.0, "the same as absent")):
+        with cancellation(rule):
+            got = _comparison_loss(**bare).d(1)
+            t.close(f"U12.05 {rule}: bare 0.0 for the un-seeded input gives df/da = "
+                    f"{got}, {verdict}", got, want, tol=1e-15)
     t.close(f"U12.06 absent gives df/da = {_comparison_loss(**absent).d(1)}, "
             f"which is right", _comparison_loss(**absent).d(1), 0.0, tol=1e-15)
     t.close(f"U12.07 and d2f/da2 = {_comparison_loss(**absent).d(2)}, exact -2",

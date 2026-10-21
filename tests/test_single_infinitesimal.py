@@ -24,6 +24,7 @@ import pytest
 import composite.composite_lib as cl
 from composite.composite_lib import Composite, R, ZERO, exp, ln, sin, sqrt
 from composite.backends import config
+from tests.zero_modes import RULES, cancellation
 
 TAG = cl.TAG
 
@@ -198,11 +199,30 @@ def test_a_demoted_operand_keeps_its_own_backend(backend):
 
 # --- the mode leaves nothing behind -------------------------------------------
 
-def test_default_behaviour_outside_the_block_is_untouched():
-    x = R(3) + ZERO
-    assert (x * x + R(0)).d(1) == 7.0, "the denoted reading changed outside the mode"
-    assert grades(R(6) - R(6)) == {-1: 6.0}
-    assert grades(R(1) / R(0)) == {1: 1.0}
+# Outside TAG, per rule:
+#   x*x + R(0) at 3, d(1): mechanical 7 (R6, the zero converts to h);
+#     natural 6 (N4, the zero is counted away); convert_and_keep 7 (K1, it
+#     converts and is kept).
+#   6 - 6: mechanical |6|_-1 (a - a = a*h); natural and convert_and_keep
+#     <|0|_0> (N2).
+OUTSIDE_TAG = {
+    "mechanical": (7.0, {-1: 6.0}),
+    "natural": (6.0, {0: 0.0}),
+    "convert_and_keep": (7.0, {0: 0.0}),
+}
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_default_behaviour_outside_the_block_is_untouched(rule):
+    want_d1, want_cancel = OUTSIDE_TAG[rule]
+    with cancellation(rule):
+        x = R(3) + ZERO
+        got = (x * x + R(0)).d(1)
+        assert got == want_d1, f"[{rule}] the denoted reading changed outside the mode: got {got}, want {want_d1}"
+        got = grades(R(6) - R(6))
+        assert got == want_cancel, f"[{rule}] 6 - 6: got {got}, want {want_cancel}"
+        got = grades(R(1) / R(0))
+        assert got == {1: 1.0}, f"[{rule}] 1/0: got {got}, want {{1: 1.0}}"
 
 
 def test_tag_arms_the_mode_by_itself():
@@ -213,14 +233,20 @@ def test_tag_arms_the_mode_by_itself():
     assert (x * x + (R(2) - R(2))).d(1) == 6.0
 
 
-def test_untag_restores_the_default():
-    x = TAG(3)
-    assert (x * x + R(0)).d(1) == 6.0
-    assert cl.UNTAG() is True, "UNTAG reported the mode was not on"
-    y = R(3) + ZERO
-    assert (y * y + R(0)).d(1) == 7.0, "the denoted reading did not come back"
-    assert grades(R(6) - R(6)) == {-1: 6.0}
-    assert cl.UNTAG() is False, "UNTAG should be safe when the mode is off"
+@pytest.mark.parametrize("rule", RULES)
+def test_untag_restores_the_default(rule):
+    want_d1, want_cancel = OUTSIDE_TAG[rule]
+    with cancellation(rule):
+        x = TAG(3)
+        got = (x * x + R(0)).d(1)
+        assert got == 6.0, f"[{rule}] inside TAG: got {got}, want 6.0"
+        assert cl.UNTAG() is True, "UNTAG reported the mode was not on"
+        y = R(3) + ZERO
+        got = (y * y + R(0)).d(1)
+        assert got == want_d1, f"[{rule}] the reading after UNTAG: got {got}, want {want_d1}"
+        got = grades(R(6) - R(6))
+        assert got == want_cancel, f"[{rule}] 6 - 6: got {got}, want {want_cancel}"
+        assert cl.UNTAG() is False, "UNTAG should be safe when the mode is off"
 
 
 def test_degeneracy_tracking_is_restored_on_exit():

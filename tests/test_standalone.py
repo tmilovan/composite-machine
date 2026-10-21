@@ -53,6 +53,7 @@ from composite.composite_lib import (
     derivative, nth_derivative, all_derivatives,
     limit, antiderivative,
 )
+from tests.zero_modes import RULES, cancellation
 
 
 # =============================================================================
@@ -592,23 +593,39 @@ def test_algebraic_properties():
     lhs_add = (a + b) + c
     rhs_add = a + (b + c)
     suite.assert_true("Additive associativity", lhs_add.c == rhs_add.c)
-    # a - a = a*h: a cancellation carries the annihilated QUANTITY, one grade
-    # down, so a + (-a) is a*h and not a zero awaiting conversion.  Dimension 0
-    # still holds nothing -- the value is gone, which is the part that has to be
-    # right -- and the quantity reappears from grade -1 down.
     neg_a = -a
-    sum_zero = a + neg_a
-    suite.assert_eq("a + (-a) leaves nothing at dim 0", sum_zero.c.get(0, 0), 0)
-    suite.assert_eq("a + (-a) carries a at dim -1", sum_zero.c.get(-1, 0), 3)
-    suite.assert_eq("a + (-a) carries a at dim -2", sum_zero.c.get(-2, 0), 2)
-    suite.assert_true("a + (-a) == a * ZERO", sum_zero.c == (a * ZERO).c)
-    # THE COST OF THAT RULE, asserted so it cannot drift unnoticed: the
-    # annihilated quantity is read from the LEFT operand, and in `a + (-a)` the
-    # two operands are not the same quantity, so the two orders disagree.  In
-    # `a - a` they are, which is why subtraction has no such ambiguity.
-    suite.assert_true("and a + (-a) != (-a) + a, since the left operand decides",
-                      (a + neg_a).c != (neg_a + a).c)
-    suite.assert_true("while a - a has no ambiguity", (a - a).c == (a * ZERO).c)
+    # MECHANICAL cancellation: a - a = a*h, a cancellation carries the
+    # annihilated QUANTITY, one grade down, so a + (-a) is a*h and not a zero
+    # awaiting conversion.  Dimension 0 still holds nothing -- the value is
+    # gone, which is the part that has to be right -- and the quantity
+    # reappears from grade -1 down.
+    with cancellation("mechanical"):
+        sum_zero = a + neg_a
+        suite.assert_eq("mechanical: a + (-a) leaves nothing at dim 0", sum_zero.c.get(0, 0), 0)
+        suite.assert_eq("mechanical: a + (-a) carries a at dim -1", sum_zero.c.get(-1, 0), 3)
+        suite.assert_eq("mechanical: a + (-a) carries a at dim -2", sum_zero.c.get(-2, 0), 2)
+        suite.assert_true("mechanical: a + (-a) == a * ZERO", sum_zero.c == (a * ZERO).c,
+                          f"got={sum_zero.c}  want={(a * ZERO).c}")
+        # THE COST OF THAT RULE, asserted so it cannot drift unnoticed: the
+        # annihilated quantity is read from the LEFT operand, and in `a + (-a)`
+        # the two operands are not the same quantity, so the two orders
+        # disagree.  In `a - a` they are, which is why subtraction has no such
+        # ambiguity.
+        suite.assert_true("mechanical: and a + (-a) != (-a) + a, since the left operand decides",
+                          (a + neg_a).c != (neg_a + a).c,
+                          f"a + (-a) = {(a + neg_a).c}  (-a) + a = {(neg_a + a).c}")
+        suite.assert_true("mechanical: while a - a has no ambiguity", (a - a).c == (a * ZERO).c,
+                          f"got={(a - a).c}  want={(a * ZERO).c}")
+    # NATURAL and CONVERT-AND-KEEP: + and - count (N1) and a cancelled real or
+    # infinitesimal grade stays where it was as an inert |0|_k (N2).  Neither
+    # operand is wholly zero, so convert-and-keep's K1 does not apply.  No
+    # residue, so the order of the operands no longer matters.
+    for rule in ("convert_and_keep", "natural"):
+        with cancellation(rule):
+            want = {0: 0.0, -1: 0.0}
+            suite.assert_eq(f"{rule}: a + (-a) leaves |0|_0 |0|_-1", (a + neg_a).c, want)
+            suite.assert_eq(f"{rule}: (-a) + a is the same", (neg_a + a).c, want)
+            suite.assert_eq(f"{rule}: a - a is the same", (a - a).c, want)
     return suite.report()
 
 
@@ -909,20 +926,32 @@ def test_subtraction_rules():
     z3 = ZERO * ZERO * ZERO
     z4 = ZERO * ZERO * ZERO * ZERO
 
-    # Rule 1: R(5)-R(5) shifts to dim[-1] and the residue IS what cancelled.
-    # The magnitude exists only at the cancellation site, so it is read there;
-    # a residue of 1 regardless of operand is what made the conversion
-    # inhomogeneous, and multiplication could not distribute across it.
-    r55 = R(5) - R(5)
-    suite.assert_eq("R(5)-R(5) has no standard part", r55.st(), 0)
-    suite.assert_eq("R(5)-R(5) leaves nothing at dim[0]", r55.coeff(0), 0)
-    suite.assert_eq("R(5)-R(5) leaves 5 at dim[-1]", r55.coeff(-1), 5)
+    # Rule 1 (MECHANICAL): R(5)-R(5) shifts to dim[-1] and the residue IS what
+    # cancelled.  The magnitude exists only at the cancellation site, so it is
+    # read there; a residue of 1 regardless of operand is what made the
+    # conversion inhomogeneous, and multiplication could not distribute across it.
+    with cancellation("mechanical"):
+        r55 = R(5) - R(5)
+        suite.assert_eq("mechanical: R(5)-R(5) has no standard part", r55.st(), 0)
+        suite.assert_eq("mechanical: R(5)-R(5) leaves nothing at dim[0]", r55.coeff(0), 0)
+        suite.assert_eq("mechanical: R(5)-R(5) leaves 5 at dim[-1]", r55.coeff(-1), 5)
 
-    # Rule 2: same shape, magnitude 1, which is the 1 - 1 != 0 statement
-    r11 = R(1) - R(1)
-    suite.assert_eq("R(1)-R(1) has no standard part", r11.st(), 0)
-    suite.assert_eq("R(1)-R(1) leaves nothing at dim[0]", r11.coeff(0), 0)
-    suite.assert_eq("R(1)-R(1) leaves 1 at dim[-1]", r11.coeff(-1), 1)
+        # Rule 2: same shape, magnitude 1, which is the 1 - 1 != 0 statement
+        r11 = R(1) - R(1)
+        suite.assert_eq("mechanical: R(1)-R(1) has no standard part", r11.st(), 0)
+        suite.assert_eq("mechanical: R(1)-R(1) leaves nothing at dim[0]", r11.coeff(0), 0)
+        suite.assert_eq("mechanical: R(1)-R(1) leaves 1 at dim[-1]", r11.coeff(-1), 1)
+
+    # Rules 1-2 under NATURAL and CONVERT-AND-KEEP: + and - count (N1), so a
+    # cancellation of two reals leaves the written zero <|0|_0> (N2), the same
+    # number as R(0), and no residue.
+    for rule in ("convert_and_keep", "natural"):
+        with cancellation(rule):
+            for v in (5, 1):
+                d = R(v) - R(v)
+                suite.assert_eq(f"{rule}: R({v})-R({v}) has no standard part", d.st(), 0)
+                suite.assert_eq(f"{rule}: R({v})-R({v}) is <|0|_0>", d.c, {0: 0.0})
+                suite.assert_eq(f"{rule}: R({v})-R({v}) == R(0)", d == R(0), True)
 
     # Rules 3-6: 0**a - 0**a = 0**(a+1).
     # Compared as NUMBERS, not as coefficient dicts.  Subtraction leaves the
@@ -931,21 +960,44 @@ def test_subtraction_rules():
     # are one number with two spellings, so `==` is the right test and
     # `.c == .c` is not.
 
-    # Rule 3: R(0)-R(0) = ZERO-ZERO = 0² = ZERO² (R(0) is ZERO)
-    r00 = R(0) - R(0)
-    suite.assert_eq("R(0)-R(0) = ZERO²", r00 == z2, True)
+    # Rule 3 (MECHANICAL): R(0)-R(0) = ZERO-ZERO = 0² = ZERO² (R(0) is ZERO)
+    with cancellation("mechanical"):
+        r00 = R(0) - R(0)
+        suite.assert_eq("mechanical: R(0)-R(0) = ZERO²", r00 == z2, True)
+    # Rule 3 under CONVERT-AND-KEEP: both written zeros convert and are kept
+    # (K1), then the minus applies (K2): ZERO - ZERO is counted to <|0|_-1>,
+    # which == reads through R1 as ZERO**2, as under mechanical.  A further
+    # - 0 converts that zero again: 0 - 0 - 0 is <|-1|_-1 |1|_-2>.
+    with cancellation("convert_and_keep"):
+        r00 = R(0) - R(0)
+        suite.assert_eq("convert_and_keep: R(0)-R(0) is <|0|_-1>", r00.c, {-1: 0.0})
+        suite.assert_eq("convert_and_keep: R(0)-R(0) == ZERO²", r00 == z2, True)
+        r000 = R(0) - R(0) - R(0)
+        suite.assert_eq("convert_and_keep: R(0)-R(0)-R(0) is <|-1|_-1 |1|_-2>",
+                        r000.c, {-1: -1.0, -2: 1.0})
+    # Rule 3 under NATURAL: two wholly zero operands are counted without R1
+    # (N4), so 0 - 0 is the written zero again.
+    with cancellation("natural"):
+        r00 = R(0) - R(0)
+        suite.assert_eq("natural: R(0)-R(0) is <|0|_0>", r00.c, {0: 0.0})
+        suite.assert_eq("natural: R(0)-R(0) == R(0)", r00 == R(0), True)
 
-    # Rule 4: ZERO-ZERO = 0² = ZERO² (same as rule 3)
-    zz = ZERO - ZERO
-    suite.assert_eq("ZERO-ZERO = ZERO²", zz == z2, True)
+    # Rules 4-6 hold under every rule: ZERO**k is not wholly zero, so the
+    # cancellation leaves |0|_-k (or, mechanically, its residue), which `==`
+    # reads as ZERO**(k+1).
+    for rule in RULES:
+        with cancellation(rule):
+            # Rule 4: ZERO-ZERO = 0² = ZERO² (same as rule 3)
+            zz = ZERO - ZERO
+            suite.assert_eq(f"{rule}: ZERO-ZERO = ZERO²", zz == z2, True)
 
-    # Rule 5: ZERO²-ZERO² = 0³ = ZERO³
-    z2z2 = z2 - z2
-    suite.assert_eq("ZERO²-ZERO² = ZERO³", z2z2 == z3, True)
+            # Rule 5: ZERO²-ZERO² = 0³ = ZERO³
+            z2z2 = z2 - z2
+            suite.assert_eq(f"{rule}: ZERO²-ZERO² = ZERO³", z2z2 == z3, True)
 
-    # Rule 6: ZERO³-ZERO³ = 0⁴ = ZERO⁴
-    z3z3 = z3 - z3
-    suite.assert_eq("ZERO³-ZERO³ = ZERO⁴", z3z3 == z4, True)
+            # Rule 6: ZERO³-ZERO³ = 0⁴ = ZERO⁴
+            z3z3 = z3 - z3
+            suite.assert_eq(f"{rule}: ZERO³-ZERO³ = ZERO⁴", z3z3 == z4, True)
 
     # Rule 7: normal subtraction still works
     suite.assert_eq("R(5)-R(3) = 2", (R(5) - R(3)).st(), 2)

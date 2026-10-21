@@ -18,6 +18,7 @@ import composite.composite_lib as cl
 import composite.display as display
 from composite.composite_lib import Composite, R, ZERO, ln, sin, sqrt
 from composite.backends import config
+from tests.zero_modes import RULES, cancellation
 
 
 @pytest.fixture(autouse=True)
@@ -64,18 +65,29 @@ def test_a_plain_jet_reads_the_same_on_every_backend(backend):
 
 # --- the three states the string does not show -------------------------------
 
-def test_a_denoted_jet_is_flagged_on_every_affected_row():
+# d(1) of x*x*(R(2) - R(2)) + x*x at 3, per rule.
+#   mechanical: 2 - 2 = 2h, so the value denotes x**2 + 2x**2(x - 3): d(1) = 24.
+#   natural, convert_and_keep: 2 - 2 is counted to <|0|_0> (N2), which R1 turns
+#     into h in the product: x**2 + x**2(x - 3), d(1) = 15.
+DENOTED_D1 = {"mechanical": 24, "natural": 15, "convert_and_keep": 15}
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_a_denoted_jet_is_flagged_on_every_affected_row(rule):
     # One operand went through a cancellation, so the coefficients are the
     # derivatives of the function the expression DENOTES, not of x*x.  The
     # string |9|_0 + |24|_-1 + ... gives no sign of that.
-    x = R(3) + ZERO
-    value = x * x * (R(2) - R(2)) + x * x
-    assert value.denotation_order == 1.0, "got %r, want 1.0" % value.denotation_order
-    said = meanings(value)
+    with cancellation(rule):
+        x = R(3) + ZERO
+        value = x * x * (R(2) - R(2)) + x * x
+        assert value.denotation_order == 1.0, \
+            "[%s] got %r, want 1.0" % (rule, value.denotation_order)
+        said = meanings(value)
     assert "DENOTED" not in said[0], "grade 0 is order 0, below the marker: got %r" % said[0]
     for grade in (-1, -2, -3):
         assert "DENOTED" in said[grade], "grade %s: got %r, want the marker" % (grade, said[grade])
-    assert "d(1) = 24" in said[-1], "got %r, want 24 (the denoted first derivative)" % said[-1]
+    want = "d(1) = %d" % DENOTED_D1[rule]
+    assert want in said[-1], "[%s] got %r, want %s (the denoted first derivative)" % (rule, said[-1], want)
 
 
 def test_terms_past_complete_order_are_flagged():

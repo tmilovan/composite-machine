@@ -6,8 +6,11 @@ corner, a log divergence, a formula that loses digits, and the two escapes
 """
 import math
 
+import pytest
+
 from composite.composite_lib import Composite, R, ZERO, cos, ln, sin, sqrt
 from composite.explain import explain
+from tests.zero_modes import RULES, cancellation
 
 H = ZERO
 
@@ -30,14 +33,25 @@ def test_lead_order_handles_fractional_and_log_axes():
     assert (H * ln(H)).lead_order() == 1     # infinitesimal, despite the log factor
 
 
-def test_lead_order_skips_zero_coefficients_and_nothing():
+# lead_order of a cancellation, per rule.
+#   mechanical: it converts at the site and leads at first order, carrying the
+#     magnitude it annihilated (a - a = a*h).
+#   natural, convert_and_keep: it is counted to <|0|_0> (N2), all coefficients
+#     zero, so nothing leads, exactly as for Composite({0: 0.0}).
+CANCELLATION_LEAD = {"mechanical": 1, "natural": None, "convert_and_keep": None}
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_lead_order_skips_zero_coefficients_and_nothing(rule):
     assert Composite({}).lead_order() is None
     assert Composite({0: 0.0}).lead_order() is None  # all coefficients zero
-    # A CANCELLATION is no longer all-zero: it converts at the site and leads
-    # at first order, carrying the magnitude it annihilated.
-    assert (R(1) - R(1)).lead_order() == 1
-    assert (R(6) - R(6)).lead_order() == 1
-    assert ((R(1) + H) - H).lead_order() == 0        # the cancelled term does not lead
+    want = CANCELLATION_LEAD[rule]
+    with cancellation(rule):
+        for a in (1, 6):
+            got = (R(a) - R(a)).lead_order()
+            assert got == want, f"[{rule}] ({a} - {a}).lead_order(): got {got}, want {want}"
+        got = ((R(1) + H) - H).lead_order()
+        assert got == 0, f"[{rule}] the cancelled term does not lead: got {got}, want 0"
 
 
 # --- explain -----------------------------------------------------------------

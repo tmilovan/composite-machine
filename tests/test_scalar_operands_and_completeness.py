@@ -45,6 +45,7 @@ import composite.composite_lib as cl
 from composite.composite_lib import Composite, R, IncompleteOrderWarning
 from composite.backends import config
 from composite import forensics
+from tests.zero_modes import RULES, cancellation
 
 
 BACKENDS = {"sparse_dense": config.use_sparse_dense, "dict": config.use_dict}
@@ -110,18 +111,32 @@ def test_negating_a_written_zero_converts():
     show("  as a value", got.coeffs_dict(), {-1: -1.0})
 
 
-@pytest.mark.parametrize("spelled, composite_spelling, want", [
-    (lambda x: x * x + R(0) * 2,  lambda x: x * x + R(0) * R(2),  8.0),
-    (lambda x: x * x + 2 * R(0),  lambda x: x * x + R(2) * 0,     8.0),
-    (lambda x: x * x + R(0) / 2,  lambda x: x * x + R(0) / R(2),  6.5),
-    (lambda x: x * x + (-R(0)),   lambda x: x * x - R(0),         5.0),
-    (lambda x: x * x + R(0) * -1, lambda x: x * x + R(0) * R(-1), 5.0),
+# x*x - R(0) at 3, d(1), per rule.  Negation converts first, so -R(0) is
+# -h under every rule and x*x + (-R(0)) has d(1) = 5.  Subtracting the written
+# zero differs:
+#   mechanical: R1 converts it and the minus applies: 6 - 1 = 5.
+#   natural: a wholly zero operand is counted away (N4): 6.
+#   convert_and_keep: it converts and is kept (K1), then the minus applies
+#     (K2): 6 - 1 = 5, the same as x*x + (-R(0)).
+# Only under natural does the -R(0) row depend on the spelling.
+MINUS_WRITTEN_ZERO = {"mechanical": 5.0, "natural": 6.0, "convert_and_keep": 5.0}
+
+
+@pytest.mark.parametrize("rule", RULES)
+@pytest.mark.parametrize("spelled, composite_spelling, want, ref_want", [
+    (lambda x: x * x + R(0) * 2,  lambda x: x * x + R(0) * R(2),  8.0, None),
+    (lambda x: x * x + 2 * R(0),  lambda x: x * x + R(2) * 0,     8.0, None),
+    (lambda x: x * x + R(0) / 2,  lambda x: x * x + R(0) / R(2),  6.5, None),
+    (lambda x: x * x + (-R(0)),   lambda x: x * x - R(0),         5.0, MINUS_WRITTEN_ZERO),
+    (lambda x: x * x + R(0) * -1, lambda x: x * x + R(0) * R(-1), 5.0, None),
 ], ids=["R(0)*2", "2*R(0)", "R(0)/2", "-R(0)", "R(0)*-1"])
-def test_derivative_does_not_depend_on_the_spelling(spelled, composite_spelling, want):
-    x = seeded(3.0)
-    got, ref = d1(quiet(lambda: spelled(x))), d1(quiet(lambda: composite_spelling(x)))
-    show("python-number spelling d(1) at 3", got, want)
-    show("composite spelling    d(1) at 3", ref, want)
+def test_derivative_does_not_depend_on_the_spelling(spelled, composite_spelling, want, ref_want, rule):
+    with cancellation(rule):
+        x = seeded(3.0)
+        got, ref = d1(quiet(lambda: spelled(x))), d1(quiet(lambda: composite_spelling(x)))
+    ref_want = want if ref_want is None else ref_want[rule]
+    show(f"[{rule}] python-number spelling d(1) at 3", got, want)
+    show(f"[{rule}] composite spelling    d(1) at 3", ref, ref_want)
 
 
 @pytest.mark.parametrize("op", ["*", "/"])
@@ -138,13 +153,18 @@ def test_a_nonzero_value_times_a_number_is_unchanged():
     show("-(3+h)", (-x).coeffs_dict(), {0: -3.0, -1: -1.0})
 
 
+@pytest.mark.parametrize("rule", RULES)
 @pytest.mark.parametrize("left, right", [(2, -2), (-2, 2), (3.5, -3.5)])
-def test_number_on_the_left_keeps_the_left_residue(left, right):
-    """A cancellation reads its residue off the LEFT operand; 2 + R(-2) is 2h."""
-    got = quiet(lambda: left + R(right))
-    want = quiet(lambda: R(left) + R(right))
-    show(f"{left} + R({right})", got.coeffs_dict(), want.coeffs_dict())
-    show("  as a value", got.coeffs_dict(), {-1: float(left)})
+def test_number_on_the_left_keeps_the_left_residue(left, right, rule):
+    """A Python number on the left behaves as R(left) on the left.  Under
+    mechanical cancellation the residue is read off the LEFT operand, so
+    2 + R(-2) is 2h; natural and convert_and_keep count it to <|0|_0> (N2)."""
+    with cancellation(rule):
+        got = quiet(lambda: left + R(right))
+        want = quiet(lambda: R(left) + R(right))
+    value = {-1: float(left)} if rule == "mechanical" else {0: 0.0}
+    show(f"[{rule}] {left} + R({right})", got.coeffs_dict(), want.coeffs_dict())
+    show(f"[{rule}]   as a value", got.coeffs_dict(), value)
 
 
 def test_zero_plus_nothing_is_a_no_op():

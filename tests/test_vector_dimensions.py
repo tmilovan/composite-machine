@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import composite.composite_lib as cl
 from composite.composite_lib import Composite, R
 import composite.backends.vector_dim_backend as vb
+from tests.zero_modes import RULES, cancellation
 
 cl.MAX_ACTIVE_DIMS = 10 ** 9
 
@@ -419,29 +420,77 @@ def r1_on_a_vector_zero(t):
     """
     H = Composite({-1: 1.0})
     L = cl.ln(1 / H)
-    Z = L - L                                  # wholly zero, vector-keyed
-    t.eq("D98 L - L converts on the POWER axis, log axis untouched",
-         lambda: str(Z), "<1_(-1,1)>")
-    t.eq("D99 0.0 + L uplifts to h + L",
-         lambda: str(0.0 + L), "<1_(0,1) 1_(-1,0)>")
-    # LITERAL expected value, not str(0.0 + L): comparing one live result to
-    # another live result asserts nothing -- both sides move together, so the
-    # check passes whatever the code does.  It also crashes rather than
-    # reports, because `want` is evaluated at the call site.
-    t.eq("D100 R(0) + L agrees with the bare zero",
-         lambda: str(R(0) + L), "<1_(0,1) 1_(-1,0)>")
-    t.eq("D101 1/(h*L) lands at (1,-1)", lambda: str(1 / Z), "<1_(1,-1)>")
-    t.true("D102 the uplift is strictly infinitesimal",
-           lambda: cl._dim_negative(sorted((Z + 1).c)[0]))
-    # Z is a genuine infinitesimal now, so a scalar multiply scales it.  This
-    # also pins the one asymmetry worth knowing: `Z * 2` goes through
-    # scalar_multiply and never sees _operands, so under the old rule it was
-    # the one product R1 did not reach.
-    t.eq("D103 Z*2 scales the residue", lambda: str(Z * 2), "<2_(-1,1)>")
-    # and the scalar spellings must not have moved at all
-    t.eq("D104 scalar 1/0 unchanged", lambda: str(1 / R(0)), "<|1|\u2081>")
-    t.eq("D105 scalar 0.0 + h unchanged",
-         lambda: str(0.0 + H), "<|2|\u208b\u2081>")
+    # MECHANICAL cancellation converts L - L at the site, so it is the vector
+    # zero this block was written for.
+    with cancellation("mechanical"):
+        Z = L - L                              # wholly zero, vector-keyed
+        t.eq("D98 mechanical: L - L converts on the POWER axis, log axis untouched",
+             lambda: str(Z), "<1_(-1,1)>")
+        t.eq("D99 mechanical: 0.0 + L uplifts to h + L",
+             lambda: str(0.0 + L), "<1_(0,1) 1_(-1,0)>")
+        # LITERAL expected value, not str(0.0 + L): comparing one live result to
+        # another live result asserts nothing -- both sides move together, so the
+        # check passes whatever the code does.  It also crashes rather than
+        # reports, because `want` is evaluated at the call site.
+        t.eq("D100 mechanical: R(0) + L agrees with the bare zero",
+             lambda: str(R(0) + L), "<1_(0,1) 1_(-1,0)>")
+        t.eq("D101 mechanical: 1/(h*L) lands at (1,-1)", lambda: str(1 / Z), "<1_(1,-1)>")
+        t.true("D102 mechanical: the uplift is strictly infinitesimal",
+               lambda: cl._dim_negative(sorted((Z + 1).c)[0]))
+        # Z is a genuine infinitesimal now, so a scalar multiply scales it.  This
+        # also pins the one asymmetry worth knowing: `Z * 2` goes through
+        # scalar_multiply and never sees _operands, so under the old rule it was
+        # the one product R1 did not reach.
+        t.eq("D103 mechanical: Z*2 scales the residue", lambda: str(Z * 2), "<2_(-1,1)>")
+        t.eq("D105 mechanical: scalar 0.0 + h unchanged",
+             lambda: str(0.0 + H), "<|2|\u208b\u2081>")
+    # and the scalar spellings must not have moved at all, under any rule
+    for rule in RULES:
+        with cancellation(rule):
+            t.eq(f"D104 {rule}: scalar 1/0 unchanged", lambda: str(1 / R(0)), "<|1|\u2081>")
+
+    # R1 on a vector zero does not depend on the cancellation rule: a WRITTEN
+    # vector-keyed zero converts on the POWER axis in * and / under all three.
+    # (Composite({...}) binds the scalar backend, so it is built with _like.)
+    for rule in RULES:
+        with cancellation(rule):
+            Zw = cl._like(L, {(0, 1): 0.0})
+            t.eq(f"D98w {rule}: 1/<0_(0,1)> converts on the POWER axis",
+                 lambda: str(1 / Zw), "<1_(1,-1)>")
+            t.eq(f"D103w {rule}: <0_(0,1)>*2 scales the converted zero",
+                 lambda: str(Zw * 2), "<2_(-1,1)>")
+
+    # NATURAL and CONVERT-AND-KEEP count L - L (N1).  L sits on the log-axis
+    # infinity, and a cancelled infinite grade leaves |0|_0 (N3): no vector zero
+    # is left, and what remains reads like 3 - 3.
+    for rule in ("convert_and_keep", "natural"):
+        with cancellation(rule):
+            Z = L - L
+            t.eq(f"D98 {rule}: L - L drops to the real zero (N3)", lambda: str(Z), "<0_(0,0)>")
+            t.true(f"D98b {rule}: L - L == R(0)", lambda: Z == R(0), f"got {Z}")
+            # the counted zero converts as a unit in / and *, like 1/R(0) and 0*2
+            t.eq(f"D101 {rule}: 1/(L - L) is 1/0", lambda: str(1 / Z), "<|1|\u2081>")
+            t.eq(f"D103 {rule}: (L - L)*2 is 0*2", lambda: str(Z * 2), "<|2|\u208b\u2081>")
+    # CONVERT-AND-KEEP: a wholly zero operand of + converts and is kept (K1).
+    with cancellation("convert_and_keep"):
+        Z = L - L
+        t.eq("D99 convert_and_keep: 0.0 + L uplifts to h + L (K1)",
+             lambda: str(0.0 + L), "<1_(0,1) 1_(-1,0)>")
+        t.eq("D100 convert_and_keep: R(0) + L agrees with the bare zero",
+             lambda: str(R(0) + L), "<1_(0,1) 1_(-1,0)>")
+        t.eq("D102 convert_and_keep: (L - L) + 1 keeps the zero as h (K1)",
+             lambda: str(Z + 1), "<|1|\u2080 |1|\u208b\u2081>")
+        t.eq("D105 convert_and_keep: scalar 0.0 + h is two zeros (K1)",
+             lambda: str(0.0 + H), "<|2|\u208b\u2081>")
+    # NATURAL: a wholly zero operand of + is counted and adds nothing (N4).
+    with cancellation("natural"):
+        Z = L - L
+        t.eq("D99 natural: 0.0 + L is L (N4)", lambda: str(0.0 + L), "<1_(0,1)>")
+        t.eq("D100 natural: R(0) + L agrees with the bare zero",
+             lambda: str(R(0) + L), "<1_(0,1)>")
+        t.eq("D102 natural: (L - L) + 1 is 1 (N4)", lambda: str(Z + 1), "<|1|\u2080>")
+        t.eq("D105 natural: scalar 0.0 + h is h (N4)",
+             lambda: str(0.0 + H), "<|1|\u208b\u2081>")
 
 
 def vector_keyed_with_infinitesimal(t):

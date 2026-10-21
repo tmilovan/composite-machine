@@ -14,6 +14,7 @@ import pytest
 import composite.composite_lib as cl
 from composite.backends import config
 from composite.partials import partial, partials, Runs, PartialError
+from tests.zero_modes import cancellation
 
 mp.mp.dps = 50
 
@@ -204,8 +205,22 @@ def test_refuses_inside_tag_mode():
 
 
 def test_refuses_a_denoted_run():
-    """f cancels a seeded input exactly against itself: the identity converts
-    even under TAG, so that run is not the jet of f's classical reading."""
+    """f cancels a seeded input exactly against itself.  Under mechanical
+    cancellation the identity converts even under TAG, so that run is not the
+    jet of f's classical reading."""
     f = lambda x, y: (x - x) * y + x * y
-    with pytest.raises(PartialError):
-        partial(f, dict(x=0.3, y=0.4), {"x": 1, "y": 1})
+    with cancellation("mechanical"):
+        with pytest.raises(PartialError):
+            partial(f, dict(x=0.3, y=0.4), {"x": 1, "y": 1})
+
+
+@pytest.mark.parametrize("rule", ["natural", "convert_and_keep"])
+def test_a_counted_self_cancellation_reads_classically(rule):
+    """Under natural and convert_and_keep x - x is counted to <|0|_0 |0|_-1>
+    (N2) and leaves no residue.  Inside TAG that zero is not converted by the
+    product, so the run is not denoted and d2f/dxdy is the classical 1 of x*y."""
+    f = lambda x, y: (x - x) * y + x * y
+    with cancellation(rule):
+        got = partial(f, dict(x=0.3, y=0.4), {"x": 1, "y": 1})
+    print(f"  [{rule}] d2/dxdy (x - x)*y + x*y at (0.3, 0.4): got {got!r}, want 1.0")
+    assert got == 1.0, f"[{rule}] got {got!r}, want 1.0"

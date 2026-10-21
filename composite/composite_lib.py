@@ -204,6 +204,29 @@ def _operands(a, b):
     are rebuilt on switch but references captured by `from ... import ZERO`
     are not -- then applies R1 to each.
     """
+    a, b = _aligned(a, b)
+    # Judge each operand on ITS OWN blessing. Asking whether the PAIR contained
+    # a blessed value let `x*x + ZERO` through: x*x is blessed, so the pair was,
+    # and the bare ZERO beside it stayed infinitesimal.
+    #
+    # _like, not the bare constructor: Composite({...}) binds whatever backend is
+    # globally ACTIVE, so demoting an operand living on another one handed its
+    # data to the wrong backend -- "'DictData' object has no attribute 'runs'".
+    # ORDER MATTERS, measured: _is_infinitesimal_operand calls lead_order(), so
+    # testing it first ran that on both operands of EVERY operation and cost 2.07x
+    # on the default path with the mode never entered (0.1078s against 0.0522s).
+    # _sealed is one ContextVar read that returns False immediately when the mode
+    # is off, so it goes first and short-circuits.
+    return _prepared(a), _prepared(b)
+
+
+def _aligned(a, b):
+    """Two composites on one backend, nothing else done to them.
+
+    The first half of _operands, split out so an operation that must not run
+    R1 -- two zeros counted together under natural cancellation -- can still meet
+    an operand built before a backend switch.
+    """
     if type(a._data) is not type(b._data):
         # Convert toward the RICHER representation.  A vector-dimension backend
         # can hold a scalar dimension d as (d, 0, ...); the reverse loses the
@@ -226,19 +249,7 @@ def _operands(a, b):
             b = Composite._wrap(a._backend.create_from_terms(dims, vals),
                                 a._backend, demote=False,
                                 complete=b._complete, denot=_denot_of(b))
-    # Judge each operand on ITS OWN blessing. Asking whether the PAIR contained
-    # a blessed value let `x*x + ZERO` through: x*x is blessed, so the pair was,
-    # and the bare ZERO beside it stayed infinitesimal.
-    #
-    # _like, not the bare constructor: Composite({...}) binds whatever backend is
-    # globally ACTIVE, so demoting an operand living on another one handed its
-    # data to the wrong backend -- "'DictData' object has no attribute 'runs'".
-    # ORDER MATTERS, measured: _is_infinitesimal_operand calls lead_order(), so
-    # testing it first ran that on both operands of EVERY operation and cost 2.07x
-    # on the default path with the mode never entered (0.1078s against 0.0522s).
-    # _sealed is one ContextVar read that returns False immediately when the mode
-    # is off, so it goes first and short-circuits.
-    return _prepared(a), _prepared(b)
+    return a, b
 
 
 def _prepared(x):
@@ -753,6 +764,83 @@ def _r1(c, sibling=None):
         denot=_merge_denot(_denot_of(c), _lead_order(dims[0]))))
 
 
+CANCELLATION = "convert_and_keep"
+"""Which rule + and - follow: "convert_and_keep" (default), "natural" or
+"mechanical".  Zero Rules v2, sections 1b and 1c.
+
+"convert_and_keep"  the default, decided 2026-10-21.  Natural cancellation,
+         except that a WHOLLY zero operand of + or - converts by R1 and is
+         kept, whatever it meets:
+           0 + 0 + 0 is <|3|_-1>, R(5) + 0 is <|5|_0 |1|_-1>,
+           (0 + 0) + 5 equals 0 + (0 + 5), (3 - 3) + 5 is <|5|_0 |1|_-1>
+         The zero converts first and the sign then applies, so a subtracted
+         zero is subtracted: 0 - 0 is <|0|_-1>, ZERO - 0 is <|0|_-1>,
+         5 - 0 is <|5|_0 |-1|_-1>, and x - 0 equals x + (-0).  A cancelled
+         <|0|_-1> is a zero again and converts at its next + or -:
+         0 - 0 - 0 = <|0|_-1> - <|1|_-1> = <|1|_-2> - <|1|_-1>
+                   = <|-1|_-1 |1|_-2>.
+         Two non-zero operands are counted exactly as under "natural",
+         infinite-grade drop included: 3INF - 3INF is <|0|_0>, and
+         (3INF + 1) - 3INF is <|1|_0>, but (3INF - 3INF) + 1 is
+         <|1|_0 |1|_-1>, because the cancelled zero then meets the 1.
+
+"natural"  Addition and subtraction add coefficients grade by grade
+         and nothing else:
+           a cancelled real or infinitesimal grade stays where it was, as an
+           inert |0|_x term: <|3|_-1> - <|3|_-1> is <|0|_-1>, 3 - 3 is <|0|_0>,
+           the same number as a written 0
+           a cancelled INFINITE grade leaves |0|_0: 3INF - 3INF is <|0|_0>,
+           (3INF + 3) - 3INF is <|3|_0>, (3INF - 3INF) + 3 is <|3|_0>
+           this holds on the log axis too: ln(0) - ln(0) is <|0|_0>, so
+           ln(INF) + ln(ZERO) equals ln(INF*ZERO)
+           a WHOLLY zero operand is counted, so it adds nothing:
+             <|0|_-1> + <|3|_-1> is <|3|_-1>, R(5) + R(0) is <|5|_0>
+           two wholly zero operands both survive, as terms of one number:
+             <|0|_-2> + <|0|_1> is <|0|_1 |0|_-2>, the same in either order
+         There is no cancellation residue: CANCELLATION_CARRIES is not read.
+         R1 still converts a wholly zero operand of *, /, negation and every
+         function built on them, so annihilation is unchanged: 5*0 is <|5|_-1>,
+         5*0/0 is 5, (5*0)/(2*0) is 2.5, 3INF*0 is 3.
+         Added 2026-10-20: the infinite-grade drop.  Under counting
+         alone 3INF - 3INF was <|0|_1>, a zero infinity that R1 converted to
+         <|1|_0> in the next product, so (3INF - 3INF) * 7 had standard part 7.
+"mechanical"  the rule up to 2026-10-20: R1 on every operand and
+         a - a = a * h at the site, per CANCELLATION_CARRIES.  Kept reachable
+         for comparison.
+
+WHY NATURAL.  Counting has to start from zero.  Under "mechanical",
+(3INF - 3INF) + 1 was 4 and
+(3INF + 1) - 3INF was 1, and 9INF - 9INF left 9 on the value grade.  The package
+exists to track ANNIHILATION, multiplication by zero; a cancellation is not one.
+Under "natural" every ordering of 3INF, 1 and -3INF has standard part 1.
+
+WHY CONVERT AND KEEP.  Two zeros meeting are two zeros, so a written zero is
+a zero everywhere, not counted away when it meets a real.  Measured on the same
+2000 sums: distributivity 39 failures (natural 586), standard part differing in
+1; associativity 24 (natural 24), never in the standard part; commutativity 0.
+The cost: a cancellation is a zero too, so (3 - 3) + 5 and (3INF - 3INF) + 1
+carry a ZERO, and classical derivatives fall to 6929 / 5770 (natural 6948 /
+6067, mechanical 6875 / 5508).
+
+THE COST OF NATURAL, measured on 2000 random sums of one to three terms:
+  distributivity   586 cases differ, 561 with a wholly zero factor, partial
+                   sum or product.  (3 - 3) * 2 is <|2|_-1>: the counted zero
+                   was multiplied, an annihilation, and it is recorded.
+                   3*2 - 3*2 is <|0|_0>: nothing was annihilated.  The other
+                   25 are partial cancellations whose inert |0|_k term a
+                   product moves to another grade than the sum leaves it:
+                   records only.  The standard part differs in 54 of the 586:
+                   31 have a written zero infinity (<|0|_1>) as a factor, 23 a
+                   zero at grade <= 0 meeting an infinite factor.
+                   (3 - 3) * INF is <|1|_0>, INF copies of ZERO;
+                   3*INF - 3*INF is <|0|_0>, two rates cancelled.
+  cancellation     (6 - 6) / (2 - 2) is 1, not 3: a counted zero has no size,
+  ratios           so R1 converts it as a unit.  (5*0)/(2*0) keeps its 2.5.
+  R6               a written zero is counted too, so x*x + 0 has d(1) = 6.
+                   R(0) * 2 is still <|2|_-1>.
+Batch-dense operands keep the earlier rule.
+"""
+
 CANCELLATION_CARRIES = "quantity"
 """What a cancellation deposits.  "quantity" or "magnitude".
 
@@ -807,6 +895,26 @@ _CANCELLED_MSG = (
     "real acceleration, of that function. The standard part is unchanged; "
     "orders from %g are the denoted reading. Composite({}) is NOTHING and adds "
     "no order, if the classical reading was intended.")
+
+# A cancelled infinity's record does not land among the infinitesimals.  INF -
+# INF is INF*ZERO = |1|_0: a FINITE quantity at grade 0, so the standard part
+# itself is the denoted reading, and an order-n infinity leaves an order-(n-1)
+# infinity.  The message above said "an order--0 infinitesimal" and "the
+# standard part is unchanged" for both, which is false in each.
+_CANCELLED_MSG_FINITE = (
+    "a cancellation at grade 0 added a finite quantity of magnitude %.6g: the "
+    "cancelled term was a first-order infinity, and a - a = a*ZERO puts its "
+    "record on grade 0. This is a DENOTATION, not a corruption: the standard "
+    "part itself is now the denoted reading -- (3*INF - 3*INF) + 1 is 4, where "
+    "(3*INF + 1) - 3*INF, which annihilates no operand, is 1. Composite({}) is "
+    "NOTHING and adds no order, if the classical reading was intended.")
+
+_CANCELLED_MSG_INFINITE = (
+    "a cancellation at grade %s added an infinite quantity of magnitude %.6g "
+    "(order %g): the cancelled term was an infinity of higher order, and a - a "
+    "= a*ZERO leaves an infinity one order lower. This is a DENOTATION, not a "
+    "corruption, and the result has no standard part. Composite({}) is NOTHING "
+    "and adds no order, if the classical reading was intended.")
 
 
 CONVENTIONAL_STRICT = False
@@ -982,8 +1090,14 @@ def _warn_cancelled(dim, order, mag):
     if mag.__class__.__name__ == "Lanes":
         # a batch (batch-dense backend): the largest magnitude across its rows
         mag = float(np.max(np.abs(np.asarray(getattr(mag.v, "val", mag.v)))))
-    warnings.warn(_CANCELLED_MSG % (dim, order, mag, order),
-                  CancellationWarning, stacklevel=4)
+    order = order + 0.0                  # -0.0 printed as "order--0"
+    if order > 0:
+        msg = _CANCELLED_MSG % (dim, order, mag, order)
+    elif order == 0:
+        msg = _CANCELLED_MSG_FINITE % mag
+    else:
+        msg = _CANCELLED_MSG_INFINITE % (dim, mag, order)
+    warnings.warn(msg, CancellationWarning, stacklevel=4)
 
 
 def _cancellation_residue(a, b, result):
@@ -1078,6 +1192,113 @@ def _untouched(x, nothing):
                                             getattr(nothing, "_complete", None)),
                           denot=getattr(x, "_denot", None))
     return _join(out, x, nothing)
+
+
+_CANCELLATION_RULES = ("convert_and_keep", "natural", "mechanical")
+
+
+def _counts(x, y):
+    """CANCELLATION governs x + y and x - y: True unless the rule is
+    "mechanical".  Batch-dense data always follows "mechanical"."""
+    if CANCELLATION not in _CANCELLATION_RULES:
+        raise ValueError(f"CANCELLATION must be one of {_CANCELLATION_RULES}, "
+                         f"not {CANCELLATION!r}")
+    return CANCELLATION != "mechanical" and not (
+        getattr(x, "_batch_data", False) or getattr(y, "_batch_data", False))
+
+
+def _counted(self, other, sign):
+    """x + y (sign 1) or x - y (sign -1) when + and - count: grade by grade,
+    no residue on a cancellation.
+
+    "convert_and_keep": a wholly zero operand converts by R1 first and is kept,
+    and then the sign applies: a zero subtrahend is subtracted.
+
+    "natural": a wholly zero operand adds nothing, so the other comes back as
+    it was -- negated when it is the subtrahend.  Two wholly zero operands are
+    summed grade by grade without R1, so every zero they hold survives.
+    """
+    if CANCELLATION == "convert_and_keep":
+        zs, zo = _is_wholly_zero(self), _is_wholly_zero(other)
+        # Then the natural path.  Not _counted again: under conventional() and
+        # for an untagged zero inside TAG, _prepared leaves the zero as it is,
+        # and the natural path then counts it -- recursing never ended.
+        if zo:
+            return _counted_natural(_prepared(self) if zs else self,
+                                    _prepared(other), sign)
+        if zs:
+            return _counted_natural(_prepared(self), other, sign)
+    return _counted_natural(self, other, sign)
+
+
+def _counted_natural(self, other, sign):
+    """_counted under "natural": see _counted."""
+    zs, zo = _is_wholly_zero(self), _is_wholly_zero(other)
+    if zs and zo:
+        a, b = _aligned(self, other)
+        data = b._data if sign > 0 else a._backend.negate(b._data)
+        return Composite._wrap(a._backend.add(a._data, data), a._backend,
+                               complete=_min_complete(self, other),
+                               denot=_denot_additive(a, b))
+    if zo:
+        return _untouched(self, other)
+    if zs:
+        return _untouched(other if sign > 0 else -other, self)
+    a, b = _operands(self, other)
+    data = b._data if sign > 0 else a._backend.negate(b._data)
+    out = Composite._wrap(a._backend.add(a._data, data), a._backend,
+                          complete=_min_complete(self, other),
+                          denot=_denot_additive(a, b))
+    if _CANCEL_WARN[0]:
+        _check_cancellation(a, b, out, self is other, sign)
+    return _infinities_to_real(a, b, out)
+
+
+def _infinities_to_real(a, b, out):
+    """A cancelled infinite grade leaves |0|_0, not |0|_k (natural and
+    convert-and-keep cancellation).
+
+    Only grades where an operand held a nonzero coefficient and the sum holds
+    zero move; zero terms the operands already carried stay where they were.
+    Real and infinitesimal grades keep their |0|_x."""
+    be = out._backend
+    dims, vals = be.to_arrays(out._data)
+    if dims.dtype == object:
+        return _infinities_to_real_vector(a, b, out, dims, vals)
+    hit = (vals == 0.0) & (dims > 0)
+    if not hit.any():
+        return out
+    for i in np.flatnonzero(hit):
+        d = dims[i].item()
+        if a.coeff(d) == 0.0 and b.coeff(d) == 0.0:
+            hit[i] = False
+    if not hit.any():
+        return out
+    keep = ~hit
+    dims, vals = dims[keep], vals[keep]
+    if not (dims == 0).any():
+        at = int(np.searchsorted(dims, 0))
+        dims = np.insert(dims, at, 0).astype(DIM_DTYPE, copy=False)
+        vals = np.insert(vals, at, 0.0)
+    return Composite._wrap(be.create_from_terms(dims, vals), be,
+                           complete=getattr(out, "_complete", None),
+                           denot=_denot_of(out))
+
+
+def _infinities_to_real_vector(a, b, out, dims, vals):
+    """_infinities_to_real for tuple grades: infinite means a positive
+    leading component, and the real grade is the all-zero tuple."""
+    hit = [d for d, v in zip(dims, vals) if v == 0.0 and _lead_order(d) < 0
+           and (a.coeff(d) != 0.0 or b.coeff(d) != 0.0)]
+    if not hit:
+        return out
+    terms = {d: float(v) for d, v in zip(dims, vals) if d not in hit}
+    real = tuple(0 for _ in hit[0])
+    terms.setdefault(real, 0.0)
+    r = _like(out, terms)
+    r._complete = getattr(out, "_complete", None)
+    r._denot = _denot_of(out)
+    return r
 
 
 def _batch_operand(other):
@@ -1627,7 +1848,11 @@ class Composite:
 
         Adding NOTHING is a no-op, and it is checked BEFORE R1: the other
         operand comes back as it was, a written zero still latent.  Decided
-        2026-10-12 -- R1 had converted it, so <0_0> + NOTHING was <1_-1>."""
+        2026-10-12 -- R1 had converted it, so <0_0> + NOTHING was <1_-1>.
+
+        Under CANCELLATION "natural" or "convert_and_keep" (the default) the
+        sum counts and leaves no cancellation residue; see CANCELLATION.  The
+        text above is the rule with CANCELLATION = "mechanical"."""
         if isinstance(other, (int, float)):
             other = _scalar_operand(other)
         if not isinstance(other, Composite):
@@ -1638,6 +1863,8 @@ class Composite:
             return _untouched(self, other)
         if _is_nothing(self):
             return _untouched(other, self)
+        if _counts(self, other):
+            return _counted(self, other, 1)
         a, b = _operands(self, other)
         out = Composite._wrap(a._backend.add(a._data, b._data), a._backend,
                               complete=_min_complete(self, other),
@@ -1665,6 +1892,11 @@ class Composite:
         a - a leaves |0|_d: the dimension was constructed by both operands, so
         it exists and holds zero.  No special case is needed -- |0|_a - |0|_a
         giving 0**(a+1) follows from R1 plus this rule, not from a branch here.
+
+        That is the rule with CANCELLATION = "mechanical".  Under "natural" and
+        "convert_and_keep" (the default) a cancelled |0|_d stays as it is (an
+        infinite grade drops to |0|_0), with no residue; see CANCELLATION for
+        what each does with a zero operand.
         """
         if isinstance(other, (int, float)):
             other = _scalar_operand(other)
@@ -1674,6 +1906,8 @@ class Composite:
                 return NotImplemented
         if _is_nothing(other):
             return _untouched(self, other)    # subtracting NOTHING: a no-op, before R1
+        if _counts(self, other):
+            return _counted(self, other, -1)
         a, b = _operands(self, other)
         out = Composite._wrap(a._backend.add(a._data, a._backend.negate(b._data)),
                               a._backend,

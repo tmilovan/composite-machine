@@ -14,6 +14,7 @@ import composite.composite_lib as cl
 from composite.composite_lib import (
     R, ZERO, INF, Composite, StandardPartUndefinedError, sqrt, ln, sin)
 from composite.backends import config
+from tests.zero_modes import RULES, cancellation
 
 BACKENDS = ["dict", "sparse_dense", "dense_series"]
 
@@ -29,19 +30,32 @@ def grades(c):
     return {g: v for g, v in cl._ensure_composite(c).coeffs_dict().items() if v != 0.0}
 
 
-def test_pole_derivative_is_unbounded_not_zero(backend):
-    # `x*2 - (x*2)` cancels 4 against 4, and the residue carries what it
-    # cancelled, so the infinitesimal it produces is 4h and not h.  That is the
-    # point of spelling it this way rather than writing ZERO: the operand
-    # reaches the division from a cancellation.
-    # (2 + h)/(4h) = 1/(2h) + 1/4, a simple pole.
-    x = R(2.0)
-    assert grades(x * 2 - (x * 2)) == {-1: 4.0}, "the residue is the magnitude"
-    y = (x + ZERO) / (x * 2 - (x * 2))
-    assert grades(y) == {1: 0.5, 0: 0.25}, f"got {y}, want |0.5|_1 + |0.25|_0"
-    assert grades(y.D(1)) == {2: -0.5}, f"got {y.D(1)}, want |-0.5|_2"
-    assert grades(y.D(2)) == {3: 1.0}, f"got {y.D(2)}, want |1|_3"
-    assert grades(y.D(3)) == {4: -3.0}, f"got {y.D(3)}, want |-3|_4"
+# What `x*2 - (x*2)` leaves, and the simple pole (2 + h) over it, per rule.
+#   mechanical: a - a = a*h, so the residue carries the 4 it cancelled: 4h, and
+#     (2 + h)/(4h) = 1/(2h) + 1/4.
+#   natural, convert_and_keep: the cancellation is counted to <|0|_0> (N2),
+#     which R1 converts to h in the division: (2 + h)/h = 2/h + 1.
+POLE = {
+    "mechanical": ({-1: 4.0}, {1: 0.5, 0: 0.25}, {2: -0.5}, {3: 1.0}, {4: -3.0}),
+    "natural": ({}, {1: 2.0, 0: 1.0}, {2: -2.0}, {3: 4.0}, {4: -12.0}),
+    "convert_and_keep": ({}, {1: 2.0, 0: 1.0}, {2: -2.0}, {3: 4.0}, {4: -12.0}),
+}
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_pole_derivative_is_unbounded_not_zero(backend, rule):
+    # The operand reaches the division from a cancellation rather than as a
+    # written ZERO; the pole's derivatives are unbounded, not zero, either way.
+    cancelled, want, d1, d2, d3 = POLE[rule]
+    with cancellation(rule):
+        x = R(2.0)
+        got = grades(x * 2 - (x * 2))
+        assert got == cancelled, f"[{rule}] x*2 - x*2: got {got}, want {cancelled}"
+        y = (x + ZERO) / (x * 2 - (x * 2))
+        assert grades(y) == want, f"[{rule}] got {y}, want {want}"
+        assert grades(y.D(1)) == d1, f"[{rule}] got {y.D(1)}, want {d1}"
+        assert grades(y.D(2)) == d2, f"[{rule}] got {y.D(2)}, want {d2}"
+        assert grades(y.D(3)) == d3, f"[{rule}] got {y.D(3)}, want {d3}"
 
 
 def test_d_refuses_where_it_used_to_return_zero(backend):
@@ -52,14 +66,28 @@ def test_d_refuses_where_it_used_to_return_zero(backend):
             y.d(n)
 
 
-def test_multiplication_by_a_converted_zero_stays_a_taylor_series(backend):
-    # (2 + h)*(4h) = 8h + 4h**2, the 4 being the magnitude the cancellation
-    # carried.  Bounded, so d(n) keeps the fast path.
-    x = R(2.0)
-    y = (x + ZERO) * (x * 2 - (x * 2))
-    assert grades(y) == {-1: 8.0, -2: 4.0}, f"got {y}, want |8|_-1 + |4|_-2"
-    got = [y.d(k) for k in range(4)]
-    assert got == [0.0, 8.0, 8.0, 0.0], f"got {got}, want [0, 8, 8, 0] for 8h + 4h**2"
+# (2 + h) times what `x*2 - (x*2)` leaves, per rule.
+#   mechanical: (2 + h)*(4h) = 8h + 4h**2, the 4 being what the cancellation
+#     carried.
+#   natural, convert_and_keep: <|0|_0> converts to h in the product (R1):
+#     (2 + h)*h = 2h + h**2.
+CONVERTED_PRODUCT = {
+    "mechanical": ({-1: 8.0, -2: 4.0}, [0.0, 8.0, 8.0, 0.0]),
+    "natural": ({-1: 2.0, -2: 1.0}, [0.0, 2.0, 2.0, 0.0]),
+    "convert_and_keep": ({-1: 2.0, -2: 1.0}, [0.0, 2.0, 2.0, 0.0]),
+}
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_multiplication_by_a_converted_zero_stays_a_taylor_series(backend, rule):
+    # Bounded, so d(n) keeps the fast path under every rule.
+    want, want_d = CONVERTED_PRODUCT[rule]
+    with cancellation(rule):
+        x = R(2.0)
+        y = (x + ZERO) * (x * 2 - (x * 2))
+        assert grades(y) == want, f"[{rule}] got {y}, want {want}"
+        got = [y.d(k) for k in range(4)]
+        assert got == want_d, f"[{rule}] got {got}, want {want_d}"
 
 
 def test_shift_reproduces_the_ordinary_derivative(backend):

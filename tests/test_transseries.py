@@ -49,6 +49,7 @@ from composite.transseries import (Transseries, Sector, flat, sector, ts_exp, ts
                                    resum_sector, sector_coefficients,
                                    ts_d, ts_ln, from_series, action_from_growth)
 from test_dimension_scales import Suite, head
+from tests.zero_modes import RULES, cancellation
 
 cl.MAX_ACTIVE_DIMS = 10 ** 9
 
@@ -532,20 +533,34 @@ def t8_zero_sectors(t):
     # R1 ACTS ON THE OPERAND, and the operand is the whole transseries.  Both
     # layers must therefore answer the same way, or `0` means one thing in a
     # Composite and another one call up.
-    for lbl, comp, ts in (
-            ("lift(0) + 5", Composite(0) + R(5),
-             (Transseries.lift(0) + Transseries.lift(R(5))).sectors[0]),
-            ("lift(0) * 5", Composite(0) * R(5),
-             (Transseries.lift(0) * Transseries.lift(R(5))).sectors.get(0))):
-        t.true(f"T8.0 {lbl}: Composite {d(comp)} == Transseries {d(ts)}",
-               d(comp) == d(ts), f"{d(comp)} vs {d(ts)}")
-    F = flat(1) - flat(1)
-    c = Composite({0: 1.0})
-    t.true(f"T8.05 a wholly zero transseries IS an operand and converts: "
-           f"(flat-flat)+flat = {d((F + flat(1)).sectors[1])}, matching "
-           f"(c-c)+R(1) = {d((c - c) + R(1))}",
-           d((F + flat(1)).sectors[1]) == d((c - c) + R(1)),
-           f"{d((F + flat(1)).sectors[1])}")
+    # Checked under CONVERT-AND-KEEP and MECHANICAL, where a wholly zero operand
+    # of + converts (K1; R1 on every operand).  Under NATURAL a zero operand of
+    # + is counted in a Composite (N4) but the transseries layer still converts
+    # it -- it does not read CANCELLATION -- so the two layers disagree there:
+    # lift(0) + 5 is {0: 5} in a Composite and {-1: 1, 0: 5} in a Transseries.
+    # Not pinned; it is a gap in composite/transseries.py, not a rule.
+    for rule in ("convert_and_keep", "mechanical"):
+        with cancellation(rule):
+            for lbl, comp, ts in (
+                    ("lift(0) + 5", Composite(0) + R(5),
+                     (Transseries.lift(0) + Transseries.lift(R(5))).sectors[0]),
+                    ("lift(0) * 5", Composite(0) * R(5),
+                     (Transseries.lift(0) * Transseries.lift(R(5))).sectors.get(0))):
+                t.true(f"T8.0 {rule}: {lbl}: Composite {d(comp)} == Transseries {d(ts)}",
+                       d(comp) == d(ts), f"{d(comp)} vs {d(ts)}")
+            F = flat(1) - flat(1)
+            c = Composite({0: 1.0})
+            t.true(f"T8.05 {rule}: a wholly zero transseries IS an operand and converts: "
+                   f"(flat-flat)+flat = {d((F + flat(1)).sectors[1])}, matching "
+                   f"(c-c)+R(1) = {d((c - c) + R(1))}",
+                   d((F + flat(1)).sectors[1]) == d((c - c) + R(1)),
+                   f"{d((F + flat(1)).sectors[1])}")
+    # The product converts the zero under every rule (R1 in *).
+    with cancellation("natural"):
+        comp = Composite(0) * R(5)
+        ts = (Transseries.lift(0) * Transseries.lift(R(5))).sectors.get(0)
+        t.true(f"T8.0 natural: lift(0) * 5: Composite {d(comp)} == Transseries {d(ts)}",
+               d(comp) == d(ts) == {-1: 5.0}, f"{d(comp)} vs {d(ts)}")
 
     # R2: A ZERO SECTOR SITTING AMONG NON-ZERO ONES IS A TERM, NOT AN OPERAND.
     # Per-sector arithmetic through Composite.__add__ made it an operand, and
@@ -568,20 +583,38 @@ def t8_zero_sectors(t):
     t.true("T8.20 and sector 0 is untouched by any of it",
            d((A + B).sectors[0]) == {0: 1.0}, f"{d((A + B).sectors[0])}")
 
-    # A CANCELLED sector is not a zero sector.  5 - 5 leaves |5|_-1, so sector
-    # 1 holds 5h and every operation treats it as the series it is.  Nothing is
-    # manufactured here: the 5 was annihilated and the residue records its size.
-    zc = Composite({0: 5.0}) - Composite({0: 5.0})
-    t.true(f"T8.2 a cancellation reaches the sector as {zc}, not a zero",
-           d(zc) == {-1: 5.0}, f"{d(zc)}")
-    Ac = Transseries({0: R(1), 1: zc})
-    for lbl, got, want in (("Ac + B", d((Ac + B).sectors[1]), {-1: 5.0, 0: 5.0}),
-                           ("Ac - B", d((Ac - B).sectors[1]), {-1: 5.0, 0: -5.0}),
-                           ("Ac * 2", d((Ac * two).sectors[1]), {-1: 10.0})):
-        t.true(f"T8.2 ({lbl}).sectors[1] = {got}, the series says {want}",
-               got == want, f"{got} vs {want}")
-    t.true("T8.21 and sector 0 is untouched there too",
-           d((Ac + B).sectors[0]) == {0: 1.0}, f"{d((Ac + B).sectors[0])}")
+    # MECHANICAL: a CANCELLED sector is not a zero sector.  5 - 5 leaves
+    # |5|_-1, so sector 1 holds 5h and every operation treats it as the series
+    # it is.  Nothing is manufactured here: the 5 was annihilated and the
+    # residue records its size.
+    with cancellation("mechanical"):
+        zc = Composite({0: 5.0}) - Composite({0: 5.0})
+        t.true(f"T8.2 mechanical: a cancellation reaches the sector as {zc}, not a zero",
+               d(zc) == {-1: 5.0}, f"{d(zc)}")
+        Ac = Transseries({0: R(1), 1: zc})
+        for lbl, got, want in (("Ac + B", d((Ac + B).sectors[1]), {-1: 5.0, 0: 5.0}),
+                               ("Ac - B", d((Ac - B).sectors[1]), {-1: 5.0, 0: -5.0}),
+                               ("Ac * 2", d((Ac * two).sectors[1]), {-1: 10.0})):
+            t.true(f"T8.2 mechanical: ({lbl}).sectors[1] = {got}, the series says {want}",
+                   got == want, f"{got} vs {want}")
+        t.true("T8.21 mechanical: and sector 0 is untouched there too",
+               d((Ac + B).sectors[0]) == {0: 1.0}, f"{d((Ac + B).sectors[0])}")
+    # NATURAL and CONVERT-AND-KEEP count 5 - 5 to the written zero <|0|_0>
+    # (N1, N2), so the cancelled sector IS a zero sector: a term among non-zero
+    # sectors, inert by R2, exactly as the written zero of T8.1.
+    for rule in ("convert_and_keep", "natural"):
+        with cancellation(rule):
+            zc = Composite({0: 5.0}) - Composite({0: 5.0})
+            t.true(f"T8.2 {rule}: a cancellation reaches the sector as {zc}, the written zero",
+                   d(zc) == {0: 0.0}, f"{d(zc)}")
+            Ac = Transseries({0: R(1), 1: zc})
+            for lbl, got, want in (("Ac + B", d((Ac + B).sectors[1]), {0: 5.0}),
+                                   ("Ac - B", d((Ac - B).sectors[1]), {0: -5.0}),
+                                   ("Ac * 2", d((Ac * two).sectors[1]), {0: 0.0})):
+                t.true(f"T8.2 {rule}: ({lbl}).sectors[1] = {got}, R2 says {want}",
+                       got == want, f"{got} vs {want}")
+            t.true(f"T8.21 {rule}: and sector 0 is untouched there too",
+                   d((Ac + B).sectors[0]) == {0: 1.0}, f"{d((Ac + B).sectors[0])}")
 
 
 def t9_sector_index(t):
@@ -618,9 +651,20 @@ def t9_sector_index(t):
                list(P.sectors) == [0] and nz(P.sectors[0]) == {0: 1.0}, f"{P}")
     P = ts_exp(R(3) * INF + R(2)) * ts_exp(R(-3) * INF)
     t.close("T9.04 exp(3/h + 2) exp(-3/h) = e^2", P.sectors[0].st(), math.exp(2.0), tol=1e-15)
-    D = ts_exp(R(2.5) * INF - R(2.5) * INF)
-    t.close("T9.05 exp(2.5/h - 2.5/h) = e^2.5: the SUBTRACTION cancels and keeps "
-            "its residue |2.5|_0", D.sectors[0].st(), math.exp(2.5), tol=1e-14)
+    with cancellation("mechanical"):
+        D = ts_exp(R(2.5) * INF - R(2.5) * INF)
+        t.close("T9.05 mechanical: exp(2.5/h - 2.5/h) = e^2.5: the SUBTRACTION cancels "
+                "and keeps its residue |2.5|_0", D.sectors[0].st(), math.exp(2.5), tol=1e-14)
+    # NATURAL and CONVERT-AND-KEEP: equal infinities cancel to the real zero
+    # <|0|_0> (N3), with no residue, so the exponent is 0 and exp(0) = 1 (the
+    # zero converts inside exp, R1, which leaves the standard part at 1).
+    for rule in ("convert_and_keep", "natural"):
+        with cancellation(rule):
+            E = R(2.5) * INF - R(2.5) * INF
+            t.true(f"T9.05 {rule}: 2.5/h - 2.5/h is the real zero (N3)",
+                   E.coeffs_dict() == {0: 0.0}, f"got {E.coeffs_dict()}  want {{0: 0.0}}")
+            D = ts_exp(E)
+            t.close(f"T9.05 {rule}: exp(2.5/h - 2.5/h) = e^0", D.sectors[0].st(), 1.0, tol=1e-14)
 
     x, y = R(2.5) * INF + R(1) + h, INF * INF - INF + h
     lhs, rhs = ts_exp(x) * ts_exp(y), ts_exp(x + y)

@@ -7,6 +7,21 @@ Supersedes *Zero Rules — Formal Specification (DRAFT)*, whose §8 recorded
 consequences that these rules do not produce. Every numeric claim below was
 measured against a working prototype.
 
+**Cancellation has three rules.** *Convert and keep* is the default
+(2026-10-21); *natural cancellation* (2026-10-20) and *mechanical
+cancellation*, the rule this document was first written for, stay reachable.
+They differ only in what `+` and `-` do; R1, R2, R3 and R5 are shared. §1b
+states natural cancellation and §1c what convert and keep changes on top of it.
+Where §1 to §7 describe a cancellation, they describe the mechanical rule
+unless marked otherwise.
+
+```
+import composite.composite_lib as cl
+cl.CANCELLATION = "convert_and_keep"   # the default
+cl.CANCELLATION = "natural"
+cl.CANCELLATION = "mechanical"         # the rule up to 2026-10-20
+```
+
 Notation: `|a|_d`, shortened to `a_d`, is coefficient `a` at dimension `d`.
 `|a|_d = a·h^(-d)`, so dimension −1 is the infinitesimal and +1 the infinity.
 
@@ -60,6 +75,9 @@ an operand of any operation, converts: `0_d -> 1_(d-1)`.
 If it carries several zeros, convert the **lowest dimension only**. Once that
 one has converted the composite holds a nonzero, so by R2 every remaining zero
 is inert - and, by R2, retained.
+
+*Mechanical cancellation.* (Under natural cancellation and convert and keep, a
+cancellation is counted instead and nothing converts at the site: §1b.)
 
 **R1 applies AT THE SITE for a cancellation, and the residue is the whole
 annihilated quantity, one grade down:**
@@ -229,13 +247,17 @@ every case.
 
 **R3 - `× 1` and `/ 1` are identities.** They return the operand untouched.
 
-**R4 - addition and subtraction never shift dimensions.** Coefficients add per
+**R4 - addition and subtraction never shift dimensions.** *(As stated here,
+mechanical cancellation. Natural cancellation: §1b.)* Coefficients add per
 dimension, and the addition itself shifts nothing. Where the result still
 carries a nonzero term, a zero among them is a term and stays put, per R2.
 Where the result is **wholly** zero the cancellation converts at the site, per
 R1: `6 - 6` is `|6|_-1`, not `|0|_0`.
 
-**R6 - there is no additive identity.**
+**R6 - there is no additive identity.** *(The examples below are mechanical
+cancellation. Under natural cancellation a written zero is counted in `+` and
+`-`, so `R(5) + <0_0>` is `<5_0>`; there is still no additive identity, because
+the zero converts in the next `*` or `/`: §1b.)*
 Adding zero is not a no-op. `0_d` is a number, so by R1 it converts and
 contributes `1_(d-1)`:
 
@@ -292,6 +314,210 @@ dimensions nobody built.
 
 ---
 
+## 1b. Natural cancellation
+
+Decided 2026-10-20 (`CANCELLATION = "natural"`), the default until
+2026-10-21, when convert and keep (§1c) replaced it. Everything here holds under
+convert and keep too, except what §1c changes for a zero operand. Addition and
+subtraction COUNT;
+only an annihilation, `*` or `/` by a zero, records one. R1, R2, R3 and R5 are
+unchanged. What changes:
+
+**N1 - `+` and `-` count, grade by grade.** Coefficients add per grade and
+nothing else happens: R1 does not act on an operand of `+` or `-`, and a
+cancellation leaves no residue (`CANCELLATION_CARRIES` is not read).
+
+**N2 - a cancelled real or infinitesimal grade stays where it was,** as an inert
+`|0|_k` term (R2):
+
+```
+3 - 3                 ->  <|0|_0>                 the same number as a written 0
+<|3|_-1> - <|3|_-1>   ->  <|0|_-1>
+ZERO**5 - ZERO**5     ->  <|0|_-5>
+x - x,  x = 3 + h     ->  <|0|_0 |0|_-1>
+```
+
+**N3 - a cancelled infinite grade leaves `|0|_0`.** A cancellation record never
+sits above the real grade: grade k leaves its record at `min(k, 0)`.
+
+```
+3INF - 3INF           ->  <|0|_0>
+INF**3 - INF**3       ->  <|0|_0>
+(3INF + 1) - 3INF     ->  <|1|_0>
+(3INF - 3INF) + 1     ->  <|1|_0>                 the same, in either order
+ln(0) - ln(0)         ->  <|0|_0>                 log-axis infinities too
+```
+
+Why. A positive grade is an infinite structured quantity: `|3|_1` is 3 added
+infinitely, the rate at which the number blows up. Two equal ones cancel
+exactly; there is no way for one to be "x - 1" while the other stays "x", so
+their difference cannot be a real. What is left is the real zero. Equal rates
+leave rate 0: the result does not grow, so it belongs at the real grade. Left at
+its own grade, the record would be `|0|_1`, which R1 converts to `|1|_0`, a real
+no operand held: under counting alone `(3INF - 3INF) * 7` had standard part 7.
+Multiplication and division never produce a wholly zero composite above grade 0
+(`0/ZERO` is `<|1|_0>`, `0*INF` is `<|1|_0>`), so N3 keeps that true for `+` and
+`-` as well.
+
+**N4 - a wholly zero operand is counted, so it adds nothing:**
+
+```
+R(5) + R(0)           ->  <|5|_0>
+(3 - 3) + 5           ->  <|5|_0>
+<|0|_-1> + <|3|_-1>   ->  <|3|_-1>
+```
+
+Two wholly zero operands both survive, as terms of one number:
+`<|0|_-2> + <|0|_1>` is `<|0|_1 |0|_-2>`, the same in either order.
+
+**R1 still converts a zero used in `*`, `/`, negation and every function built
+on them,** so annihilation is unchanged: `5 * 0` is `<|5|_-1>`, `5 * 0 / 0` is
+5, `(5*0)/(2*0)` is 2.5, `3INF * 0` is 3. A counted zero converts there like
+any written zero:
+
+```
+(3 - 3) * 7           ->  <|7|_-1>                same as 0 * 7
+(3 - 3) * INF         ->  <|1|_0>                 same as 0 * INF
+(6 - 6) / (2 - 2)     ->  <|1|_0>                 a counted zero has no size
+(3INF - 3INF) * 7     ->  <|7|_-1>
+```
+
+**Counting against annihilation.** `3INF - 3INF` is `<|0|_0>` while
+`(3 - 3) * INF` is `<|1|_0>`. They are different operations: the first cancels
+two rates and multiplies nothing by zero; the second multiplies an expressed
+zero by an infinity, INF copies of ZERO, which is 1 (the integration identity).
+Distributivity fails across exactly this pair.
+
+**Why counting.** Counting has to start from zero. Under mechanical
+cancellation `(3INF - 3INF) + 1` is 4 and `(3INF + 1) - 3INF` is
+`<|0|_1 |1|_0>`, and `9INF - 9INF` leaves 9 on the value grade. The package
+exists to track ANNIHILATION, multiplication by zero; a cancellation is not
+one.
+
+**Measured, natural against mechanical** (sparse-dense backend, same harness
+for both):
+
+| | natural | mechanical |
+|---|---|---|
+| `(a+b)*c = a*c + b*c`, 2000 cases (with / without written zeros above grade 0) | 586 / 470 fail; standard part differs in 54 / 24 | 0 / 0 |
+| `(a+b)+c = a+(b+c)` | 24 / 27 fail, records only; standard part never differs | 26 / 21 fail; standard part differs in 4 / 5 |
+| `a+b = b+a` | **0 / 0** | 10 / 8 (the `a + (-a)` sign, §1) |
+| classical derivatives, 1000 cases x orders 0..6 (no zeros / zeros injected) | **6948 / 6067** | 6875 / 5508 |
+| derivative orders that are not classical (all warned, apart from 3 + 2 precision cases) | 41 / 661 | 113 / 1202 |
+| `st()` agreeing with classical, 15000 expressions | 11356 | 11352 |
+| consistency pairs equal, of 35 | 22 | 23 |
+| test suite | 989 passed, 80 failed: the 80 pin mechanical results | 1067 passed, 2 failed |
+| integrals (`test_integration_comprehensive`, jets, quotient) | 54/54, 109 passed | the same |
+| options (`private_demos`, 199 options, every Greek) | identical to mechanical | |
+
+Most distributivity failures (561 of 586, 428 of 470) have a wholly zero
+factor, partial sum or product. `(3 - 3) * 2` is `<|2|_-1>`: the counted zero
+was multiplied, an annihilation, and it is recorded. `3*2 - 3*2` is `<|0|_0>`:
+nothing was annihilated. The rest are partial cancellations whose inert `|0|_k`
+term a product carries to a different grade than the sum's drop leaves it;
+they differ in records only. The standard part differs in 54 / 24 cases. With no
+written zero infinities all 24 are a zero at grade <= 0 meeting an infinite
+factor, `(3 - 3) * INF` against `3*INF - 3*INF`, the counting-against-
+annihilation case above; with them, 31 of the 54 have a written `<|0|_1>` as a
+factor.
+
+Two consistency pairs became equal: `(INF + 1) - INF` against `(INF - INF) + 1`,
+and `ln(INF) + ln(ZERO)` against `ln(INF*ZERO)`. Three became unequal, all of
+the form `(a - a) / ZERO` against `a`: `(3 - 3) / ZERO` is 1 against 3,
+`(x - x) / ZERO` is `<|0|_1 |1|_-1>` against `x = 2 + h`, and `(INF - INF) / ZERO`
+is 1 against `INF`. Mechanical cancellation made them equal because its residue
+`a*ZERO` was divided back; under counting nothing was annihilated, so there is
+nothing to recover.
+
+Batch-dense operands keep mechanical cancellation.
+
+---
+
+## 1c. Convert and keep - the default
+
+Decided 2026-10-21 (`CANCELLATION = "convert_and_keep"`). Natural cancellation
+(§1b) with one change, for a WHOLLY zero operand of `+` or `-`:
+
+**K1 - two zeros meeting are two zeros.** A wholly zero operand converts by R1
+and is kept, whatever it meets. It is never counted away:
+
+```
+0 + 0                 ->  <|2|_-1>
+0 + 0 + 0             ->  <|3|_-1>
+R(5) + 0              ->  <|5|_0 |1|_-1>
+INF + 0               ->  <|1|_1 |1|_-1>
+(0 + 0) + 5           ->  <|5|_0 |2|_-1>          equal to 0 + (0 + 5)
+ZERO + 0              ->  <|2|_-1>
+x*x + 0, x = 3 + h    ->  <|9|_0 |7|_-1 |1|_-2>   a zero added to a seeded value
+```
+
+**K2 - the zero converts first, then the sign applies.** A subtracted zero is
+subtracted, so `x - 0` and `x + (-0)` are the same number. A cancellation of
+two converted zeros is counted and is a zero again (`<|0|_-1>`), so it
+converts at its next `+` or `-`:
+
+```
+0 - 0                 ->  <|1|_-1> - <|1|_-1>  =  <|0|_-1>
+0 - 0 - 0             ->  <|0|_-1> - <|1|_-1>  =  <|1|_-2> - <|1|_-1>
+                      =   <|-1|_-1 |1|_-2>
+0 - (0 + 0)           ->  <|1|_-1> - <|2|_-1>  =  <|-1|_-1>
+ZERO - 0              ->  <|0|_-1>
+0 - ZERO              ->  <|0|_-1>
+5 - 0                 ->  <|5|_0 |-1|_-1>
+0 - 5                 ->  <|-5|_0 |1|_-1>
+x*x - 0, x = 3 + h    ->  <|9|_0 |5|_-1 |1|_-2>   the same as x*x + (-0)
+```
+
+A written zero and `ZERO` are therefore the same operand of `+` and `-` under
+this rule, as `==` already says they are.
+
+**Everything else is natural cancellation (§1b).** Two non-zero operands are
+counted, a cancelled infinite grade drops to `<|0|_0>`, and there is no
+residue. A cancellation produces a zero, and by K1 that zero converts when it
+meets the next operand:
+
+```
+3 - 3                 ->  <|0|_0>
+(3 - 3) + 5           ->  <|5|_0 |1|_-1>
+3INF - 3INF           ->  <|0|_0>
+(3INF + 1) - 3INF     ->  <|1|_0>
+(3INF - 3INF) + 1     ->  <|1|_0 |1|_-1>          same standard part, one ZERO more
+```
+
+Under `conventional()`, and for an untagged zero inside `TAG`, R1 does not
+convert, so the zero is counted as under natural cancellation.
+
+**Measured, against the other two** (sparse-dense backend, same harness):
+
+| | convert and keep | natural | mechanical |
+|---|---|---|---|
+| `(a+b)*c = a*c + b*c`, 2000 cases (with / without written zeros above grade 0), built with `+` only | **39 / 54** fail; standard part differs in 1 / 0 | 586 / 470; 54 / 24 | 0 / 0 |
+| `(a+b)+c = a+(b+c)` | 24 / 33 fail, records only | 24 / 27, records only | 26 / 21; standard part differs in 4 / 5 |
+| `a+b = b+a` | **0** | 0 | 10 / 8 |
+| classical derivatives, 1000 cases x orders 0..6 (no zeros / zeros injected) | 6929 / 5770 | 6948 / 6067 | 6875 / 5508 |
+| derivative orders that are not classical (all warned, apart from 3 + 2 precision cases) | 60 / 958 | 41 / 661 | 113 / 1202 |
+| `st()` agreeing with classical, 15000 expressions | 11355 | 11356 | 11352 |
+| consistency pairs equal, of 35 | 21 | 22 | 23 |
+| multivariable battery, zero-injected: scored / refused (residues are refused by design), 0 failures in all three | 418 / 682 | 748 / 352 | 374 / 726 |
+| test suite, before the tests were updated for the three rules | 1033 passed, 36 failed | 989 passed, 80 failed | 1067 passed, 2 failed |
+| test suite, after that update (2026-10-21), this rule as default | 1141 passed, 2 failed (the two that also fail under mechanical) | | |
+| options (`private_demos`, 7 scripts, every Greek) | identical to mechanical | | |
+
+The consistency pair lost against natural is `(INF + 1) - INF` against
+`(INF - INF) + 1`: equal standard parts, one `ZERO` apart. Every test that fails
+under convert and keep also failed under natural. The 36 pinned mechanical
+behaviour, chiefly the residue `a - a = a*ZERO` of a cancellation between
+non-zero operands. They now run under each rule with that rule's values
+(`tests/zero_modes.py`).
+
+In the option demos two degenerate points read as under mechanical
+cancellation: the call at the forward with sigma = 0 is denoted from sigma^0,
+and the call at the money with T = 0 from T^0.5. The zero that `ln(S/K)` makes
+at S = K now converts when it is added to a seeded quantity. Under natural
+cancellation both matched the classical series.
+
+---
+
 ## 2. Worked examples - all measured
 
 | expression | result |
@@ -303,7 +529,7 @@ dimensions nobody built.
 | `0_3 × 2_0` | `2_2` |
 | `5_0 × 0_3` | `5_2` |
 | `0_0 / 0_0` | `1_0` |
-| `<0_3> + <5_3>` | `<5_3 1_2>` (an addition - R1 applies to `0_3`) |
+| `<0_3> + <5_3>` | `<5_3 1_2>` (mechanical: R1 applies to `0_3`); `<5_3>` under natural cancellation |
 | `<0_3 0_-1 0_-3> × 2_0` | `<0_3 0_-1 2_-4>` |
 | `x − x` for `x = <3_3 5_-1 2_-3>`, then `× 2_0` | `<0_3 0_-1 2_-4>` |
 | `<0_2 3_0><0_1 5_0>` | `<6_1 18_0>` |
@@ -557,7 +783,9 @@ not whether a coefficient is a zero -- a different question, left alone.
 `to_array`/`from_array` all round-trip zero coefficients. `from_array` was
 filtering `if v != 0`; that is gone.
 
-**7.3 - cancellation above dimension 0.** *Resolved; no change needed.*
+**7.3 - cancellation above dimension 0.** *Superseded 2026-10-20 by natural
+cancellation, N3 in §1b: a cancelled infinite grade leaves `<|0|_0>`. Kept as
+the mechanical record.*
 `3_3 - 3_3` gives `<0_3>` -- the dimension was constructed by both operands, so
 it exists and holds zero, exactly as at any other dimension. When that zero is
 later used as an operand R1 converts it, and the result is the mirror image of

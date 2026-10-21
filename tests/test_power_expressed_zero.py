@@ -20,6 +20,7 @@ import pytest
 import composite.composite_lib as cl
 from composite.composite_lib import R, ZERO, power, sqrt
 from composite.backends import config
+from tests.zero_modes import cancellation
 
 TOL = 1e-12
 
@@ -71,11 +72,21 @@ def test_constant_fast_path_is_correctly_rounded():
 
 
 def test_equal_constants_cancel_into_the_residue():
-    d = power(R(2), 0.5) - sqrt(R(2))
-    # a - a = a*h: the residue is sqrt(2) one grade down, not float dust
+    with cancellation("mechanical"):
+        d = power(R(2), 0.5) - sqrt(R(2))
+    # mechanical, a - a = a*h: the residue is sqrt(2) one grade down, not float dust
     got = d.coeffs_dict()
     assert set(got) == {-1} and close(got[-1], math.sqrt(2.0)), \
         "power(2, 0.5) - sqrt(2): got %r, want {-1: %r}" % (got, math.sqrt(2.0))
+
+
+@pytest.mark.parametrize("rule", ["natural", "convert_and_keep"])
+def test_equal_constants_cancel_to_a_counted_zero(rule):
+    # natural, convert_and_keep: the cancellation is counted (N2) and leaves
+    # <|0|_0>, still exactly zero, not float dust.
+    with cancellation(rule):
+        got = (power(R(2), 0.5) - sqrt(R(2))).coeffs_dict()
+    assert got == {0: 0.0}, "[%s] power(2, 0.5) - sqrt(2): got %r, want {0: 0.0}" % (rule, got)
 
 
 def test_negative_base_still_refuses():

@@ -130,7 +130,16 @@ All standard arithmetic operations are overloaded for Composite objects.
 
 ### Addition: `a + b`
 
-Adds coefficients at matching dimensions.
+Adds coefficients at matching dimensions. What happens to a zero operand, and
+to a cancellation, is set by [`CANCELLATION`](#cancellation); under the default
+(`"convert_and_keep"`):
+
+```python
+R(5) + R(0)               # <|5|_0 |1|_-1>    a written zero converts (R1) and is kept
+R(0) + R(0) + R(0)        # <|3|_-1>          three zeros
+3*INF - 3*INF             # <|0|_0>           a cancellation is counted, no residue
+(3*INF + 1) - 3*INF       # <|1|_0>
+```
 
 **Example:**
 
@@ -144,7 +153,16 @@ result = a + b  # <|4|₀ |6|₋₁>
 
 ### Subtraction: `a - b`
 
-Subtracts coefficients at matching dimensions.
+Subtracts coefficients at matching dimensions. A zero operand converts first and
+the sign then applies, so `x - 0` and `x + (-0)` are the same number. Under the
+default rule:
+
+```python
+R(6) - R(6)               # <|0|_0>           counted: the same number as R(0)
+R(5) - R(0)               # <|5|_0 |-1|_-1>
+R(0) - R(0)               # <|0|_-1>          ZERO - ZERO, counted
+R(0) - R(0) - R(0)        # <|-1|_-1 |1|_-2>  <|0|_-1> is a zero again and converts
+```
 
 ---
 
@@ -817,7 +835,7 @@ into a system that HAS an additive identity.
 No single substitution `h = value` does this, because the two halves of the
 dimension axis want opposite limits. Negative grades want `h = 0`, so an
 infinitesimal becomes a true zero; at the smallest representable float instead,
-`R(6) - R(6)` comes back as `2.96e-323`, a subnormal crumb, and the identity is
+`R(6) - R(6)` under mechanical cancellation (`|6|_-1`) comes back as `2.96e-323`, a subnormal crumb, and the identity is
 not restored. Positive grades want `h -> 0` from above, where a pole becomes an
 infinity -- which is IEEE754's own answer for `1/0`; at `h = 0` exactly they
 divide by zero and raise. So the projection is piecewise, keyed on `lead_order`:
@@ -989,9 +1007,49 @@ so it is True for NOTHING and False for a dimensioned zero.
   A written zero, `Composite({0: 0.0})`, is one.
 - `is_zero(x)` - either of the above.
 
+### `CANCELLATION`
+
+Module switch, `"convert_and_keep"`. Which rule `+` and `-` follow; `*`, `/`,
+negation and the functions are the same under all three. Zero Rules v2,
+sections 1b and 1c, has the rules and the measurements.
+
+```python
+import composite.composite_lib as cl
+cl.CANCELLATION = "convert_and_keep"   # the default
+cl.CANCELLATION = "natural"
+cl.CANCELLATION = "mechanical"         # the rule up to 2026-10-20
+```
+
+| | `"convert_and_keep"` | `"natural"` | `"mechanical"` |
+|---|---|---|---|
+| `R(5) + R(0)` | `<\|5\|_0 \|1\|_-1>` | `<\|5\|_0>` | `<\|5\|_0 \|1\|_-1>` |
+| `R(5) - R(0)` | `<\|5\|_0 \|-1\|_-1>` | `<\|5\|_0>` | `<\|5\|_0 \|-1\|_-1>` |
+| `R(0) + R(0)` | `<\|2\|_-1>` | `<\|0\|_0>` | `<\|2\|_-1>` |
+| `R(6) - R(6)` | `<\|0\|_0>` | `<\|0\|_0>` | `<\|6\|_-1>` |
+| `3*INF - 3*INF` | `<\|0\|_0>` | `<\|0\|_0>` | `<\|3\|_0>` |
+| `(3*INF + 1) - 3*INF` | `<\|1\|_0>` | `<\|1\|_0>` | `<\|0\|_1 \|1\|_0>` |
+| `(3*INF - 3*INF) + 1` | `<\|1\|_0 \|1\|_-1>` | `<\|1\|_0>` | `<\|4\|_0>` |
+| `R(3) + 0`, then `x*x` | `<\|9\|_0 \|6\|_-1 \|1\|_-2>`, denoted | `<\|9\|_0>` | as convert_and_keep |
+
+- `"convert_and_keep"` - `+` and `-` count, grade by grade, and leave no
+  residue: a cancelled real or infinitesimal grade stays as an inert `|0|_k`,
+  a cancelled infinite grade drops to `|0|_0`. A wholly zero operand converts
+  by R1 and is kept, whatever it meets; it converts first and the sign then
+  applies.
+- `"natural"` - the same counting, but a wholly zero operand is counted too and
+  adds nothing, so `R(5) + R(0)` is 5 and two zeros added stay one zero.
+- `"mechanical"` - R1 on every operand, and a cancellation leaves the annihilated
+  quantity one grade down, `a - a = a*h`, as set by `CANCELLATION_CARRIES`.
+
+Any other value raises `ValueError` at the next `+` or `-`. Batch-dense data
+follows `"mechanical"` whatever this says. To switch for a block and restore,
+the tests use `tests/zero_modes.cancellation(rule)`.
+
 ### `CANCELLATION_CARRIES`
 
-Module switch, `"quantity"`. What a cancellation deposits.
+Module switch, `"quantity"`. What a cancellation deposits under
+`CANCELLATION = "mechanical"`; the other two rules leave no residue and do not
+read it. The examples below are mechanical.
 
 `"quantity"` - the whole annihilated quantity, one grade down: **`a - a = a*h`**.
 
@@ -1291,9 +1349,13 @@ result = 10 / x     # int / Composite -> Composite
     # Good
     x = R(3) + ZERO
 
-    # Bad - won't give derivatives
+    # Bad - a written zero, not a seed
     x = R(3) + 0
     ```
+
+    Under the default rule the `0` converts to `ZERO`, so this gives the same jet
+    but marks it denoted, and every `d(n)` warns. Under `CANCELLATION = "natural"`
+    the `0` is counted away and there are no derivatives at all.
 
 4. **Check standard part for validity**
 

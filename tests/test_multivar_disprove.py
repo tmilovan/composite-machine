@@ -56,6 +56,7 @@ from composite.composite_lib import (
     R, Composite, ResidueError,
     sin, cos, exp, ln, sqrt,
 )
+from tests.zero_modes import cancellation
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -474,8 +475,18 @@ class TestEdgeCases:
         print(f"\n  {label}: refused, {type(e.value).__name__}: {str(e.value)[:60]}")
 
     def test_EC02_subtraction_cancellation(self):
-        """exp(xy) - exp(xy): a cancellation, refused."""
-        self._refused("EC02 f - f", lambda x, y: exp(x * y) - exp(x * y))
+        """exp(xy) - exp(xy): under mechanical cancellation a residue, refused."""
+        with cancellation("mechanical"):
+            self._refused("EC02 f - f", lambda x, y: exp(x * y) - exp(x * y))
+
+    @pytest.mark.parametrize("rule", ["natural", "convert_and_keep"])
+    def test_EC02b_counted_cancellation(self, rule):
+        """exp(xy) - exp(xy) counted to zero (N2): no residue, nothing refused,
+        and the gradient is the classical one of the zero function."""
+        with cancellation(rule):
+            g = gradient_at(lambda x, y: exp(x * y) - exp(x * y), [1, 1])
+        for i, v in enumerate(g):
+            check(f"EC02b [{rule}] d/dx{i} f - f", v, 0.0, 0.0)
 
     def test_EC03_multiply_by_zero(self):
         """0 * exp(xy): a written zero as an operand, refused."""

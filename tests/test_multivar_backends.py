@@ -22,6 +22,7 @@ from composite.composite_lib import LimitDoesNotExistError, R, ResidueError, exp
 from composite.composite_multivar import (PoleError, curl_at, directional_derivative, gradient_at,
                                           hessian_at, laplacian_at, multivar_limit,
                                           partial_derivative)
+from tests.zero_modes import cancellation
 
 TOL = 1e-13
 BACKENDS = ["sparse_dense", "dict", "dense_series", "fractional_dict", "fractional_numpy"]
@@ -72,10 +73,18 @@ def test_values(backend, label, run, want):
 REFUSALS = [
     ("path-dependent limit", lambda: multivar_limit(lambda x, y: x * y / (x * x + y * y), [0, 0]),
      LimitDoesNotExistError),
-    ("cancellation residue", lambda: gradient_at(lambda x, y: exp(x * y) - exp(x * y), [1, 1]), ResidueError),
+    # Only mechanical cancellation leaves a residue (a - a = a*h); natural and
+    # convert_and_keep count it to zero: test_counted_cancellation_has_no_residue.
+    ("cancellation residue", lambda: _mechanical(
+        lambda: gradient_at(lambda x, y: exp(x * y) - exp(x * y), [1, 1])), ResidueError),
     ("pole", lambda: gradient_at(lambda x, y: x * y / (x + y), [1, -1]), PoleError),
     ("float function", lambda: gradient_at(lambda x, y: math.exp(x * y), [0.5, 1.0]), ValueError),
 ]
+
+
+def _mechanical(run):
+    with cancellation("mechanical"):
+        return run()
 
 
 @pytest.mark.parametrize("label,run,exc", REFUSALS, ids=[c[0] for c in REFUSALS])
@@ -83,3 +92,13 @@ def test_refusals(backend, label, run, exc):
     with pytest.raises(exc) as e:
         run()
     print(f"\n  [{backend}] {label}: {type(e.value).__name__}")
+
+
+@pytest.mark.parametrize("rule", ["natural", "convert_and_keep"])
+def test_counted_cancellation_has_no_residue(backend, rule):
+    # exp(xy) - exp(xy) is counted to zero (N2), nothing converts, so there is
+    # nothing to refuse: the gradient is the classical one of the zero function.
+    with cancellation(rule):
+        got = gradient_at(lambda x, y: exp(x * y) - exp(x * y), [1, 1])
+    for i, g in enumerate(got):
+        check(f"[{backend}] [{rule}] d/dx{i} exp(xy) - exp(xy) at (1,1)", g, 0.0)

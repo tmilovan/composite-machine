@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Brute-force derivative battery: random expressions against an mpmath reference.
 
+Scores the MECHANICAL cancellation rule, the one its reference encodes, and
+sets CANCELLATION = "mechanical" for the run.  The default rule,
+convert_and_keep, has its own battery: brute_derivatives_convert_and_keep.py.
+
 Not a pass/fail suite (pytest does not collect it).  It reports, by category,
 where the library's derivatives disagree with an independent reference, so a
 change can be checked against thousands of compositions nobody wrote by hand.
@@ -351,9 +355,10 @@ if __name__ == "__main__":
         getattr(config, "use_" + args.backend)()
     cl._refresh_constants()
     cl.set_max_order(args.max_order)
+    cl.CANCELLATION = "mechanical"          # the rule this reference encodes
     # the module-level names were bound at import, before the switch
     ZERO = cl.ZERO
-    print(f"backend {type(get_backend()).__name__}, orders 0..{NMAX}, tol {TOL} rel, "
+    print(f"rule {cl.CANCELLATION}, backend {type(get_backend()).__name__}, orders 0..{NMAX}, tol {TOL} rel, "
           f"mpmath taylor at 40 and 60 digits (agree {AGREE}), seed {args.seed}/+1, "
           f"max order {args.max_order}",
           flush=True)

@@ -22,6 +22,22 @@ Pade coefficient that did not exist: it manufactured a zero the mathematics
 never expressed, and the lateral Borel integral returned 3224 for a value of
 0.697.  Section Z5 pins that down.
 
+THREE CANCELLATION RULES (Zero Rules v2, sections 1b and 1c).  The sections
+that depend on what + and - do with a zero run under every rule in
+tests/zero_modes.RULES, each against that rule's own expectation:
+
+    "mechanical"        R1 on every operand of + and -, and a - a = a*h at
+                        the site.  This file was first written for it, and its
+                        original checks run verbatim under it.
+    "natural"           + and - count: a cancellation stays |0|_k, a wholly
+                        zero operand adds nothing (N1-N4).
+    "convert_and_keep"  the default: natural, except a wholly zero operand of
+                        + or - converts by R1 and is kept, and the sign then
+                        applies (K1, K2).
+
+The R6 statement above is the mechanical and convert-and-keep reading; under
+natural, R(5) + <0_0> is <5_0>.
+
 This file was briefly written against the opposite rule -- a bare scalar zero
 coercing to NOTHING -- which was reverted.  The premise was wrong (the event
 R1 records is the EXPRESSION of the zero, and writing it is that event), and
@@ -46,6 +62,7 @@ from composite.composite_lib import (Composite, R, ZERO, is_zero, is_nothing,
                                      is_vanishing)
 from composite.transseries import _d_composite
 from test_dimension_scales import Suite, head
+from tests.zero_modes import RULES, cancellation
 
 cl.MAX_ACTIVE_DIMS = 10 ** 9
 
@@ -65,30 +82,61 @@ def _quiet(fn, *a):
 
 
 # =============================================================================
-def z1_expressed(t):
-    head("Z1  a written zero is expressed, and converts")
-    want = "<|5|\u2080 |1|\u208b\u2081>"
+_FIVE_AND_A_ZERO = "<|5|\u2080 |1|\u208b\u2081>"
+_FIVE = "<|5|\u2080>"
+
+# What `R(5) + <0_0>` is: R1 converts the zero and keeps it (mechanical, and K1
+# under convert-and-keep), or the zero is counted and adds nothing (N4).
+_Z1_PLUS_ZERO = {"mechanical": _FIVE_AND_A_ZERO, "convert_and_keep": _FIVE_AND_A_ZERO,
+                 "natural": _FIVE}
+# <0_0> + <0_0>: two zeros are two zeros (mechanical; K1), or one counted zero
+# (N4: two wholly zero operands are summed grade by grade without R1).
+_Z1_ZERO_PLUS_ZERO = {"mechanical": "<|2|\u208b\u2081>",
+                      "convert_and_keep": "<|2|\u208b\u2081>",
+                      "natural": "<|0|\u2080>"}
+
+
+def z1_expressed(t, rule):
+    head(f"Z1  a written zero is expressed, and converts  [{rule}]")
+    want = _Z1_PLUS_ZERO[rule]
     for i, (lbl, got) in enumerate((
             ("R(5) + 0        -- the spec's own example",
              str(_quiet(lambda: R(5) + 0))),
             ("R(5) + <0_0>    -- same number, written out", str(R(5) + Z0)),
             ("R(5) + R(0)     -- and the canonical spelling", str(R(5) + R(0)))), 1):
-        t.true(f"Z1.0{i} {lbl}: {got}", got == want, f"got {got!r} want {want!r}")
-    t.true(f"Z1.04 <0_0> + <0_0> -> 2_-1: {Z0 + Z0}",
-           str(Z0 + Z0) == "<|2|\u208b\u2081>", f"{Z0 + Z0}")
-    t.true(f"Z1.05 c * 0 converts rather than annihilating: "
+        t.true(f"Z1.0{i} [{rule}] {lbl}: {got}", got == want,
+               f"got {got!r} want {want!r}")
+    want = _Z1_ZERO_PLUS_ZERO[rule]
+    t.true(f"Z1.04 [{rule}] <0_0> + <0_0> -> {want}: {Z0 + Z0}",
+           str(Z0 + Z0) == want, f"got {Z0 + Z0} want {want}")
+    t.true(f"Z1.05 [{rule}] c * 0 converts rather than annihilating: "
            f"{_d(_quiet(lambda: C * 0))}",
            _d(_quiet(lambda: C * 0)) == {-2: 3.0, -1: 5.0},
            f"{_d(_quiet(lambda: C * 0))}")
-    # 1 - 1 != 0, which is the same statement
-    t.exact("Z1.10 R(1) - R(1) converts AT THE SITE, keeping what cancelled",
-            (R(1) - R(1)).coeffs_dict(), {-1: 1.0})
-    t.exact("Z1.10b and the residue is the magnitude, not a unit: R(6) - R(6)",
-            (R(6) - R(6)).coeffs_dict(), {-1: 6.0})
-    t.true(f"Z1.11 and it converts on next use: {(R(1) - R(1)) + R(5)}",
-           str((R(1) - R(1)) + R(5)) == "<|5|\u2080 |1|\u208b\u2081>",
-           f"{(R(1) - R(1)) + R(5)}")
-    t.true("Z1.12 ZERO - ZERO == ZERO**2", (ZERO - ZERO) == ZERO ** 2,
+    if rule == "mechanical":
+        # 1 - 1 != 0, which is the same statement
+        t.exact("Z1.10 [mechanical] R(1) - R(1) converts AT THE SITE, keeping what cancelled",
+                (R(1) - R(1)).coeffs_dict(), {-1: 1.0})
+        t.exact("Z1.10b [mechanical] and the residue is the magnitude, not a unit: R(6) - R(6)",
+                (R(6) - R(6)).coeffs_dict(), {-1: 6.0})
+    else:
+        # N2: a cancelled real grade stays where it was, as |0|_0 -- the same
+        # number as a written 0.  No residue, so no magnitude either.
+        t.exact(f"Z1.10 [{rule}] R(1) - R(1) is counted: |0|_0, nothing at the site",
+                (R(1) - R(1)).coeffs_dict(), {0: 0.0})
+        t.exact(f"Z1.10b [{rule}] and R(6) - R(6) is the same |0|_0, no magnitude",
+                (R(6) - R(6)).coeffs_dict(), {0: 0.0})
+        t.true(f"Z1.10c [{rule}] R(6) - R(6) == R(0), the written zero",
+               (R(6) - R(6)) == R(0), f"{R(6) - R(6)}")
+    # And on next use: mechanical already converted at the site; under K1 the
+    # counted zero converts when it meets R(5); under N4 it adds nothing.
+    want = _Z1_PLUS_ZERO[rule]
+    t.true(f"Z1.11 [{rule}] and on next use: {(R(1) - R(1)) + R(5)}",
+           str((R(1) - R(1)) + R(5)) == want,
+           f"got {(R(1) - R(1)) + R(5)} want {want}")
+    # == reads a wholly zero operand through R1, so <|0|_-1> (counted) and
+    # <|1|_-2> (mechanical residue) both equal ZERO**2.
+    t.true(f"Z1.12 [{rule}] ZERO - ZERO == ZERO**2", (ZERO - ZERO) == ZERO ** 2,
            f"{ZERO - ZERO}")
 
 
@@ -125,8 +173,19 @@ def z2_family(t):
 
 
 # =============================================================================
-def z3_substitution(t):
-    head("Z3  substitution: equal operands must stay equal under every f")
+# Where <0_0> and ZERO, equal under ==, are NOT the same operand of + or -.
+# convert_and_keep: a written zero converts to ZERO in + and - (K1) and the
+#   sign then applies (K2), so it is the same operand as ZERO: no split.
+# natural, N4: a written zero is counted and adds nothing, ZERO is a quantity.
+# Every other (rule, f) pair must keep them equal.
+_Z3_SPLIT = {
+    ("natural", "+c"): ({-1: 3.0, 0: 5.0}, {-1: 4.0, 0: 5.0}),
+    ("natural", "c-"): ({-1: 3.0, 0: 5.0}, {-1: 2.0, 0: 5.0}),
+}
+
+
+def z3_substitution(t, rule):
+    head(f"Z3  substitution: equal operands must stay equal under every f  [{rule}]")
     # This is what caught d/dh reading coefficients raw: |0|_0 and ZERO are the
     # same number -- each converts under R1, so they are operationally
     # indistinguishable -- yet d/dh gave NOTHING for one and |1|_0 for the
@@ -140,14 +199,21 @@ def z3_substitution(t):
             continue
         for fname, f in fs:
             fa, fb = _quiet(f, a), _quiet(f, b)
-            t.true(f"Z3 {pname} under {fname}: {_d(fa)} == {_d(fb)}", fa == fb,
-                   f"{_d(fa)} vs {_d(fb)}")
+            split = _Z3_SPLIT.get((rule, fname)) if pname == "<0_0> vs ZERO" else None
+            if split is None:
+                t.true(f"Z3 [{rule}] {pname} under {fname}: {_d(fa)} == {_d(fb)}",
+                       fa == fb, f"{_d(fa)} vs {_d(fb)}")
+            else:
+                t.exact(f"Z3 [{rule}] {pname} under {fname} split by the rule: <0_0> side",
+                        _d(fa), split[0])
+                t.exact(f"Z3 [{rule}] {pname} under {fname} split by the rule: ZERO side",
+                        _d(fb), split[1])
 
 
 # =============================================================================
-def z4_laws(t):
-    head("Z4  the algebraic laws, zeros of every kind in the pool")
-    rng = random.Random(20260920)
+def z4_laws(t, rule):
+    head(f"Z4  the algebraic laws, zeros of every kind in the pool  [{rule}]")
+    rng = random.Random(20260920)      # the same 2000 triples under every rule
 
     def mk():
         r = rng.random()
@@ -187,23 +253,58 @@ def z4_laws(t):
             "(a+b)*c = a*c+b*c": lambda a, b, c: (a + b) * c == a * c + b * c}
     N = 2000
     fails = {k: 0 for k in laws}
+    # Under natural cancellation distributivity is not a law: (a-a)*c is an
+    # annihilation of a counted zero, a*c - a*c a count (section 1b).  What
+    # must hold instead: every failure has an EXPRESSED wholly zero factor,
+    # partial sum or product, and the standard part differs only where the
+    # factor c is infinite.
+    dist_no_zero = dist_st = dist_st_finite = 0
+
+    def _wz(x):
+        return cl._is_wholly_zero(x) and not is_nothing(x)
+
+    def _st(x):
+        try:
+            return round(x.st(), 12)
+        except Exception:
+            return "undef"
+
+    def _infinite(x):
+        return any(float(d) > 0 and v != 0.0 for d, v in x.coeffs_dict().items())
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         for _ in range(N):
             a, b, c = mk(), mk(), mk()
             for k, f in laws.items():
                 try:
-                    if not f(a, b, c):
-                        fails[k] += 1
+                    ok = f(a, b, c)
                 except Exception:
-                    fails[k] += 1
+                    ok = False
+                if ok:
+                    continue
+                fails[k] += 1
+                if k == "(a+b)*c = a*c+b*c":
+                    if not any(_wz(x) for x in (a, b, c, a + b, a * c, b * c)):
+                        dist_no_zero += 1
+                    if _st((a + b) * c) != _st(a * c + b * c):
+                        dist_st += 1
+                        dist_st_finite += not _infinite(c)
     for k, n in fails.items():
-        t.true(f"Z4 {k:<20} {N - n}/{N} hold", n == 0, f"{n} failures")
+        if rule == "natural" and k == "(a+b)*c = a*c+b*c":
+            t.true(f"Z4 [natural] {k:<20} {N - n}/{N} hold; every one of the {n} "
+                   f"failures has an expressed wholly zero piece", dist_no_zero == 0,
+                   f"{dist_no_zero} failures without one")
+            t.true(f"Z4 [natural] and the standard part differs in {dist_st} of them, "
+                   f"each with an infinite factor c", dist_st_finite == 0,
+                   f"{dist_st_finite} with a finite c")
+            continue
+        t.true(f"Z4 [{rule}] {k:<20} {N - n}/{N} hold", n == 0, f"{n} failures")
 
 
 # =============================================================================
-def z5_expressed_vs_absent(t):
-    head("Z5  the real bug: a zero that was MANUFACTURED, not expressed")
+def z5_expressed_vs_absent(t, rule):
+    head(f"Z5  the real bug: a zero that was MANUFACTURED, not expressed  [{rule}]")
     coeffs = {0: 2.0, 2: 5.0}          # no coefficient at 1 -- it does not exist
 
     # WRONG: invent one.  The scalar is written, so it is expressed, and it
@@ -211,8 +312,14 @@ def z5_expressed_vs_absent(t):
     acc = R(7)
     for k in (0, 1, 2):
         acc = _quiet(lambda a=acc, k=k: a + coeffs.get(k, 0.0))
-    t.true(f"Z5.01 `d.get(k, 0.0)` for an ABSENT coefficient deposits |1|_-1: "
-           f"{_d(acc)}", _d(acc).get(-1, 0.0) == 1.0, f"{_d(acc)}")
+    if rule == "natural":
+        # N4: the manufactured zero is counted and adds nothing, so under
+        # natural cancellation this bug has no symptom in + at all.
+        t.exact(f"Z5.01 [natural] `d.get(k, 0.0)` deposits nothing: the zero is counted",
+                _d(acc), {0: 14.0})
+    else:
+        t.true(f"Z5.01 [{rule}] `d.get(k, 0.0)` for an ABSENT coefficient deposits |1|_-1: "
+               f"{_d(acc)}", _d(acc).get(-1, 0.0) == 1.0, f"{_d(acc)}")
 
     # RIGHT: an absent term is absent.
     acc2 = R(7)
@@ -220,15 +327,20 @@ def z5_expressed_vs_absent(t):
         v = coeffs.get(k)
         if v is not None:
             acc2 = acc2 + v
-    t.true(f"Z5.02 `d.get(k)` and skip deposits nothing: {_d(acc2)}",
+    t.true(f"Z5.02 [{rule}] `d.get(k)` and skip deposits nothing: {_d(acc2)}",
            _d(acc2) == {0: 14.0}, f"{_d(acc2)}")
 
     # and the accumulator idiom, which is the same mistake one line earlier
-    t.true(f"Z5.10 `acc = 0` seeds an expressed zero: "
-           f"{_d(_quiet(lambda: sum([C, C])))}",
-           _d(_quiet(lambda: sum([C, C]))).get(-1) == 7.0,
-           f"{_d(_quiet(lambda: sum([C, C])))}")
-    t.true(f"Z5.11 Composite({{}}) seeds an absence: "
+    if rule == "natural":
+        # N4 again: sum()'s start value 0 is counted, so 0 + C + C is 2C.
+        t.exact("Z5.10 [natural] `acc = 0` is counted and adds nothing",
+                _d(_quiet(lambda: sum([C, C]))), {-1: 6.0, 0: 10.0})
+    else:
+        t.true(f"Z5.10 [{rule}] `acc = 0` seeds an expressed zero: "
+               f"{_d(_quiet(lambda: sum([C, C])))}",
+               _d(_quiet(lambda: sum([C, C]))).get(-1) == 7.0,
+               f"{_d(_quiet(lambda: sum([C, C])))}")
+    t.true(f"Z5.11 [{rule}] Composite({{}}) seeds an absence: "
            f"{_d(sum([C, C], Composite({})))}",
            sum([C, C], Composite({})) == C * 2.0,
            f"{_d(sum([C, C], Composite({})))}")
@@ -238,54 +350,84 @@ def z5_expressed_vs_absent(t):
         warnings.simplefilter("always")
         _ = C + 0
     msg = str(w[0].message) if w else ""
-    t.true("Z5.20 and the bare-zero warning says so: " + msg[:46] + "...",
-           "d.get(k)" in msg and "Composite({})" in msg, msg[:90])
+    if rule == "natural":
+        # Nothing converts, so there is nothing to warn about.
+        t.true("Z5.20 [natural] C + 0 converts nothing and warns nothing",
+               not w, f"{len(w)} warnings: {msg[:60]}")
+    else:
+        t.true(f"Z5.20 [{rule}] and the bare-zero warning says so: " + msg[:46] + "...",
+               "d.get(k)" in msg and "Composite({})" in msg, msg[:90])
 
 
 # =============================================================================
-def z4c_cancelling_pair(t):
-    head("Z4c  a cancelling pair: a-a is unambiguous, a+(-a) is not")
+def z4c_cancelling_pair(t, rule):
+    head(f"Z4c  a cancelling pair: a-a is unambiguous, a+(-a) is not  [{rule}]")
+    if rule != "mechanical":
+        # N2: + and - count, so every cancelled grade stays as |0|_k, and the
+        # pair is commutative again -- there is no residue to read off an
+        # operand, so the order cannot matter.
+        for v in (2.0, 6.0, -3.0, 0.5):
+            a = Composite({0: v, -1: 1.0})
+            t.exact(f"Z4c [{rule}] ({v}+h) - itself leaves |0|_0 |0|_-1",
+                    (a - a).coeffs_dict(), {-1: 0.0, 0: 0.0})
+            t.exact(f"Z4c [{rule}] ({v}+h) + (-itself) is the same",
+                    (a + (-a)).coeffs_dict(), {-1: 0.0, 0: 0.0})
+            t.exact(f"Z4c [{rule}] and so is the other order",
+                    ((-a) + a).coeffs_dict(), {-1: 0.0, 0: 0.0})
+        return
     # a - a  has the quantity on both sides, so it is a*h whichever way it is
     # read.  a + (-a) has a on one side and -a on the other, and the rule reads
     # the left one, so the two orders differ by a sign.  Pinned rather than
     # deleted: it is the price of Euler's ratio surviving at every order.
     for v in (2.0, 6.0, -3.0, 0.5):
         a = Composite({0: v, -1: 1.0})
-        t.exact(f"Z4c ({v}+h) - itself is (that)*h",
+        t.exact(f"Z4c [mechanical] ({v}+h) - itself is (that)*h",
                 (a - a).coeffs_dict(), (a * ZERO).coeffs_dict())
-        t.true(f"Z4c ({v}+h) + (-itself) differs from the other order",
+        t.true(f"Z4c [mechanical] ({v}+h) + (-itself) differs from the other order",
                (a + (-a)).coeffs_dict() != ((-a) + a).coeffs_dict(),
                f"{(a + (-a)).coeffs_dict()} vs {((-a) + a).coeffs_dict()}")
-        t.exact(f"Z4c and the two differ by a sign only",
+        t.exact(f"Z4c [mechanical] and the two differ by a sign only",
                 {k: -v2 for k, v2 in (a + (-a)).coeffs_dict().items()},
                 ((-a) + a).coeffs_dict())
 
 
 # =============================================================================
-def z4b_grouping(t):
-    head("Z4b  regrouping differs by EXACTLY the residue it caused")
+# What ((a+b)+c) - (a+(b+c)) leaves, a = v, b = -v.  mechanical: the residue
+# |v|_-1 of the grouping that cancelled.  convert_and_keep: the cancellation
+# is the counted zero |0|_0, which then meets c and converts as a unit (K1), so
+# |1|_-1 whatever v was.  natural: the counted zero adds nothing (N4).
+def _z4b_want(rule, v):
+    return {"mechanical": {-1: abs(v)}, "convert_and_keep": {-1: 1.0},
+            "natural": {}}[rule]
+
+
+def z4b_grouping(t, rule):
+    head(f"Z4b  regrouping differs by EXACTLY the residue it caused  [{rule}]")
     # The associativity "failure" is the thesis, not a defect, so it gets
     # pinned as an identity rather than deleted: the grouping that cancelled
     # deposits the magnitude it annihilated, and the other deposits nothing.
     for v, c in ((1.0, 2.0), (6.0, 2.0), (6.0, -4.0), (0.5, 3.0)):
         a, b, cc = R(v), R(-v), R(c)
         diff = ((a + b) + cc) - (a + (b + cc))
-        t.exact(f"Z4b ({v}+{-v})+{c} exceeds {v}+({-v}+{c}) by |{v}|_-1",
+        want = _z4b_want(rule, v)
+        t.exact(f"Z4b [{rule}] ({v}+{-v})+{c} exceeds {v}+({-v}+{c}) by {want}",
                 {k: x for k, x in diff.coeffs_dict().items() if x != 0.0},
-                {-1: abs(v)})
+                want)
 
 
 # =============================================================================
-def z6_naming(t):
-    head("Z6  is_zero / is_vanishing / is_nothing")
+def z6_naming(t, rule):
+    head(f"Z6  is_zero / is_vanishing / is_nothing  [{rule}]")
+    # Under mechanical cancellation c-c converts at the site, so it is a
+    # genuine infinitesimal and none of the three predicates hold; the
+    # remaining producer of a vanishing composite is the WRITTEN zero.  Under
+    # counting (N2) c-c is |0|_0 |0|_-1, a vanishing zero exactly like <0_0>.
+    cc = (False, False, False) if rule == "mechanical" else (True, False, True)
     cases = [("E", E, True, True, False), ("<0_0>", Z0, True, False, True),
-             # c-c converts at the site now, so it is a genuine infinitesimal
-             # and none of the three predicates hold.  The remaining producer
-             # of a vanishing composite is the WRITTEN zero, <0_0> above.
-             ("c-c", C - C, False, False, False), ("ZERO", ZERO, False, False, False),
+             ("c-c", C - C) + cc, ("ZERO", ZERO, False, False, False),
              ("c", C, False, False, False), ("0.0", 0.0, True, False, False)]
     for lbl, v, wz, wn, wv in cases:
-        t.true(f"Z6 {lbl:<7} is_zero={is_zero(v)} is_nothing={is_nothing(v)} "
+        t.true(f"Z6 [{rule}] {lbl:<7} is_zero={is_zero(v)} is_nothing={is_nothing(v)} "
                f"is_vanishing={is_vanishing(v)}",
                (is_zero(v), is_nothing(v), is_vanishing(v)) == (wz, wn, wv),
                f"want {(wz, wn, wv)}")
@@ -368,8 +510,8 @@ def z7_equality_is_identity(t):
         t.true("Z7.16 equal inputs stay equal through %s" % lbl, f(p_) == f(q_))
 
 
-def z8_r1_reaches_the_transcendentals(t):
-    head("Z8  R1 applies to a transcendental's argument, not just to arithmetic")
+def z8_r1_reaches_the_transcendentals(t, rule):
+    head(f"Z8  R1 applies to a transcendental's argument, not just to arithmetic  [{rule}]")
     # Arithmetic ran its operands through _operands, which ends in _r1.  The
     # transcendentals did not, so a cancellation arrived as |0|_0 instead of
     # |1|_-1 and the infinitesimal was thrown away at the door:
@@ -388,12 +530,23 @@ def z8_r1_reaches_the_transcendentals(t):
     # ceases to exist there.  With R1 skipped the argument reached sqrt as a
     # plain zero and the answer was 0 -- the branch point silently gone.
     z = R(1) - R(1)
-    t.exact("Z8.01 a cancellation arrives converted, magnitude carried",
-            z.coeffs_dict(), {-1: 1.0})
-    t.exact("Z8.02 so _r1 has nothing left to do: it is a no-op here",
-            _r1(z).coeffs_dict(), {-1: 1.0})
-    t.exact("Z8.02b and sqrt sees the infinitesimal without R1 at its door",
-            cl.sqrt(z).lead_order(), 0.5)
+    if rule == "mechanical":
+        t.exact("Z8.01 [mechanical] a cancellation arrives converted, magnitude carried",
+                z.coeffs_dict(), {-1: 1.0})
+        t.exact("Z8.02 [mechanical] so _r1 has nothing left to do: it is a no-op here",
+                _r1(z).coeffs_dict(), {-1: 1.0})
+        t.exact("Z8.02b [mechanical] and sqrt sees the infinitesimal without R1 at its door",
+                cl.sqrt(z).lead_order(), 0.5)
+    else:
+        # Counted (N2), the cancellation arrives as |0|_0, and R1 at the door
+        # of every consumer converts it -- the conversion the comment above
+        # describes a transcendental once skipping.
+        t.exact(f"Z8.01 [{rule}] a cancellation arrives counted, as |0|_0",
+                z.coeffs_dict(), {0: 0.0})
+        t.exact(f"Z8.02 [{rule}] and _r1 converts it to |1|_-1",
+                _r1(z).coeffs_dict(), {-1: 1.0})
+        t.exact(f"Z8.02b [{rule}] so sqrt still sees the infinitesimal: the branch point",
+                cl.sqrt(z).lead_order(), 0.5)
 
     # THE PHYSICS CASE.
     Za = R(1.0)
@@ -417,7 +570,7 @@ def z8_r1_reaches_the_transcendentals(t):
         f = getattr(cl, nm)
         try:
             a, b = f(z), f(ZERO)
-            t.true("Z8.06 %-5s(R(1)-R(1)) == %s(ZERO)" % (nm, nm), a == b,
+            t.true("Z8.06 [%s] %-5s(R(1)-R(1)) == %s(ZERO)" % (rule, nm, nm), a == b,
                    "%s  vs  %s" % (str(a)[:34], str(b)[:34]))
         except Exception as e:
             t.true("Z8.06 %-5s(R(1)-R(1)) == %s(ZERO)" % (nm, nm), False,
@@ -655,16 +808,33 @@ def z11_deconvolve_emits_unique_grades(t):
 
 def run_all():
     t = Suite()
+    # Sections whose expectations depend on what + and - do with a zero run
+    # under every cancellation rule; the rest under the default rule only.
+    per_rule = (z1_expressed, z3_substitution, z4_laws, z4b_grouping,
+                z4c_cancelling_pair, z5_expressed_vs_absent, z6_naming,
+                z8_r1_reaches_the_transcendentals)
+    once = (z2_family, z7_equality_is_identity, z9_nothing_keeps_the_constant,
+            z10_division_by_an_unbounded_multi_axis_divisor,
+            z11_deconvolve_emits_unique_grades)
     for fn in (z1_expressed, z2_family, z3_substitution, z4_laws, z4b_grouping, z4c_cancelling_pair,
                z5_expressed_vs_absent, z6_naming, z7_equality_is_identity,
                z8_r1_reaches_the_transcendentals,
                z9_nothing_keeps_the_constant,
                z10_division_by_an_unbounded_multi_axis_divisor,
                z11_deconvolve_emits_unique_grades):
-        try:
-            fn(t)
-        except Exception as e:
-            t._note(f"{fn.__name__} ABORTED", False, f"{type(e).__name__}: {e}")
+        for rule in (RULES if fn in per_rule else (None,)):
+            name = fn.__name__ if rule is None else f"{fn.__name__} [{rule}]"
+            try:
+                if rule is None:
+                    fn(t)
+                else:
+                    with cancellation(rule):
+                        fn(t, rule)
+            except Exception as e:
+                t._note(f"{name} ABORTED", False, f"{type(e).__name__}: {e}")
+    assert set(per_rule) | set(once) == set(
+        f for f in globals().values() if callable(f) and getattr(f, "__name__", "").startswith("z")
+        and f.__name__[1:2].isdigit())
     total = t.passed + t.failed
     print(f"\n{'=' * 66}")
     print(f"RESULTS: {t.passed}/{total} passed")

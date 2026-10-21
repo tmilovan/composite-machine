@@ -15,6 +15,7 @@ import composite.composite_lib as cl
 from composite.composite_lib import (
     Composite, R, ZERO, StandardPartUndefinedError, ln, sqrt)
 from composite.backends import config
+from tests.zero_modes import RULES, cancellation
 
 MIN_SUBNORMAL = 5e-324
 
@@ -76,12 +77,22 @@ def test_it_agrees_with_st_wherever_st_is_defined():
             "%s: projection %r vs st %r" % (value, value.to_ieee754(), value.st())
 
 
-def test_the_smallest_float_is_NOT_a_substitute():
+# What `6 - 6` leaves, per rule.
+#   mechanical: a - a = a*h, the residue |6|_-1.
+#   natural, convert_and_keep: counted to <|0|_0> (N2).
+SIX_MINUS_SIX = {"mechanical": {-1: 6.0}, "natural": {0: 0.0}, "convert_and_keep": {0: 0.0}}
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_the_smallest_float_is_NOT_a_substitute(rule):
     # The measurement this method exists because of: at h = 5e-324 a
-    # cancellation comes back as a subnormal, so `6 - 6` is not 0 and the
-    # additive identity is not restored.
-    residue = R(6) - R(6)
-    assert residue.coeffs_dict() == {-1: 6.0}, residue
+    # mechanical cancellation comes back as a subnormal, so `6 - 6` is not 0
+    # and the additive identity is not restored.  The projection gives a true
+    # zero under every rule.
+    with cancellation(rule):
+        residue = R(6) - R(6)
+    assert residue.coeffs_dict() == SIX_MINUS_SIX[rule], \
+        "[%s] got %r, want %r" % (rule, residue.coeffs_dict(), SIX_MINUS_SIX[rule])
     crumb = 6.0 * MIN_SUBNORMAL
     assert crumb != 0.0, "expected a representable subnormal, got %r" % crumb
     assert crumb == pytest.approx(2.9643938750474793e-323, rel=1e-12), crumb

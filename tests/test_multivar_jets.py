@@ -18,6 +18,7 @@ mpmath.mp.dps = 50
 
 from composite.composite_lib import R, cos, exp, ln, sin, sqrt
 from composite.composite_lib import LimitDoesNotExistError, ResidueError
+from tests.zero_modes import cancellation
 from composite.composite_multivar import (_direction_set, _orthonormal_directions,
                                           _orthonormal_exact, curl_at, divergence_at,
                                           directional_derivative, gradient_at,
@@ -380,7 +381,10 @@ SEGMENT_REFUSED = [
     ("d/dx x*y/(x^2+y^2) at (0,0)", lambda x, y: x * y / (x * x + y * y), [0, 0], [1, 0], NonSmoothError),
     ("d3/dx3 y/x^3 at (0,0)", lambda x, y: y / (x * x * x), [0, 0], [3, 0], NonSmoothError),
     ("d/dx x/y at (1,0)  [pole in a fixed coordinate]", lambda x, y: x / y, [1, 0], [1, 0], PoleError),
-    ("d/dx exp(xy)-exp(xy)  [residue]", lambda x, y: exp(x * y) - exp(x * y), [1, 1], [1, 0], ResidueError),
+    # A residue only under mechanical cancellation (a - a = a*h); natural and
+    # convert_and_keep count it to zero: test_counted_cancellation_is_not_refused.
+    ("d/dx exp(xy)-exp(xy)  [residue, mechanical]", lambda x, y: exp(x * y) - exp(x * y), [1, 1], [1, 0],
+     ResidueError),
     ("d/dx x*y + 0  [written zero]", lambda x, y: x * y + 0, [1, 2], [1, 0], ResidueError),
     ("d/dx sqrt(x^2+y^2) at 0  [cone]", lambda x, y: sqrt(x * x + y * y), [0, 0], [1, 0], NonSmoothError),
     ("d/dx sqrt(x)*y at (0,1)  [branch]", lambda x, y: sqrt(x) * y, [0, 1], [1, 0], BranchPointError),
@@ -389,11 +393,22 @@ SEGMENT_REFUSED = [
 
 @pytest.mark.parametrize("label,f,at,wrt,exc", SEGMENT_REFUSED, ids=[c[0] for c in SEGMENT_REFUSED])
 def test_segment_refusals(label, f, at, wrt, exc):
-    with pytest.raises(exc) as e:
-        partial_derivative(f, at, wrt)
+    with cancellation("mechanical" if "mechanical" in label else "convert_and_keep"):
+        with pytest.raises(exc) as e:
+            partial_derivative(f, at, wrt)
     print(f"\n  {label}: {type(e.value).__name__}: {str(e.value)[:80]}")
     if exc is PoleError:
         assert "grade" not in str(e.value)      # the fixed coordinate's grade is not the pole's
+
+
+@pytest.mark.parametrize("rule", ["natural", "convert_and_keep"])
+def test_counted_cancellation_is_not_refused(rule):
+    # exp(xy) - exp(xy) counted to zero (N2): nothing converts, nothing to
+    # refuse, and d/dx is the classical derivative of the zero function.
+    with cancellation(rule):
+        got = partial_derivative(lambda x, y: exp(x * y) - exp(x * y), [1, 1], [1, 0])
+    print(f"\n  [{rule}] d/dx exp(xy)-exp(xy) at (1,1): got {got!r}, want 0.0")
+    assert got == 0.0, f"[{rule}] got {got!r}, want 0.0"
 
 
 # --- limits along curves, not only lines ------------------------------------------------
