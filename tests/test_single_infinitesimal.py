@@ -85,6 +85,25 @@ def test_a_transcendental_derivative_is_exact():
     assert abs(got - math.cos(3.0)) < 1e-15, "got %r, want cos(3) = %r" % (got, math.cos(3.0))
 
 
+EVERY_FUNCTION = ["sin", "cos", "tan", "exp", "ln", "sqrt", "atan", "asin", "acos",
+                  "sinh", "cosh", "tanh"]
+
+
+@pytest.mark.parametrize("name", EVERY_FUNCTION)
+def test_every_function_keeps_the_tag(name):
+    """Each function of TAG(a) gives the same jet as by default.  tanh lost it:
+    its last step built a number with no source, which the mode then treated as
+    an untagged zero, so tanh(TAG(0.4)) read 0.379949 with every derivative 0."""
+    f = getattr(cl, name)
+    default = f(R(0.4) + ZERO)
+    want = [default.st()] + [default.d(k) for k in range(1, 5)]
+    with cl.single_infinitesimal():
+        tagged = f(TAG(0.4))
+        got = [tagged.st()] + [tagged.d(k) for k in range(1, 5)]
+    assert all(abs(g - w) <= 1e-12 * max(1.0, abs(w)) for g, w in zip(got, want)), \
+        "%s(TAG(0.4)) d(0..4): got %r, want %r (untagged)" % (name, got, want)
+
+
 # --- every untagged zero is conventional --------------------------------------
 
 @pytest.mark.parametrize("label,build,want", [

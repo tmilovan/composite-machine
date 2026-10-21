@@ -5459,9 +5459,12 @@ def tanh(x, terms=15):
     # Scaled through the backend: sech2 is a positive number that may underflow
     # to 0.0 for |a| > ~370, and a Python 0.0 entering `core * sech2` would be
     # an expressed zero, which R1 converts.  An underflowed scale is not that.
-    scaled = Composite._wrap(core._backend.scalar_multiply(core._data, sech2),
-                             core._backend, complete=core._complete,
-                             denot=_denot_of(core))
+    # _join: _wrap builds a fresh number with no source, and under TAG an
+    # infinitesimal with no source is demoted to a conventional zero at the
+    # `+` below -- tanh(TAG(a)) kept its value and lost every derivative.
+    scaled = _join(Composite._wrap(core._backend.scalar_multiply(core._data, sech2),
+                                   core._backend, complete=core._complete,
+                                   denot=_denot_of(core)), core)
     # The division above runs past T's bound; return only what is complete,
     # as every transcendental does (test_series_completeness audits it).
     out = R(t) + scaled
