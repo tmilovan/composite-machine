@@ -35,6 +35,18 @@ The first proper PyPI library based on this experimental features has been relea
 
 **A computational system that does not lose data on operations with zeros, giving automatic calculus via dimensional arithmetic... and a bit more.**
 
+## What is it?
+
+A numerical data structure that:
+- carries numerical "metadata" besides the value
+- keeps track of data loss at data annihilating operations
+- is operated on with Laurent series arithmetic
+- performs automatic calculus in one  evaluation
+
+## How does it do it?
+
+The data structure has positive and negative dimensions. Dimension "0" is the value, negative dimensions represent rates of vanishing (infinitesimal side), the positive dimensions represent rates for blowing up (infinite side). The data structure represents a polynomial expression and is operated on with polynomial arithmetic over positive and negative powers, which gives results in te form of Taylor, Laurent or Hahn series.
+
 ## Why all this? ##
 
 Out of a desire to create a computational system that doesn't lose data on operations with 0, where a * 0 will be invertible and where a / 0 will not crash, but that will still give accurate results. All of this builds on Euler's notion that infinitesimals are actually zeros with different ratios.
@@ -45,21 +57,16 @@ In essence this system converts zeros to infinitesimals and tries to do arithmet
 
 The implementation leads to a data structure that implements a number system, letting different parts of non-standard (and standard) math work together.
 
-For example, it gives you derivatives, integrals, and limits as a side effect of normal computation. No symbolic engine, no computation graph, no tape. Tag a number, do your math, read the results off the dimensional coefficients.
+For example, it gives  derivatives, integrals, and limits as a side effect of normal computation. No symbolic engine, no computation graph, no tape. Seed a number, do your math, read the results off the dimensional coefficients.
 
 > Here *1 − 1 ≠ 0 - it is zero with residue*
 >
 
-> *The residue is infinitesimal, structured, and it contains the derivative of every operation that produced it.*
+> *The residue is infinitesimal and structured, and the calculation continues through it.*
 >
 
-Euler got here first. In *Institutiones calculi differentialis* (1755), Part I, Chapter 3
-(*De infinitis et infinite parvis*), §84-§88, he says an infinitely small quantity really is
-zero, and that this is not a problem, because there are two ways two quantities can be equal:
-arithmetically, when *a* − *b* = 0, and geometrically, when *a*/*b* = 1. Any two zeros are
-equal in the first way but not in the second. So d*x* = 0 and *a*·d*x* = 0, and still
-*a*·d*x* : d*x* = *a* : 1. In §86 he says the whole force of the differential calculus is
-finding that ratio.
+Euler was the first to describe this. In *Institutiones calculi differentialis* (1755), Part I, Chapter 3
+(*De infinitis et infinite parvis*), §84-§88, he says an infinitely small quantity really is zero, and that this is not a problem, because there are two ways two quantities can be equal: arithmetically, when *a* − *b* = 0, and geometrically, when *a*/*b* = 1. Any two zeros are equal in the first way but not in the second. So d*x* = 0 and *a*·d*x* = 0, and still *a*·d*x* : d*x* = *a* : 1. In §86 he says the whole force of the differential calculus is finding that ratio.
 
 Then in §85 he says what to do about it:
 
@@ -83,22 +90,17 @@ infinitesimal `h`, and every operation is ordinary arithmetic on series in `h`
 with that one substitution. Measured on the code:
 
 ```
-a - a           ==  a * 0                a cancellation is a multiplication by h
-(a - a) / 0     ==  a                    and it is reversible
+a = R(5)
+a * 0            ->  <|5|₋₁>                a multiplication by zero moves a one grade down
+a * 0 / 0        ->  <|5|₀>                 and it is reversible
+a - a            ->  <|0|₀>                 a cancellation is counted: a zero, which is h when used
+(a - a) / 0      ->  <|1|₀>                 two zeros of the same order have ratio 1
+5 + 0            ->  <|5|₀ |1|₋₁>           a written zero is h, so it is kept
 x = R(3) + ZERO
-x**2 - R(9)      ->  <|0|₀ |6|₋₁ |1|₋₂>                       the jet of x^2 - 9 at 3
-exp(x) - exp(x)  ->  <|20.0855|₋₁ |20.0855|₋₂ |10.0428|₋₃ ...>  the jet of e^x * (x - 3)
+x**2 - R(9)      ->  <|0|₀ |6|₋₁ |1|₋₂>     the jet of x^2 - 9 at 3
 ```
 
-A composite is the jet of the function the expression denotes, and a written
-constant is a germ too: a written `0` denotes `x - a`. That is what lets the
-residue of `1 - 1` carry the derivative of the operation that produced it, and
-it is also the one habit to unlearn. `x*x + 0` is the jet of `x^2 + (x - a)`,
-derivative 5 at 2, and the library says so with `NotConventionalWarning`. Spell
-an absence as `Composite({})`, or use `conventional()` or `TAG()` for the
-classical reading. The price, stated plainly: there is no additive identity,
-and `a + (-a)` does not commute on a cancelling pair. Zero Rules v2 has the
-rules and the measured laws.
+A composite is the jet of the function the expression denotes, and a written constant is a germ too: a written `0` denotes `x - a`. That is the one habit to unlearn. `x*x + 0` is the jet of `x^2 + (x - a)`, derivative 5 at 2, and the library says so with `NotConventionalWarning`. Spell an absence as `Composite({})`, or use `conventional()` or `TAG()` for the classical reading. The price, stated plainly: there is no additive identity, so `5 + 0` is not `5`, and distributivity and associativity fail in some sums where a zero is written or produced by a cancellation. Zero Rules v2 has the rules and the measured laws, and `CANCELLATION` in the API Reference selects how `+` and `-` treat a cancellation.
 
 Alpha stage. Research code. The math works, ~~performance doesn't (yet)~~. AGPL-licensed. A PyTorch/CUDA backend is available under commercial license.
 
@@ -107,7 +109,7 @@ Alpha stage. Research code. The math works, ~~performance doesn't (yet)~~. AGPL-
 ## In short?
 
 
-Numbers are sparse dicts mapping dimensions to coefficients. A dimension is an integer, or a vector over an iterated-logarithm basis when log-scale terms are in play. Dimension 0 is the value. Negative dimensions store derivative info. Multiply dimensions - turns out that's the same thing as the product rule and chain rule, just expressed as data structure operations.
+Numbers are sparse dicts mapping dimensions to coefficients. A dimension is an integer, or a vector over an iterated-logarithm basis when log-scale terms are in play. Dimension 0 is the value. Negative dimensions store derivative info. Multiply two composites and their dimensions add while the coefficients convolve - turns out that's the same thing as the product rule and chain rule, just expressed as data structure operations.
 
 ```python
 from composite.composite_lib import R, ZERO
@@ -138,9 +140,9 @@ Computing in such a field, rather than reasoning about it, also has prior art. B
 
 Total division has its own prior art, adjacent rather than overlapping. **Wheel theory** (Carlstrom, 2004) extends a commutative ring with one extra element, bottom, so that x/0 is always defined. **Meadows** (Bergstra and Tucker, 2007) take the convention 1/0 = 0 and keep the field equations. The projective reals add one point at infinity. IEEE 754 has signed inf and nan. All of these make division total by adding a point or by adopting a convention for 1/0. None grades the infinity or keeps what was divided: 1/0 and 2/0 are the same element in each of them, and in inf - inf the operands are gone. Here 1/0 is |1|_1 and 2/0 is |2|_1, |2|_1 - |1|_1 is |1|_1, and |2|_1 * |1|_-1 is 2 again. That is the difference, and a reader who knows those systems should expect it to be named.
 
-The word provenance comes from **Provenance semirings** (Green, Karvounarakis and Tannen, 2007) which annotate every query result in a database with a polynomial recording which source tuples produced it and how; the annotation is a separate algebraic object carried beside the value. Here the record is numerical and lives in the same number as the value: the residue of a - a is a itself one grade down, so the provenance of a cancellation is read with the same arithmetic that produced it, and dividing by 0 recovers the operand. The aim is the same, knowing where a result came from; the mechanism is the number rather than an annotation on it.
+The word provenance comes from **Provenance semirings** (Green, Karvounarakis and Tannen, 2007) which annotate every query result in a database with a polynomial recording which source tuples produced it and how; the annotation is a separate algebraic object carried beside the value. Here the record is numerical and lives in the same number as the value: a * 0 is a itself one grade down, so the provenance of an annihilation is read with the same arithmetic that produced it, and dividing by 0 recovers the operand. The aim is the same, knowing where a result came from; the mechanism is the number rather than an annotation on it.
 
-**What this library explores is a different algebraic context for that mechanism. Higher-order terms are kept, and where they are cut off the cut is explicit and tracked. Subtraction retains provenance instead of collapsing to zero. Multiplication by zero shifts structure instead of destroying it. The idea is that if you stop throwing away information at each step, calculus operations become extractable from the algebra.**
+**What this library explores is a different algebraic context for that mechanism. Higher-order terms are kept, and where they are cut off the cut is explicit and tracked. A zero, written or produced by a cancellation, stays an infinitesimal instead of an additive identity. Multiplication by zero shifts structure instead of destroying it. The idea is that if you stop throwing away information at each step, calculus operations become extractable from the algebra.**
 
 Does this generalize to everything? Open question. The test suite covers a wide range of standard problems and the results match, apart from the failures listed under Testing. Finding the boundaries is the point of this project.
 
@@ -154,8 +156,8 @@ Breadth in one structure, at a cost that depends entirely on the shape of the pr
 The numbers under [Performance](#performance) are measured, not asserted, and they do
 not all point the same way.
 
-- **vs PyTorch/JAX** - They give first-order gradients, fast, and vectorised across a batch. This gives every order from one evaluation, plus limits and integration. Neither is a backend here, so no throughput ratio against them is quoted - the measurements below are against NumPy and SymPy, which are what this actually runs on.
-- **vs SymPy** - SymPy is symbolic, this is numerical. On the cases measured this is the faster of the two: 3-70x on indeterminate limits (both exact) and ~6400x on a Taylor expansion to order 8, agreeing to 2.5e-15.
+- **vs PyTorch/JAX** - They give gradients, fast, and vectorised across a batch; higher orders come from nesting, or from JAX's Taylor mode (`jax.experimental.jet`), which matches the accuracy of the dimensions here and is faster (this library was 7-55% slower, widening with order). The difference is at degenerate points: at zero volatility in Black-Scholes, `jacfwd` and `jet` both return NaN for every Greek, and the composite reading is correct. This also gives limits and integration from the same numbers. Neither is a backend here, so no throughput ratio against them is quoted - the measurements below are against NumPy and SymPy, which are what this actually runs on.
+- **vs SymPy** - SymPy is symbolic, this is numerical. On the cases measured this is the faster of the two: 3-70x on indeterminate limits (both exact) and ~6000x on a Taylor expansion to order 8, agreeing to 2.5e-15.
 - **vs mpmath** - mpmath is arbitrary-precision and carries the special-function library this does not (gamma, zeta, Bessel). On derivatives the two agree exactly: the 4th derivative of x⁴eˣ at 1 matches to all 15 digits. The difference is method - mpmath samples and extrapolates, so a limit is only as good as the extrapolation converges. On six harder limits it returned 0.99962 for xˣ as x->0⁺ and −2.7e−8 for x²·ln x, where reading the standard part off the algebra gives both exactly.
 - **vs dual numbers** - Classic dual numbers give you one derivative (epsilon squared is zero). Here epsilon squared is kept, so you get all orders.
 
@@ -244,7 +246,7 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 - **[partials.py](composite/partials.py)** - Pure and mixed partial derivatives of any order from seeded runs: one run per input, mixed terms by subtracting the records of joint runs. Handles zero and equal inputs and badly balanced scales; see the API Reference.
 - **[composite_extended.py](composite/composite_extended.py)** - Complex analysis. Complex composites, residues, poles, contour integrals, asymptotics, ODE solver.
 - **[composite_vector.py](composite/composite_vector.py)** - Vector calculus. Triple integrals, line integrals, surface integrals.
-- **[backends/](composite/backends/)** - Interchangeable storage for the dimension map: dict, sparse-dense, vector-dimension, dense-series, and fractional (exact rational lattice; dict, NumPy and PyTorch flavours).
+- **[backends/](composite/backends/)** - Interchangeable storage for the dimension map: dict, sparse-dense, vector-dimension, dense-series, fractional (exact rational lattice; dict, NumPy and PyTorch flavours), and the opt-in batch-dense prototype (one composite holding many numbers as a [grades x batch] array).
 - **[forensics.py](composite/forensics.py)** - Cancellation forensics. Condition number and forward error bound from one seeded evaluation: is the formula bad, or is the problem hard?
 - **[uncertainty.py](composite/uncertainty.py)** - GUM uncertainty budgets with the bias and higher-order variance terms, and the GUM-S1 admissibility check, from composite derivatives.
 - **[singularity.py](composite/singularity.py)** - Location and exponent of a series' nearest singularity: blow-up time of an ODE, critical point of a lattice model, coefficient growth.
@@ -293,7 +295,7 @@ convergence_radius(lambda z: 1 / (1 - z), at=0) # 1.0
 No single ratio - it depends on what you ask for. Measured on CPython/macOS, float64, one thread,
 NumPy 1.26.4, SymPy 1.14.0.
 
-**Derivatives.** Tag a number, evaluate `1/(1+x)` once, read all ten derivatives off the result:
+**Derivatives.** Seed a number, evaluate `1/(1+x)` once, read all ten derivatives off the result:
 
 | | time | accuracy |
 |---|---|---|
@@ -306,7 +308,7 @@ order and has run out of digits by order 10.
 A *single* first derivative goes the other way: NumPy does it in **0.2 µs** against **35 µs** here,
 roughly 140x. The crossover is around the third derivative.
 
-**Batches.** NumPy vectorises and this does not - four orders of magnitude per point. PyTorch and CUDA backends not present here support batching.
+**Batches.** The standard backends evaluate one point at a time, and NumPy vectorises - four orders of magnitude per point. The opt-in batch-dense backend (`config.use_batch_dense(n)`, a prototype) holds a whole batch in one composite as NumPy arrays over the batch, so one composite operation does every row; decisions that would differ between rows are refused rather than taken for some of them. PyTorch and CUDA backends not present here support batching.
 
 **Sparse grids.** An explicit PDE whose active front stays at 121 cells: **24x faster** than a
 dense NumPy grid at 200,000 cells, **260x** at 2,000,000. Composite time is flat; the dense grid
@@ -320,6 +322,8 @@ dense, contiguous series, and it is ~1.6x faster there than the alternatives. `u
 pure-arithmetic jets, where there is no series to lay out (~2x faster on `1/(1+x)`). The default
 `use_sparse_dense()` is the grid backend: several times slower on either kind of jet, and the one
 to keep for sparse supports over a large domain.
+
+The figures above were measured in September 2026, before the cancellation rules changed in October. Re-measured on the dict backend on 2026-10-25, the change costs 4-9% on derivative jets and 15-25% on limits and transcendental series; the absolute figures are due to be re-measured.
 
 A high-performance backend using PyTorch with CUDA and MPS acceleration is available under commercial license. Contact [tmilovan@fwd.hr](mailto:tmilovan@fwd.hr).
 
@@ -394,12 +398,10 @@ PYTHONPATH=. python tests/test_limits.py                   # limits, all classes
 PYTHONPATH=. python tests/test_integration_comprehensive.py # every integral form
 ```
 
-`PYTHONPATH=.` matters: running a test as a bare script puts `tests/` on the
-import path rather than the repo root, so `composite` resolves to whatever is
-installed instead of the working copy.
+`PYTHONPATH=.` matters: running a test as a bare script puts `tests/` on the import path rather than the repo root, so `composite` resolves to whatever is installed instead of the working copy.
 
-Measured 2026-10-07 on `composite-env-arm`: **739 pytest tests, plus 23
-script suites totalling 1627 checks**, the script suites run under pytest by
+Measured 2026-10-25 on `composite-env-arm`: **1132 pytest tests, plus 23
+script suites totalling 1899 checks**, the script suites run under pytest by
 `test_suites.py`. Three checks fail:
 `test_resummation` R4.11 asserts that a finite Laplace cutoff is inexact and it
 no longer is, and two `test_singularity` S3 exponents miss their tolerance by
@@ -409,16 +411,16 @@ Script suites (each prints its own tally):
 
 | suite | checks | covers |
 |---|---|---|
+| `test_zero_coercion.py` | 341 | a written zero is an expressed zero: R1-R6, the algebraic laws, cancelling pairs |
+| `test_standalone.py` | 201 | paper theorems T1-T8, algebra, derivatives, limits, zero division |
 | `test_resummation.py` | 177 | Borel-Pade resummation of divergent series: Euler-Stieltjes, Painleve I |
-| `test_standalone.py` | 172 | paper theorems T1-T8, algebra, derivatives, limits, zero division |
-| `test_zero_coercion.py` | 168 | a written zero is an expressed zero: R1-R6, the algebraic laws, cancelling pairs |
-| `test_vector_dimensions.py` | 150 | vector dimensions, depth genericity, log-axis transcendentals |
+| `test_vector_dimensions.py` | 174 | vector dimensions, depth genericity, log-axis transcendentals |
+| `test_transseries.py` | 139 | the `exp(-1/h)` sector below every power: ordering first, then arithmetic |
 | `test_dimension_scales.py` | 131 | dimensions that are not integers, and not scalars |
 | `test_forensics.py` | 124 | kappa against predicted error: is the formula bad or the problem hard |
 | `test_limits.py` | 105 | indeterminate forms, oscillatory, at infinity, directional, domain errors |
-| `test_transseries.py` | 95 | the `exp(-1/h)` sector below every power: ordering first, then arithmetic |
 | `test_singularity.py` | 91 | location and exponent of a series' nearest singularity, against known answers |
-| `test_uncertainty.py` | 64 | GUM budgets with bias and higher-order terms, against closed forms |
+| `test_uncertainty.py` | 66 | GUM budgets with bias and higher-order terms, against closed forms |
 | `test_integration_comprehensive.py` | 54 | definite, improper, triple, line, surface |
 | `test_backend_agreement.py` | 52 | dict, sparse-dense and vector backends must not disagree about a number |
 | `test_multivar_extended.py` | 50 | gradients, Hessians, Jacobians, complex analysis, ODEs |
@@ -435,24 +437,37 @@ Pytest modules:
 
 | module | tests | covers |
 |---|---|---|
+| `test_scalar_operands_and_completeness.py` | 140 | Python-number operands follow the composite rules, and completeness is honoured |
 | `test_fractional_backend.py` | 122 | fractional dimensions on an exact rational lattice |
+| `test_multivar_jets.py` | 100 | directional composites against 50-digit mpmath |
 | `test_integrate_jets.py` | 84 | the integral by meeting composites, one per node |
+| `test_multivar_backends.py` | 75 | the multivariable functions on every storage backend |
+| `test_multivar_disprove.py` | 73 | multivariable vs single-variable, Black-Scholes Greeks |
 | `test_degeneracy.py` | 70 | flagging a Taylor reading that a second infinitesimal source has entered |
-| `test_multivar_disprove.py` | 71 | multivariable vs single-variable, Black-Scholes Greeks |
-| `test_multivar_jets.py` | 85 | directional composites against 50-digit mpmath |
-| `test_partials.py` | 30 | pure and mixed partials against exact formulas and 50-digit mpmath: zero, equal and unbalanced inputs, shared runs, refusals |
-| `test_multivar_backends.py` | 65 | the multivariable functions on every storage backend |
+| `test_single_infinitesimal.py` | 53 | `TAG()` and `single_infinitesimal()`: one blessed infinitesimal, conventional rest |
 | `test_conventional_zero.py` | 51 | `conventional()`: an expressed zero as the ordinary zero, in scope |
-| `test_single_infinitesimal.py` | 37 | `TAG()` and `single_infinitesimal()`: one blessed infinitesimal, conventional rest |
-| `test_derivative_grade_shift.py` | 30 | differentiation as a grade shift |
+| `test_derivative_grade_shift.py` | 42 | differentiation as a grade shift |
+| `test_batch_dense.py` | 40 | the batch-dense backend: one composite holding many numbers, checked row by row |
+| `test_partials.py` | 32 | pure and mixed partials against exact formulas and 50-digit mpmath: zero, equal and unbalanced inputs, shared runs, refusals |
+| `test_completeness_scaling.py` | 30 | completeness through products and quotients that shift orders |
 | `test_offorigin_and_ordering.py` | 28 | residue and pole order off the origin, mixed-grade ordering on the dict backend |
+| `test_display.py` | 26 | the grade table, and the three states a reader must not miss |
 | `test_integrate_quotient.py` | 25 | integrands that divide by a composite |
-| `test_display.py` | 24 | the grade table, and the three states a reader must not miss |
-| `test_truncation.py` | 13 | the dimension cap is a default; an explicit request overrides it |
-| `test_explain.py` | 12 | `explain()` and `lead_order()`: what a function does at a point |
-| `test_ieee754_projection.py` | 9 | `to_ieee754`: the one exit to a system with an additive identity |
+| `test_power_expressed_zero.py` | 22 | `power()` with an expressed zero inside s*ln(x), and its constant fast path |
+| `test_truncation.py` | 16 | the dimension cap is a default; an explicit request overrides it |
+| `test_explain.py` | 14 | `explain()` and `lead_order()`: what a function does at a point |
+| `test_arithmetic_findings.py` | 12 | three things the composite arithmetic battery found |
+| `test_ieee754_projection.py` | 11 | `to_ieee754`: the one exit to a system with an additive identity |
+| `test_exp_by_terms.py` | 11 | exp on the power axis, built one factor per term of the argument |
+| `test_limit_rounding_residue.py` | 9 | `limit()` and the rounding residue of a cancellation floats cannot make exact |
+| `test_ln_by_terms.py` | 8 | ln on the power axis, term by term |
+| `test_transseries_inverse.py` | 8 | `ts_inverse` and division by a transseries |
+| `test_power_by_terms.py` | 7 | power at a real or rational exponent, at the depth a scope asks for |
 | `test_composite_metadata.py` | 7 | one number carrying data and metadata |
 | `test_written_zero_disclosure.py` | 6 | a written zero discloses itself however it is spelled |
+| `test_series_check.py` | 5 | the isolated-versus-degradation rule of `series_check.py` |
+| `test_exp_not_patched.py` | 3 | `composite_extended` must not replace `composite_lib.exp` |
+| `test_division_depth.py` | 2 | series division at the depth a scope asks for |
 
 ---
 

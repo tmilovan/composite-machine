@@ -765,8 +765,8 @@ def _r1(c, sibling=None):
 
 
 CANCELLATION = "convert_and_keep"
-"""Which rule + and - follow: "convert_and_keep" (default), "natural" or
-"mechanical".  Zero Rules v2, sections 1b and 1c.
+"""Which rule + and - follow: "convert_and_keep" (default), "mirrored",
+"to_nothing", "natural" or "mechanical".  Zero Rules v2, sections 1b and 1c.
 
 "convert_and_keep"  the default, decided 2026-10-21.  Natural cancellation,
          except that a WHOLLY zero operand of + or - converts by R1 and is
@@ -783,6 +783,29 @@ CANCELLATION = "convert_and_keep"
          infinite-grade drop included: 3INF - 3INF is <|0|_0>, and
          (3INF + 1) - 3INF is <|1|_0>, but (3INF - 3INF) + 1 is
          <|1|_0 |1|_-1>, because the cancelled zero then meets the 1.
+
+"mirrored"  experimental, added 2026-10-22, not the default.  As
+         "convert_and_keep", except that a cancelled infinite grade k leaves
+         its zero at the mirror grade -k instead of 0:
+           3INF - 3INF is <|0|_-1>, 3INF**2 - 3INF**2 is <|0|_-2>,
+           3 - 3 is <|0|_0> and <|3|_-1> - <|3|_-1> is <|0|_-1> as before
+         On the log axis (p, l) mirrors to (-p, -l), the grade of the
+         reciprocal.  The reason: a cancellation records that two numbers
+         were equal, and a = b is the same fact as 1/a = 1/b, so the zero has
+         the same depth either way: depth(a - a) = depth(1/a - 1/a).
+         (3INF + 1) - 3INF is <|1|_0 |0|_-1>: the zero stays as an inert term.
+
+"to_nothing"  private comparison mode, added 2026-10-23: a yardstick for
+         how far the other rules are from conventional cancellation, not a
+         candidate rule.  As
+         "convert_and_keep", except that a cancellation produces NOTHING: a
+         grade that cancels leaves no term, at any grade, and a sum that
+         cancels entirely is Composite({}), which then behaves as NOTHING
+         always does: absorbed by + and -, absorbing under * and /, and
+         refused as a divisor.
+           3 - 3 is ∅, (3 - 3) * 5 is ∅, 5 / (3 - 3) raises,
+           (3INF + 1) - 3INF is <|1|_0>, (x - 2) at x = 2 + h is <|1|_-1>
+         A written zero still converts and is kept: 5 + 0 is <|5|_0 |1|_-1>.
 
 "natural"  Addition and subtraction add coefficients grade by grade
          and nothing else:
@@ -1194,7 +1217,8 @@ def _untouched(x, nothing):
     return _join(out, x, nothing)
 
 
-_CANCELLATION_RULES = ("convert_and_keep", "natural", "mechanical")
+_CANCELLATION_RULES = ("convert_and_keep", "mirrored", "to_nothing", "natural",
+                       "mechanical")
 
 
 def _counts(x, y):
@@ -1218,7 +1242,7 @@ def _counted(self, other, sign):
     it was -- negated when it is the subtrahend.  Two wholly zero operands are
     summed grade by grade without R1, so every zero they hold survives.
     """
-    if CANCELLATION == "convert_and_keep":
+    if CANCELLATION in ("convert_and_keep", "mirrored", "to_nothing"):
         zs, zo = _is_wholly_zero(self), _is_wholly_zero(other)
         # Then the natural path.  Not _counted again: under conventional() and
         # for an untagged zero inside TAG, _prepared leaves the zero as it is,
@@ -1251,12 +1275,32 @@ def _counted_natural(self, other, sign):
                           denot=_denot_additive(a, b))
     if _CANCEL_WARN[0]:
         _check_cancellation(a, b, out, self is other, sign)
+    if CANCELLATION == "to_nothing":
+        return _cancelled_to_nothing(a, b, out)
     return _infinities_to_real(a, b, out)
+
+
+def _cancelled_to_nothing(a, b, out):
+    """CANCELLATION "to_nothing": every grade where an operand held a nonzero
+    coefficient and the sum holds zero leaves no term.  Zero terms the
+    operands already carried stay (R2).  If nothing is left, NOTHING."""
+    terms = out.coeffs_dict()
+    gone = [d for d, v in terms.items()
+            if v == 0.0 and (a.coeff(d) != 0.0 or b.coeff(d) != 0.0)]
+    if not gone:
+        return out
+    for d in gone:
+        del terms[d]
+    r = _like(out, terms)
+    if terms:
+        r._complete = getattr(out, "_complete", None)
+        r._denot = _denot_of(out)
+    return r
 
 
 def _infinities_to_real(a, b, out):
     """A cancelled infinite grade leaves |0|_0, not |0|_k (natural and
-    convert-and-keep cancellation).
+    convert-and-keep cancellation), or |0|_-k under "mirrored".
 
     Only grades where an operand held a nonzero coefficient and the sum holds
     zero move; zero terms the operands already carried stay where they were.
@@ -1274,12 +1318,14 @@ def _infinities_to_real(a, b, out):
             hit[i] = False
     if not hit.any():
         return out
+    targets = -dims[hit] if CANCELLATION == "mirrored" else [0]
     keep = ~hit
     dims, vals = dims[keep], vals[keep]
-    if not (dims == 0).any():
-        at = int(np.searchsorted(dims, 0))
-        dims = np.insert(dims, at, 0).astype(DIM_DTYPE, copy=False)
-        vals = np.insert(vals, at, 0.0)
+    for t in targets:
+        if not (dims == t).any():
+            at = int(np.searchsorted(dims, t))
+            dims = np.insert(dims, at, t).astype(DIM_DTYPE, copy=False)
+            vals = np.insert(vals, at, 0.0)
     return Composite._wrap(be.create_from_terms(dims, vals), be,
                            complete=getattr(out, "_complete", None),
                            denot=_denot_of(out))
@@ -1287,14 +1333,18 @@ def _infinities_to_real(a, b, out):
 
 def _infinities_to_real_vector(a, b, out, dims, vals):
     """_infinities_to_real for tuple grades: infinite means a positive
-    leading component, and the real grade is the all-zero tuple."""
+    leading component, and the real grade is the all-zero tuple.  The mirror
+    of (p, l) is (-p, -l), the grade of the reciprocal."""
     hit = [d for d, v in zip(dims, vals) if v == 0.0 and _lead_order(d) < 0
            and (a.coeff(d) != 0.0 or b.coeff(d) != 0.0)]
     if not hit:
         return out
     terms = {d: float(v) for d, v in zip(dims, vals) if d not in hit}
-    real = tuple(0 for _ in hit[0])
-    terms.setdefault(real, 0.0)
+    if CANCELLATION == "mirrored":
+        for d in hit:
+            terms.setdefault(tuple(-x for x in d), 0.0)
+    else:
+        terms.setdefault(tuple(0 for _ in hit[0]), 0.0)
     r = _like(out, terms)
     r._complete = getattr(out, "_complete", None)
     r._denot = _denot_of(out)
