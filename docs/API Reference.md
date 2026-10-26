@@ -194,11 +194,12 @@ result = (R(10) * ZERO) / ZERO  # |10|₀ (reversible!)
 
 ### Power: `a ** n`
 
-Integer powers via repeated multiplication.
+Integer powers via repeated multiplication. A float, `Fraction` or Composite
+exponent is accepted too, as in `power(x, s)`.
 
 **Parameters:**
 
-- `n`: int - The exponent
+- `n`: int, float, Fraction or Composite - The exponent
 
 **Example:**
 
@@ -222,12 +223,12 @@ Sine function for composite numbers.
 - `x`: Composite or float
 - `terms`: int - Number of Taylor series terms (default: 12)
 
-**Returns:** Composite or float
+**Returns:** Composite
 
 **Example:**
 
 ```python
-x = R(0) + ZERO
+x = ZERO
 result = sin(x)
 print(result.st())  # 0
 print(result.d(1))  # 1 (derivative: cos(0) = 1)
@@ -242,7 +243,7 @@ Cosine function for composite numbers.
 **Example:**
 
 ```python
-result = cos(R(0) + ZERO)
+result = cos(ZERO)
 print(result.st())  # 1
 print(result.d(1))  # 0 (derivative: -sin(0) = 0)
 ```
@@ -262,7 +263,7 @@ Exponential function eˣ.
 **Example:**
 
 ```python
-result = exp(R(0) + ZERO)
+result = exp(ZERO)
 print(result.st())  # 1
 print(result.d(1))  # 1 (derivative of eˣ is eˣ)
 ```
@@ -273,7 +274,8 @@ print(result.d(1))  # 1 (derivative of eˣ is eˣ)
 
 Natural logarithm.
 
-**Requires:** [x.st](http://x.st)() > 0
+**Requires:** `x.st() >= 0`. At standard part 0 the result is a log-axis term:
+`ln(ZERO)` is `<-1_(0,1)>`.
 
 **Example:**
 
@@ -289,7 +291,7 @@ print(result.d(1))  # 1 (derivative: 1/1 = 1)
 
 Square root via binomial series.
 
-**Requires:** [x.st](http://x.st)() > 0
+**Requires:** `x.st() >= 0`. `sqrt(ZERO)` is `<1_-0.5>`.
 
 ---
 
@@ -345,7 +347,7 @@ Real-valued power xˢ for any real exponent.
 
 **Parameters:**
 
-- `x`: Composite (requires [x.st](http://x.st)() > 0)
+- `x`: Composite (requires `x.st() >= 0`; `power(ZERO, 0.5)` is `<1_-0.5>`)
 - `s`: float - Any real exponent
 - `terms`: int - Taylor series terms
 
@@ -620,7 +622,7 @@ Adaptive stepped integration that automatically adjusts step size.
 - `tol`: float - Target accuracy
 - `terms`: int - Taylor series terms
 
-**Returns:** Tuple[float, float] - (value, error_estimate)
+**Returns:** Tuple[Composite, float] - (value, error_estimate)
 
 **Example:**
 
@@ -981,8 +983,8 @@ slope, a real acceleration - of that function:
 x = R(3) + ZERO
 f = x*x*(R(2)-R(2)) + x*x
 f.denotation_order      # 1.0
-[f.d(n) for n in range(4)]              # [9, 24, 26, 12]
-# reading R(2)-R(2) as 2(x-3) gives g(x) = 2x**3 - 5x**2, whose jet is the same
+[f.d(n) for n in range(4)]              # [9, 15, 14, 6]
+# reading R(2)-R(2) as (x-3) gives g(x) = x**3 - 2x**2, whose jet is the same
 ```
 
 It is carried rather than inferred, because division moves it: a residue at
@@ -997,8 +999,8 @@ subtract, `+ other.lead_order()` on multiply, `-` on divide.
 
 ### `is_zero(x)`, `is_nothing(x)`, `is_vanishing(x)`
 
-**Use `is_zero(x)` rather than `x == 0`.** `x == 0` compares against NOTHING,
-so it is True for NOTHING and False for a dimensioned zero.
+**Use `is_zero(x)` rather than `x == 0`.** `x == 0` is False for NOTHING, and
+True for a dimensioned zero and for `ZERO` itself.
 
 - `is_nothing(x)` - `Composite({})`, printed `∅`: no term at any dimension.
   This is the classical zero, an additive identity and a multiplicative
@@ -1010,7 +1012,7 @@ so it is True for NOTHING and False for a dimensioned zero.
 ### `CANCELLATION`
 
 Module switch, `"convert_and_keep"`. Which rule `+` and `-` follow; `*`, `/`,
-negation and the functions are the same under all three. Zero Rules v2,
+negation and the functions are the same under every rule. Zero Rules v2,
 sections 1b and 1c, has the rules and the measurements.
 
 ```python
@@ -1018,18 +1020,20 @@ import composite.composite_lib as cl
 cl.CANCELLATION = "convert_and_keep"   # the default
 cl.CANCELLATION = "natural"
 cl.CANCELLATION = "mechanical"         # the rule up to 2026-10-20
+cl.CANCELLATION = "mirrored"           # experimental
+cl.CANCELLATION = "to_nothing"         # private comparison mode
 ```
 
-| | `"convert_and_keep"` | `"natural"` | `"mechanical"` |
-|---|---|---|---|
-| `R(5) + R(0)` | `<\|5\|_0 \|1\|_-1>` | `<\|5\|_0>` | `<\|5\|_0 \|1\|_-1>` |
-| `R(5) - R(0)` | `<\|5\|_0 \|-1\|_-1>` | `<\|5\|_0>` | `<\|5\|_0 \|-1\|_-1>` |
-| `R(0) + R(0)` | `<\|2\|_-1>` | `<\|0\|_0>` | `<\|2\|_-1>` |
-| `R(6) - R(6)` | `<\|0\|_0>` | `<\|0\|_0>` | `<\|6\|_-1>` |
-| `3*INF - 3*INF` | `<\|0\|_0>` | `<\|0\|_0>` | `<\|3\|_0>` |
-| `(3*INF + 1) - 3*INF` | `<\|1\|_0>` | `<\|1\|_0>` | `<\|0\|_1 \|1\|_0>` |
-| `(3*INF - 3*INF) + 1` | `<\|1\|_0 \|1\|_-1>` | `<\|1\|_0>` | `<\|4\|_0>` |
-| `R(3) + 0`, then `x*x` | `<\|9\|_0 \|6\|_-1 \|1\|_-2>`, denoted | `<\|9\|_0>` | as convert_and_keep |
+| | `"convert_and_keep"` | `"natural"` | `"mechanical"` | `"mirrored"` | `"to_nothing"` |
+|---|---|---|---|---|---|
+| `R(5) + R(0)` | `<\|5\|_0 \|1\|_-1>` | `<\|5\|_0>` | `<\|5\|_0 \|1\|_-1>` | `<\|5\|_0 \|1\|_-1>` | `<\|5\|_0 \|1\|_-1>` |
+| `R(5) - R(0)` | `<\|5\|_0 \|-1\|_-1>` | `<\|5\|_0>` | `<\|5\|_0 \|-1\|_-1>` | `<\|5\|_0 \|-1\|_-1>` | `<\|5\|_0 \|-1\|_-1>` |
+| `R(0) + R(0)` | `<\|2\|_-1>` | `<\|0\|_0>` | `<\|2\|_-1>` | `<\|2\|_-1>` | `<\|2\|_-1>` |
+| `R(6) - R(6)` | `<\|0\|_0>` | `<\|0\|_0>` | `<\|6\|_-1>` | `<\|0\|_0>` | `∅` |
+| `3*INF - 3*INF` | `<\|0\|_0>` | `<\|0\|_0>` | `<\|3\|_0>` | `<\|0\|_-1>` | `∅` |
+| `(3*INF + 1) - 3*INF` | `<\|1\|_0>` | `<\|1\|_0>` | `<\|0\|_1 \|1\|_0>` | `<\|1\|_0 \|0\|_-1>` | `<\|1\|_0>` |
+| `(3*INF - 3*INF) + 1` | `<\|1\|_0 \|1\|_-1>` | `<\|1\|_0>` | `<\|4\|_0>` | `<\|1\|_0 \|1\|_-2>` | `<\|1\|_0>` |
+| `R(3) + 0`, then `x*x` | `<\|9\|_0 \|6\|_-1 \|1\|_-2>`, denoted | `<\|9\|_0>` | as convert_and_keep | as convert_and_keep | as convert_and_keep |
 
 - `"convert_and_keep"` - `+` and `-` count, grade by grade, and leave no
   residue: a cancelled real or infinitesimal grade stays as an inert `|0|_k`,
@@ -1040,6 +1044,19 @@ cl.CANCELLATION = "mechanical"         # the rule up to 2026-10-20
   adds nothing, so `R(5) + R(0)` is 5 and two zeros added stay one zero.
 - `"mechanical"` - R1 on every operand, and a cancellation leaves the annihilated
   quantity one grade down, `a - a = a*h`, as set by `CANCELLATION_CARRIES`.
+- `"mirrored"` - experimental. The same as `"convert_and_keep"`, except that a
+  cancelled infinite grade k leaves its zero at the mirror grade -k instead of
+  at `|0|_0`: `3*INF - 3*INF` is `<|0|_-1>`, and `3*INF**2 - 3*INF**2` is
+  `<|0|_-2>`. Real and infinitesimal cancellations behave as under
+  `"convert_and_keep"`.
+- `"to_nothing"` - a private comparison mode, not a candidate rule: a
+  yardstick for how far the other rules are from conventional cancellation.
+  The same as `"convert_and_keep"`, except that a grade that cancels leaves no
+  term, and a sum that cancels completely is `Composite({})`, which is nothing.
+  Nothing disappears under `+` and `-` (`(R(3) - R(3)) + 5` is `<|5|_0>`),
+  wipes out the other operand under `*` and `/` (`(R(3) - R(3)) * 5` is `∅`),
+  and is refused as a divisor (`R(5) / (R(3) - R(3))` raises). A written zero
+  still converts and is kept.
 
 Any other value raises `ValueError` at the next `+` or `-`. Batch-dense data
 follows `"mechanical"` whatever this says. To switch for a block and restore,
@@ -1048,7 +1065,7 @@ the tests use `tests/zero_modes.cancellation(rule)`.
 ### `CANCELLATION_CARRIES`
 
 Module switch, `"quantity"`. What a cancellation deposits under
-`CANCELLATION = "mechanical"`; the other two rules leave no residue and do not
+`CANCELLATION = "mechanical"`; the other rules leave no residue and do not
 read it. The examples below are mechanical.
 
 `"quantity"` - the whole annihilated quantity, one grade down: **`a - a = a*h`**.
@@ -1170,7 +1187,7 @@ trace(lambda x: (3*x + 1)/(x + 2), to=float('inf'))
 #     |3|₁  +  |1|₀
 #   = <|3|₁ |1|₀>
 #     ...
-# RESULT: |3|₀
+# RESULT: <|3|₀ |-5|₋₁ |10|₋₂ ...>
 # Limit = 3.0
 ```
 
@@ -1370,7 +1387,7 @@ result = 10 / x     # int / Composite -> Composite
 
 ## Performance Notes
 
-- Dictionary-based sparse representation: O(k) where k = number of non-zero dimensions
+- Sparse representation: O(k) where k = number of non-zero dimensions
 - Multiplication (convolution): O(k²) for k dimensions
 - Division: O(k*n) for n iterations of long division
 - Transcendental functions: O(terms * operations)
