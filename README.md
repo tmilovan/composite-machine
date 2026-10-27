@@ -55,6 +55,76 @@ In essence this system converts zeros to infinitesimals and tries to do arithmet
 
 ## What does it give? ##
 
+**Differential calculus**
+
+- Derivatives of any order, from one evaluation
+- Taylor and Laurent series at a point
+- Partial derivatives of any order, pure and mixed
+- Gradient, Hessian, Jacobian, Laplacian, divergence, curl, directional
+  derivative
+
+**Limits**
+
+- Indeterminate forms: 0/0, inf/inf, 0 * inf, 0^0, 1^inf
+- One-sided limits and limits at infinity
+- Multivariable limits, with path dependence detected
+
+**Integral calculus**
+
+- Antiderivatives as series
+- Definite integrals, including singular endpoints
+- Improper integrals over infinite ranges
+- Double integrals over boxes, line integrals, surface integrals
+
+**Singularities**
+
+- Removable singularities: value and derivatives at a 0/0 point
+- Poles: order and residue
+- Branch points and their exponent
+- Logarithmic growth
+- Divergent and finite parts of an expression, kept apart
+
+**Series**
+
+- Radius of convergence
+- Nearest singularity of a series: location and exponent
+- Borel-Pade resummation of divergent series
+- Logarithmic and exp(-1/x) scales (experimental)
+
+**Complex analysis**
+
+- Residues and contour integrals by the residue theorem
+
+**Differential equations**
+
+- ODE solutions with composite evaluation (experimental)
+
+**Orders of vanishing**
+
+- Exact integer orders, no tolerance: root multiplicity, rank deficiency,
+  order of contact
+
+**Numerical analysis**
+
+- Condition number and forward error bound of a formula
+- Uncertainty propagation (GUM) with bias and higher-order terms
+
+**Functions**
+
+- sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, exp, ln, sqrt, real
+  powers, erf, erfc, normal_cdf, all on composites
+
+**Arithmetic that doesn't lose information**
+
+- No more crashes on division by zero. You get a meaningful number back instead
+  of an error or NaN, and the calculation carries on.
+- Multiplying by zero is reversible. The original value is kept, so dividing by
+  zero again recovers it.
+- Very large and very small quantities can sit in the same formula as ordinary
+  numbers, and each keeps its own scale.
+- Each value can show you where its zeros came from.
+- Plain floating-point results are one call away whenever you need them.
+
 The implementation leads to a data structure that implements a number system, letting different parts of non-standard (and standard) math work together.
 
 For example, it gives  derivatives, integrals, and limits as a side effect of normal computation. No symbolic engine, no computation graph, no tape. Seed a number, do your math, read the results off the dimensional coefficients.
