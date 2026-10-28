@@ -33,6 +33,8 @@ The first proper PyPI library based on this experimental features has been relea
 
 # Composite Machine
 
+**DISCLAIMER:** this is not an attempt to make new math **(no matter what your chatbot tells you :)**). It is an attempt to build a computational system that works across several existing systems of infinitesimals and infinities at once (Levi-Civita and Hahn series, non-standard analysis, grossone...) and bridges them in a unified computational layer. The one deliberate departure is zero: here a zero is an infinitesimal, not an additive identity and it is the change that kinda glues all of it together.
+
 **A computational system that does not lose data on operations with zeros, giving automatic calculus via dimensional arithmetic... and a bit more.**
 
 ## What is it?
