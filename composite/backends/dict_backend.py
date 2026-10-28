@@ -139,6 +139,21 @@ class DictBackend(CompositeBackend):
         (dim, val), = t.items()
         return dim == 0 and val == 1.0
 
+    def lead_dim(self, data: DictData):
+        """The highest scalar dimension with a nonzero coefficient, read off
+        the dict; NotImplemented as soon as a vector dimension is met, since
+        then dominance order is the generic read's job (VectorDimBackend
+        inherits this and its keys are always tuples).  np.float64, which is
+        what to_arrays' float64 path hands the generic read for scalar keys.
+        """
+        best = None
+        for d, v in data.terms.items():
+            if isinstance(d, tuple):
+                return NotImplemented
+            if v != 0.0 and (best is None or d > best):
+                best = d
+        return None if best is None else np.float64(best)
+
     def to_arrays(self, data: DictData) -> Tuple[np.ndarray, np.ndarray]:
         if not data.terms:
             return (np.array([], dtype=DIM_DTYPE),

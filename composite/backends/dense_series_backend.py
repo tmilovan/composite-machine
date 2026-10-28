@@ -202,6 +202,14 @@ class DenseSeriesBackend(CompositeBackend):
         return (data.vals.size == 1 and data.offset == 0.0
                 and data.vals[0] == 1.0)
 
+    def lead_dim(self, data: DenseData):
+        """The last nonzero slot, as the dimension dims() would give it:
+        offset + step * k in float64, so the value is the same double."""
+        nz = np.flatnonzero(data.vals)
+        if len(nz) == 0:
+            return None
+        return np.float64(data.offset + data.step * int(nz[-1]))
+
     # ---- arithmetic -------------------------------------------------------
 
     def _align(self, a: DenseData, b: DenseData):

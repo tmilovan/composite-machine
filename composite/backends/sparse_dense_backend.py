@@ -466,6 +466,33 @@ class SparseDenseBackend(CompositeBackend):
         off, v = data._runs[0]
         return off == 0 and len(v) == 1 and v[0] == 1.0
 
+    def lead_dim(self, data: SparseData):
+        """The highest dimension with a nonzero coefficient, from whichever
+        representation already exists.
+
+        Every grade here is a scalar float64 (create_from_terms casts to
+        DIM_DTYPE, and a vector grade moves the operand to the vector backend
+        before it arrives), so dominance order is plain numeric order and the
+        answer is a max, not a sort.  Returned as np.float64 either way, which
+        is the element type the flat form hands the generic read, so callers
+        comparing or arithmetising on it see what they saw before.  As with
+        is_wholly_zero, reading .runs here would force the split for every
+        composite the question touches, so each form is read as it stands.
+        """
+        if data._runs is None:
+            nz = np.flatnonzero(data._vals)
+            if len(nz) == 0:
+                return None
+            return data._dims[nz].max()
+        best = None
+        for off, v in data._runs:
+            nz = np.flatnonzero(v)
+            if len(nz):
+                d = off + int(nz[-1])
+                if best is None or d > best:
+                    best = d
+        return None if best is None else np.float64(best)
+
     # --- arithmetic ---
 
     # FIXED: add — keep all union dimensions, do NOT strip zeros.

@@ -190,6 +190,21 @@ class CompositeBackend(ABC):
         dims, vals = self.to_arrays(data)
         return len(dims) == 1 and dims[0] == 0 and vals[0] == 1.0
 
+    def lead_dim(self, data: object):
+        """The dominant dimension, or NotImplemented to defer to the generic read.
+
+        Composite.lead_dim answers by dominance order over the flat form: a
+        copy out, a Python filter of the zero coefficients, and a sort that
+        pads every dimension to a vector.  That is what the log axis needs and
+        what a scalar-grade backend never does, and it was called twice per
+        product to shift the completeness bound -- 56% of a 15x12 multiply,
+        against 12% for the convolution.  A backend whose grades are all
+        scalar can answer from its own storage; one that cannot returns
+        NotImplemented and the generic read runs.  `None` here means the
+        composite is nothing or holds only zeros, as it does there.
+        """
+        return NotImplemented
+
     # --- arithmetic ---
     @abstractmethod
     def add(self, a: object, b: object) -> object:

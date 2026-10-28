@@ -288,6 +288,27 @@ class FractionalDictBackend(CompositeBackend):
         (k, v), = t.items()
         return k == 0 and v == 1.0
 
+    def lead_dim(self, data: FracData):
+        """The highest scalar key with a nonzero coefficient, made public.
+
+        Vector keys go to the generic read.  The type follows to_arrays: when
+        some dimension is a Fraction the array is object-typed and the element
+        is what _public_dim gives (int or Fraction); when every dimension is
+        integral the array is float64 and the element is np.float64.
+        """
+        best = None
+        for k, v in data.terms.items():
+            if isinstance(k, tuple):
+                return NotImplemented
+            if v != 0.0 and (best is None or k > best):
+                best = k
+        if best is None:
+            return None
+        L = data.L
+        if L != 1 and any(k % L != 0 for k in data.terms):
+            return _public_dim(best, L)
+        return np.float64(_public_dim(best, L))
+
     def to_arrays(self, data: FracData) -> Tuple[np.ndarray, np.ndarray]:
         if not data.terms:
             return (np.array([], dtype=DIM_DTYPE),
