@@ -566,7 +566,130 @@ class SparseDenseBackend(CompositeBackend):
     # With expressed zero preservation, the highest dim may have coeff 0.0,
     # which would cause division by zero / NaN in the quotient step.
     # Also clean near-zero remainder artifacts after each step.
+    #: Largest dense window the one-run division will allocate.  Past it the
+    #: run-by-run loop takes over, so a divisor with a huge gap below its lead
+    #: cannot ask for gigabytes of zeros.
+    _DIVISION_WINDOW = 1 << 20
+
+    @staticmethod
+    def _one_run(data: SparseData):
+        """(offset, vals, dim_of) when data is ONE unit-spaced run on a dyadic
+        offset, else None.  dim_of(i) is the exact dimension of vals[i], read
+        the way the flat form would hand it out, so the fast path emits the
+        same doubles for its grades as the run-by-run loop.
+
+        Answered from whichever form exists: a flat form is checked with one
+        diff rather than split into runs, as is_wholly_zero does.
+        """
+        if data._runs is not None:
+            if len(data._runs) != 1:
+                return None
+            off, vals = data._runs[0]
+            off = float(off)
+            if (off * 1024.0) % 1.0 != 0.0:
+                return None
+            return off, vals, (lambda i: off + i)
+        dims = data._dims
+        if dims.dtype == object or len(dims) == 0:
+            return None
+        if len(dims) > 1 and not np.all(np.diff(dims) == 1.0):
+            return None
+        off = float(dims[0])
+        if (off * 1024.0) % 1.0 != 0.0:
+            return None
+        return off, data._vals, (lambda i: float(dims[i]))
+
     def deconvolve_cut(self, a: SparseData, b: SparseData, min_terms: int = 50) -> tuple:
+        """Polynomial long division: (quotient, cut).
+
+        One run divided by one run -- every Taylor series, which is where
+        division is paid for -- runs in a dense descending window
+        (_deconvolve_window).  Anything else takes the run-by-run loop
+        (_deconvolve_runs), which is also the reference the window is held
+        bit-identical to.
+
+        WHY A WINDOW.  The loop kept the remainder as flat arrays and called
+        add() once per quotient term, so each of its ~50 steps split the
+        remainder into runs, merged, and flattened again: deconvolve was 50-60%
+        of a division, of ln, of a ten-order jet and of a limit at infinity on
+        this backend, and the dense-series backend did the same division 7x
+        faster in contiguous arrays.  The window is that loop with the
+        remainder held in place.  It is not the dense-series algorithm: that
+        one runs over a FIXED frame and emits a zero quotient term at every
+        empty slot, so 1/(1+h**2) reaches grade -48 there and grade -98 here;
+        this window skips empty slots without counting them and emits exactly
+        the terms the loop emits, at the same grades, in the same arithmetic
+        order (x - c*b is x + (-(b*c)) bit for bit).
+        """
+        ra, rb = self._one_run(a), self._one_run(b)
+        if ra is not None and rb is not None:
+            off_a, va, dim_a = ra
+            off_b, vb, dim_b = rb
+            shift = off_a - off_b
+            if shift == math.floor(shift) and va.any() and vb.any():
+                lead_k = int(np.flatnonzero(vb)[-1])
+                max_iter = max(len(va) + len(vb), min_terms)
+                if len(va) + max_iter * lead_k + 1 <= self._DIVISION_WINDOW:
+                    out = self._deconvolve_window(va, dim_a, vb, dim_b, lead_k,
+                                                  max_iter)
+                    if out is not None:
+                        return out
+        return self._deconvolve_runs(a, b, min_terms)
+
+    def _deconvolve_window(self, va, dim_a, vb, dim_b, lead_k, max_iter):
+        """The long division of _deconvolve_runs on one dense window.
+
+        Slot j of `rem` holds the remainder at dimension top_a - j.  A step
+        takes the highest nonzero slot, emits its quotient term, subtracts the
+        shifted divisor below it, and clears the slot -- exactly what the loop
+        does with its mask.  Slots below `reach` have never been touched and
+        are zero, so neither the scan nor the final cut test looks past it.
+
+        None when a quotient term overflows.  Past an inf the loop's result is
+        an artifact of its own bookkeeping -- inf times a retained zero above
+        the lead is nan, which it then takes as the next highest term -- and
+        that is not worth reproducing; the loop runs instead, so what a
+        caller sees on overflow is exactly what it saw before.  Measured on
+        4000 random pairs: every finite quotient identical, and every one of
+        the 55 that differed had an inf or nan in it.
+        """
+        lead_v = float(vb[lead_k])
+        lead_dim = dim_b(lead_k)
+        bv = vb[:lead_k + 1][::-1]                  # descending, lead first
+        m = len(bv)
+        top_a = dim_a(len(va) - 1)
+        rem = np.zeros(len(va) + max_iter * lead_k + 1, dtype=np.float64)
+        rem[:len(va)] = va[::-1]
+        reach = len(va)
+        q_dims, q_vals = [], []
+        i = 0
+        # numpy's overflow warnings are silenced here and only here: an
+        # overflow hands the division to the loop, which raises them itself,
+        # and letting both speak reported each one twice.
+        with np.errstate(over="ignore", invalid="ignore"):
+            while len(q_dims) < max_iter:
+                while i < reach and rem[i] == 0.0:
+                    i += 1
+                if i >= reach:
+                    break
+                q_val = rem[i] / lead_v
+                if not math.isfinite(q_val):
+                    return None
+                q_dims.append((top_a - i) - lead_dim)
+                q_vals.append(q_val)
+                rem[i:i + m] -= bv * q_val
+                rem[i] = 0.0
+                if i + m > reach:
+                    reach = i + m
+                i += 1
+        cut = bool(rem[:reach].any())
+        if not q_dims:
+            return SparseData(np.array([], dtype=DIM_DTYPE),
+                              np.array([], dtype=np.float64)), cut
+        return SparseData(np.array(q_dims[::-1], dtype=DIM_DTYPE),
+                          np.array(q_vals[::-1], dtype=np.float64)), cut
+
+    def _deconvolve_runs(self, a: SparseData, b: SparseData, min_terms: int = 50) -> tuple:
         """Polynomial long division in sparse form.
 
         Computes Q such that A = Q * B (approximately).

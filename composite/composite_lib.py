@@ -1305,6 +1305,15 @@ def _infinities_to_real(a, b, out):
     Only grades where an operand held a nonzero coefficient and the sum holds
     zero move; zero terms the operands already carried stay where they were.
     Real and infinitesimal grades keep their |0|_x."""
+    # A grade can only have cancelled where an operand held a nonzero term,
+    # and an infinite nonzero term is the DOMINANT one wherever it occurs (on
+    # the log axis too: a tuple with a positive leading component orders above
+    # every tuple without one).  So when neither operand's lead order is
+    # negative there is nothing to move, and the sum goes back as it is.  The
+    # read below materialised both arrays of every sum of two products --
+    # eleven times per sin(), 17% of it -- to find that out.
+    if _lead_or_zero(a) >= 0 and _lead_or_zero(b) >= 0:
+        return out
     be = out._backend
     dims, vals = be.to_arrays(out._data)
     if dims.dtype == object:
@@ -1449,7 +1458,7 @@ def is_nothing(x):
     is an additive identity and a multiplicative annihilator.  It is NOT a
     zero at a dimension and does not convert under R1.
     """
-    return isinstance(x, Composite) and not x.coeffs_dict()
+    return isinstance(x, Composite) and x._backend.term_count(x._data) == 0
 
 
 def is_vanishing(x):
@@ -4254,6 +4263,11 @@ def _has_infinitesimal_part(x):
     # never equal to an int, so a vector-keyed standard part tested as an
     # infinitesimal.  sin then built its series with a = st(x) AND h still
     # holding that same standard part, so sin(5) came back as sin(10).
+    if getattr(dims, "dtype", None) is not None and dims.dtype != object:
+        # Scalar grades: the same test as one array expression, without a
+        # Python pass over the terms.  Object arrays (tuples, Fractions,
+        # batch lanes) keep the per-term read.
+        return bool(np.any((dims != 0) & (vals != 0.0)))
     return any(_dim_nonzero(d) and v != 0.0 for d, v in zip(dims, vals))
 
 
@@ -4317,8 +4331,15 @@ def _dim_order_key(d):
 
 
 def _is_nothing(x):
-    """Check if x is the empty composite (nothing)."""
-    return isinstance(x, Composite) and not x.c
+    """Check if x is the empty composite (nothing).
+
+    Asked of both operands at the top of every + and -, before anything else.
+    `not x.c` answered it by rebuilding the whole dict, a dim_cast per term,
+    so a 15-term plus 12-term addition cast 27 dimensions to learn that neither
+    side was empty -- 85% of the call, against 9% for the merge of runs.  The
+    backend counts terms without materialising anything.
+    """
+    return isinstance(x, Composite) and x._backend.term_count(x._data) == 0
 
 
 @_honours_terms
@@ -4988,7 +5009,8 @@ def sqrt(x, terms=12):
     # ordinary value and the substitution is no longer required.  Note the
     # result stays UNIT-SPACED -- sqrt shifts the lattice by 1/2, it does not
     # refine it -- so the run representation is unaffected.
-    _nz = {d: c for d, c in x.coeffs_dict().items() if c != 0.0}
+    _terms = x.coeffs_dict()           # read once; it is rebuilt on every call
+    _nz = {d: c for d, c in _terms.items() if c != 0.0}
     if _nz:
         # dom_max, not max: raw tuple order ranks a strict prefix lower, so a
         # canonical (0,0) lost to (0,0,-3) -- an INFINITESIMAL taken as the
@@ -5033,11 +5055,11 @@ def sqrt(x, terms=12):
     # float64's sixteen run out near order 16.  The recurrence only spends
     # them more slowly.
     _scalar_orders = None
-    if all(not isinstance(d, tuple) for d in x.coeffs_dict()):
-        _ks = [-float(d) for d, c in x.coeffs_dict().items() if c != 0.0]
+    if all(not isinstance(d, tuple) for d in _terms):
+        _ks = [-float(d) for d, c in _terms.items() if c != 0.0]
         if all(k >= 0 and k == int(k) for k in _ks):
             _scalar_orders = {int(-float(d)): c
-                              for d, c in x.coeffs_dict().items()}
+                              for d, c in _terms.items()}
     if _scalar_orders is not None:
         y = {0: _mf.sqrt(a)}
         for n in range(1, terms):

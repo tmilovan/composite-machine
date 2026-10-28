@@ -88,6 +88,14 @@ def dim_cast(d):
     stays a third.  Integral fractions still come back as ints, so a caller who
     never touches a fractional grade sees exactly what it saw before.
     """
+    # The plain float first, by exact type: this is called once per term by
+    # every dict view and every scaled dimension in the series builders, and
+    # the Fraction isinstance below goes through the ABC machinery, which was
+    # most of the cost of casting a dimension that was a float all along.
+    t = type(d)
+    if t is float or t is np.float64:
+        f = float(d)
+        return int(f) if f.is_integer() else f
     if isinstance(d, tuple):
         return d
     if isinstance(d, _Fraction):
